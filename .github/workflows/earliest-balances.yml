@@ -1,0 +1,311 @@
+name: Scrape ORESTAR Account Balances
+
+on:
+  schedule:
+    # Cheap current-page refresh weekly, after Sunday's daily transaction
+    # aggregation has published the exact app snapshot it must pair against;
+    # full historical Prev crawl monthly.
+    - cron: "0 18 * * 0"
+    - cron: "0 7 1 * *"
+  workflow_dispatch:
+    inputs:
+      max_filers:
+        description: "Max filers per batch (0 = all uncached)"
+        required: false
+        default: "200"
+      filer_ids:
+        description: >
+          Space-separated filer IDs to scrape, instead of an age-based sweep.
+          For targeted repair — e.g. the committees blocking a partial-merge
+          comparison — where sweeping 7,500 filers to reach 38 is absurd.
+          Does not chain: the listed filers are scraped and the run stops.
+        required: false
+        default: ""
+      max_age_days:
+        description: >
+          Re-scrape any filer not refreshed within this many days. Use a small
+          value (e.g. 1) to sweep the whole set — unlike force, this CONVERGES:
+          each batch stamps its filers with a fresh timestamp, so the next
+          batch picks up the next slice and the remaining count falls to zero.
+        required: false
+        default: "30"
+      force:
+        description: >
+          Start a full re-scrape regardless of age. Chained children turn force
+          off and retain this run's fixed freshness cutoff, so the sweep still
+          converges rather than selecting every filer again.
+        required: false
+        default: "false"
+      current_only:
+        description: >
+          Refresh only the current account-summary page. This is the weekly
+          paired-balance path; historical opening balances are crawled monthly.
+        required: false
+        default: "false"
+      refresh_before_ts:
+        description: "Internal: fixed freshness cutoff shared by every batch"
+        required: false
+        default: ""
+      chain_index:
+        description: "Internal: which batch of the chain this is"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+  actions: write          # needed to retrigger itself
+
+# The runtime await-orestar barrier below serializes every Playwright scraper.
+# A shared GitHub concurrency key is not that barrier: GitHub retains only one
+# pending run per key, so a third arrival silently evicts the older waiter.
+# Unique queue slots preserve weekly, monthly, and chained work; total ordering
+# in await-orestar still guarantees that only one reaches ORESTAR at a time.
+concurrency:
+  # Every run keeps its own queue slot. Cross-workflow and same-workflow site
+  # serialization is handled by await-orestar below; a shared concurrency key
+  # lets GitHub retain only one pending run, so a weekly child could evict a
+  # monthly historical sweep before it starts.
+  group: account-summary-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    if: github.event_name == 'workflow_dispatch' || vars.PIPELINE_SCHEDULES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    # Worst case is a 45-minute exclusive-access wait, 25-minute browser
+    # install, and the scraper's 150-minute soft deadline. Keep enough margin
+    # for setup, aggregation, and final state publication after that soft stop.
+    timeout-minutes: 260
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_STORAGE_BUCKET: exports
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Resolve sweep parameters
+        run: |
+          MAX="${{ github.event.inputs.max_filers || '200' }}"
+          FORCE="${{ github.event.inputs.force || 'false' }}"
+          CURRENT_ONLY="${{ github.event.inputs.current_only || 'false' }}"
+          MAX_AGE="${{ github.event.inputs.max_age_days || '30' }}"
+          REFRESH_BEFORE="${{ github.event.inputs.refresh_before_ts }}"
+          FILER_IDS="${{ github.event.inputs.filer_ids }}"
+          BATCH="${{ github.event.inputs.chain_index || '1' }}"
+
+          # Translate a schedule exactly once. If exclusive access times out,
+          # the replacement is a workflow_dispatch run and therefore must
+          # receive the resolved mode/cutoff explicitly.
+          if [ "${{ github.event.schedule }}" = "0 18 * * 0" ]; then
+            CURRENT_ONLY=true
+            MAX_AGE=7
+          elif [ "${{ github.event.schedule }}" = "0 7 1 * *" ]; then
+            CURRENT_ONLY=false
+            MAX_AGE=30
+          fi
+
+          # Freeze one cutoff for the entire sweep, including coordination
+          # retries and self-dispatched batches.
+          if [ "$FORCE" = "true" ] && [ -z "$FILER_IDS" ]; then
+            REFRESH_BEFORE=$(date -u +%s)
+          elif [ -z "$REFRESH_BEFORE" ]; then
+            if [ -n "${{ github.event.schedule }}" ]; then
+              REFRESH_BEFORE=$(date -u +%s)
+            else
+              REFRESH_BEFORE=$(date -u -d "$MAX_AGE days ago" +%s)
+            fi
+          fi
+
+          echo "max_filers=$MAX" >> "$GITHUB_ENV"
+          echo "force=$FORCE" >> "$GITHUB_ENV"
+          echo "current_only=$CURRENT_ONLY" >> "$GITHUB_ENV"
+          echo "max_age_days=$MAX_AGE" >> "$GITHUB_ENV"
+          echo "refresh_before_ts=$REFRESH_BEFORE" >> "$GITHUB_ENV"
+          echo "filer_ids=$FILER_IDS" >> "$GITHUB_ENV"
+          echo "chain_index=$BATCH" >> "$GITHUB_ENV"
+
+      # Never let two ORESTAR scrapers run at once — see
+      # .github/actions/await-orestar for why this is a runtime check rather
+      # than a concurrency group or a schedule gap.
+      - name: Wait for other ORESTAR jobs
+        id: orestar_wait
+        continue-on-error: true
+        uses: ./.github/actions/await-orestar
+        with:
+          # These jobs rewrite whole summary/sweep files. Proceeding after a
+          # timeout can lose another batch's captures, so defer the run rather
+          # than fail open into concurrent state mutation.
+          fail-on-timeout: "true"
+
+      - name: Requeue after coordination timeout
+        if: steps.orestar_wait.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/dispatch_retry.sh earliest-balances.yml --ref "${{ github.ref_name }}" \
+            -f max_filers="${{ env.max_filers }}" \
+            -f filer_ids="${{ env.filer_ids }}" \
+            -f max_age_days="${{ env.max_age_days }}" \
+            -f force="${{ env.force }}" \
+            -f current_only="${{ env.current_only }}" \
+            -f refresh_before_ts="${{ env.refresh_before_ts }}" \
+            -f chain_index="${{ env.chain_index }}"
+
+      - name: Refuse uncoordinated account-summary scrape
+        if: steps.orestar_wait.outcome == 'failure'
+        run: |
+          echo "::error::ORESTAR remained busy; queued a replacement account-summary run instead of overlapping it."
+          exit 1
+
+      - name: Refresh branch after coordination wait
+        # Checkout happens before the local wait action can run. A transaction
+        # scraper may publish rows while this job waits; refresh now so the
+        # account-summary timestamp is paired with the current transaction set.
+        run: |
+          git fetch --depth=1 origin "$GITHUB_REF_NAME"
+          git reset --hard FETCH_HEAD
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scraper/requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install -r scraper/requirements.txt
+
+      - name: Hydrate account-summary state
+        run: python scripts/pipeline_state.py pull summaries
+
+      - name: Install Playwright browser + system dependencies
+        # Bounded and retried: a hung install held the ORESTAR lane for 3 hours
+        # against the job's 300-minute timeout. 18 minutes is the backstop for
+        # the script's own 3 x 300s cap.
+        timeout-minutes: 25
+        run: bash scripts/install_playwright.sh
+
+      - name: Install Xvfb (virtual display for headed browser)
+        run: sudo apt-get install -y xvfb
+
+      - name: Scrape account summaries
+        id: scrape
+        run: |
+          MAX="${{ env.max_filers }}"
+          FORCE="${{ env.force }}"
+          CURRENT_ONLY="${{ env.current_only }}"
+          MAX_AGE="${{ env.max_age_days }}"
+          REFRESH_BEFORE="${{ env.refresh_before_ts }}"
+          FILER_IDS="${{ env.filer_ids }}"
+
+          if [ -n "$FILER_IDS" ]; then
+            # Targeted repair. --force so a cached-but-incomplete filer is
+            # actually re-read rather than skipped as fresh.
+            ARGS="--filer-ids $FILER_IDS --force"
+            if [ "$CURRENT_ONLY" = "true" ]; then
+              ARGS="$ARGS --current-only"
+            fi
+            echo "Targeted scrape of: $FILER_IDS"
+            xvfb-run --auto-servernum python scraper/fetch_earliest_balances.py $ARGS
+            echo "targeted=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          # Comfortably inside the job's 260-minute timeout, so the script
+          # always stops itself rather than being cancelled. A cancelled step
+          # fails the success() gate on the retrigger, which is how a sweep of
+          # 5,454 filers previously did one partial batch and stopped.
+          ARGS="--max-age-days $MAX_AGE --refresh-before-ts $REFRESH_BEFORE --max-minutes 150"
+          if [ "$MAX" != "0" ]; then
+            ARGS="$ARGS --max-filers $MAX"
+          fi
+          if [ "$FORCE" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          if [ "$CURRENT_ONLY" = "true" ]; then
+            ARGS="$ARGS --current-only"
+          fi
+          xvfb-run --auto-servernum python scraper/fetch_earliest_balances.py $ARGS
+
+      - name: Check remaining filers
+        id: remaining
+        if: always() && steps.orestar_wait.outcome == 'success'
+        run: |
+          REMAINING_FILE="data/earliest_balances_remaining.txt"
+          if [ -f "$REMAINING_FILE" ]; then
+            REMAINING=$(cat "$REMAINING_FILE")
+          else
+            REMAINING=0
+          fi
+          echo "Filers remaining: $REMAINING"
+          echo "remaining=$REMAINING" >> "$GITHUB_OUTPUT"
+
+      - name: Hydrate final aggregation state
+        id: aggregation_state
+        if: always() && steps.orestar_wait.outcome == 'success' && steps.scrape.outcome == 'success' && steps.remaining.outputs.remaining == '0'
+        run: python scripts/pipeline_state.py pull transactions auxiliary
+
+      - name: Re-aggregate with updated beginning balances (final batch only)
+        # A breaker exits the scrape nonzero while preserving partial cache
+        # writes. Never let its control signal masquerade as sweep completion.
+        if: always() && steps.orestar_wait.outcome == 'success' && steps.scrape.outcome == 'success' && steps.remaining.outputs.remaining == '0' && steps.aggregation_state.outcome == 'success'
+        run: |
+          echo "All selected account summaries scraped — running full aggregation..."
+          python scraper/process.py
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_STORAGE_BUCKET: exports
+
+      - name: Publish account-summary state
+        if: always() && steps.orestar_wait.outcome == 'success'
+        run: python scripts/pipeline_state.py push summaries
+
+      # Bounded chain. Each run hands off to the next, but only up to
+      # MAX_CHAIN batches; after that it stops and the next scheduled run picks
+      # up where it left off.
+      #
+      # Unbounded, this chain re-claimed its lane every batch for as long as
+      # work remained — hours or days — and anything queued behind it was
+      # evicted rather than delayed, because GitHub keeps only one pending run
+      # per concurrency group. Yielding costs nothing: the cache is published
+      # every batch, so progress is never lost, only paused.
+      #
+      # `success()` rather than `always()`: a cancelled or failed run must NOT
+      # spawn another. Cancelling used to fire this step anyway, so stopping
+      # the chain meant disabling the whole workflow.
+      - name: Retrigger for next batch
+        if: success() && steps.remaining.outputs.remaining != '0' && env.targeted != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 40, matching backfill. A full sweep is ~36 runs at 200 filers each, so a
+          # cap of 6 stopped it at 1,200 and left the rest for the weekly
+          # schedule — six weeks to finish a one-day job. Safe to raise now that
+          # this lives in the orestar-scrape lane, where a long chain delays the
+          # other scrapers via await-orestar rather than evicting anything.
+          MAX_CHAIN: "40"
+        run: |
+          BATCH="${{ github.event.inputs.chain_index || '1' }}"
+          CURRENT_ONLY="${{ env.current_only }}"
+          MAX_AGE="${{ env.max_age_days }}"
+          REFRESH_BEFORE="${{ env.refresh_before_ts }}"
+          if [ "$BATCH" -ge "$MAX_CHAIN" ]; then
+            echo "Reached $MAX_CHAIN chained batches; yielding the lane."
+            echo "${{ steps.remaining.outputs.remaining }} filers remain — the next"
+            echo "scheduled run continues from here."
+            exit 0
+          fi
+          echo "Retriggering workflow for batch $((BATCH + 1)) of $MAX_CHAIN..."
+          bash scripts/dispatch_retry.sh earliest-balances.yml --ref "${{ github.ref_name }}" \
+            -f max_filers="${{ github.event.inputs.max_filers || '200' }}" \
+            -f max_age_days="$MAX_AGE" \
+            -f force="false" \
+            -f current_only="$CURRENT_ONLY" \
+            -f refresh_before_ts="$REFRESH_BEFORE" \
+            -f chain_index="$((BATCH + 1))"
+          echo "Retrigger dispatched."

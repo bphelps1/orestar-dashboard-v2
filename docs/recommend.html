@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Donor Recommendations — Oregon Campaign Finance</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="recommend.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <h1>Donor Recommendations</h1>
+    <p class="subtitle">
+      <a href="/">← Back to Dashboard</a> &mdash;
+      Find recommended donors for a candidate committee &mdash;
+      <a href="https://github.com/bphelps1/orestar-dashboard/blob/main/docs/RECOMMENDATIONS.md"
+         target="_blank" rel="noopener">How this works &amp; the weights</a>
+    </p>
+  </div>
+</header>
+
+<!-- ══════ Login Form ══════ -->
+<div id="login-form" class="login-container">
+  <div class="login-box">
+    <h2>Sign In</h2>
+    <p class="login-desc">This tool is restricted to authorized users.</p>
+    <form id="login-form-el" autocomplete="on">
+      <label for="login-email">Email</label>
+      <input type="email" id="login-email" required autocomplete="email" />
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" required autocomplete="current-password" />
+      <button type="submit" class="btn-primary" id="login-btn">Sign In</button>
+      <p class="login-error" id="login-error" hidden></p>
+    </form>
+  </div>
+</div>
+
+<!-- ══════ App Content (hidden until authenticated) ══════ -->
+<main id="app-content" hidden>
+
+  <div class="toolbar">
+    <span id="user-info"></span>
+    <button class="btn-small" id="sign-out-btn">Sign Out</button>
+  </div>
+
+  <!-- Search -->
+  <section class="search-section">
+    <div class="search-box">
+      <label for="filer-search">Search for a candidate committee:</label>
+      <input type="text" id="filer-search" placeholder="Committee name or candidate name…"
+             autocomplete="off" />
+      <ul id="filer-results" class="filer-results-dropdown" hidden></ul>
+    </div>
+    <div id="selected-filer-info" class="selected-filer-info" hidden></div>
+  </section>
+
+  <!-- Cycle selector -->
+  <section id="cycle-section" hidden>
+    <div class="controls-bar">
+      <label for="cycle-select">Election Cycle:</label>
+      <select id="cycle-select"></select>
+      <button class="btn-primary" id="run-btn">Generate Recommendations</button>
+    </div>
+  </section>
+
+  <!-- Status -->
+  <div id="status-msg" class="status-msg" hidden></div>
+
+  <!-- Results -->
+  <section id="results-section" hidden>
+    <div class="results-header">
+      <h2 id="results-title">Fundraising Plan</h2>
+      <div class="export-btns">
+        <span class="export-group-label">Export:</span>
+        <button class="btn-small" id="export-full-csv">Full Plan CSV</button>
+        <button class="btn-small" id="export-full-xlsx">Full Plan Excel</button>
+      </div>
+    </div>
+
+    <div class="results-summary" id="results-summary"></div>
+
+    <!-- ══════ Tabs ══════ -->
+    <div class="results-tabs">
+      <button class="tab-btn active" data-tab="tab-repeat">Donor Targets <span class="tab-badge">0</span></button>
+      <button class="tab-btn" data-tab="tab-prospects">New Donor Prospects <span class="tab-badge">0</span></button>
+      <button class="tab-btn" data-tab="tab-not-recommended">Not Recommended <span class="tab-badge">0</span></button>
+    </div>
+
+    <!-- ══════ Tab: Donor Targets ══════ -->
+    <div id="tab-repeat" class="tab-panel active">
+      <div id="repeat-donors-section" hidden>
+        <div class="section-header">
+          <h3>Donor Targets</h3>
+          <p class="section-desc">Donors who have previously given to this candidate.
+            Targets are based on a 5% increase from their last gift, adjusted upward based on comparable giving.</p>
+          <div class="export-btns">
+            <button class="btn-small" id="export-repeat-csv">CSV</button>
+            <button class="btn-small" id="export-repeat-xlsx">Excel</button>
+          </div>
+        </div>
+        <div class="table-search-bar">
+          <input type="search" id="repeat-search" class="table-search" placeholder="Search donors…" />
+        </div>
+        <div class="table-wrapper">
+          <table id="repeat-table" class="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th class="sortable" data-col="donor" data-table="repeat">Donor</th>
+                <th class="sortable num" data-col="prev_cycles" data-table="repeat">Prev Cycles</th>
+                <th class="sortable num" data-col="last_cycle_amt" data-table="repeat">Last Cycle</th>
+                <th class="sortable num" data-col="target" data-table="repeat">Target</th>
+                <th class="sortable num" data-col="current_cycle_amt" data-table="repeat">Given This Cycle</th>
+                <th class="sortable num" data-col="remaining" data-table="repeat">Remaining</th>
+                <th class="sortable" data-col="consistency" data-table="repeat">Consistency</th>
+                <th>History</th>
+              </tr>
+            </thead>
+            <tbody id="repeat-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════ Tab: New Donor Prospects ══════ -->
+    <div id="tab-prospects" class="tab-panel">
+      <div class="section-header">
+        <h3>New Donor Prospects</h3>
+        <p class="section-desc">Donors who gave to comparable candidates but not yet (or not enough) to this one.</p>
+        <div class="export-btns">
+          <button class="btn-small" id="export-csv">Prospects CSV</button>
+          <button class="btn-small" id="export-xlsx">Prospects Excel</button>
+        </div>
+      </div>
+
+      <div class="table-search-bar">
+        <input type="search" id="rec-search" class="table-search" placeholder="Search donors…" />
+      </div>
+      <div class="table-wrapper">
+        <table id="rec-table" class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="sortable" data-col="donor">Donor</th>
+              <th class="sortable num" data-col="score">Score</th>
+              <th class="sortable num" data-col="already_given">Already Given</th>
+              <th class="sortable num" data-col="target_ask">Target Ask</th>
+              <th class="sortable num" data-col="remaining_ask">Remaining Ask</th>
+              <th class="sortable num" data-col="comp_range">Comparable Range</th>
+              <th>Why Recommended</th>
+            </tr>
+          </thead>
+          <tbody id="rec-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ══════ Tab: Not Recommended ══════ -->
+    <div id="tab-not-recommended" class="tab-panel">
+      <div class="section-header">
+        <h3>Not Recommended</h3>
+        <p class="section-desc">Previous donors who lapsed and donor prospects who didn't meet inclusion criteria.</p>
+      </div>
+      <div class="table-search-bar">
+        <input type="search" id="not-rec-search" class="table-search" placeholder="Search…" />
+      </div>
+      <div class="table-wrapper">
+        <table id="not-rec-table" class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th class="sortable" data-col="donor" data-table="not-rec">Donor</th>
+              <th class="sortable" data-col="type" data-table="not-rec">Type</th>
+              <th class="sortable" data-col="lastGave" data-table="not-rec">Last Gave</th>
+              <th class="sortable num" data-col="amount" data-table="not-rec">Amount</th>
+              <th>Why Not Included</th>
+            </tr>
+          </thead>
+          <tbody id="not-rec-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Expandable row detail template -->
+    <div id="donor-detail-panel" class="donor-detail-panel" hidden>
+      <h3 id="detail-donor-name"></h3>
+      <div id="detail-content"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>Oregon Campaign Finance &mdash; Donor Recommendation Tool</p>
+</footer>
+
+<script src="lib/supabase.js"></script>
+<script src="lib/data.js"></script>
+<script src="recommend.js"></script>
+</body>
+</html>
