@@ -1074,7 +1074,10 @@ def _profiles(values: list[str] | None) -> tuple[str, ...]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("pull", "push", "bootstrap", "status"))
-    parser.add_argument("profiles", nargs="*", choices=PROFILE_NAMES)
+    # Do not combine choices= with nargs="*": Python 3.11 can validate the
+    # empty list itself as a choice, making the profile-less `status` command
+    # fail before main() runs. _profiles() performs the same validation.
+    parser.add_argument("profiles", nargs="*")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--dry-run", action="store_true", help="build only; do not upload")
     parser.add_argument("--no-gc", action="store_true", help=argparse.SUPPRESS)

@@ -601,3 +601,11 @@ def test_script_help_works_outside_repository(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_status_cli_accepts_no_profiles(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(pipeline_state, "status", lambda root: seen.append(root))
+
+    assert pipeline_state.main(["status"]) == 0
+    assert len(seen) == 1
