@@ -34,18 +34,25 @@ def test_workflow_refreshes_checkout_immediately_after_coordination_wait(
     assert workflow.index(refresh_marker) < workflow.index(setup_marker)
 
     # Coordination failures may requeue and terminate between the wait and
-    # refresh. Every such branch is failure-only; on the success path, refresh
-    # remains the very next step and no stale checkout can mutate data.
+    # refresh. A cooled retry also authenticates its failed parent here. Every
+    # branch before refresh is failure-only or retry-only; no stale checkout
+    # can reach state mutation.
     between = workflow[
         workflow.index(wait_marker) + len(wait_marker) : workflow.index(refresh_marker)
     ]
     intervening = re.findall(r"^      - name: (.+)$", between, re.MULTILINE)
-    assert len(intervening) == 2
+    expected_count = 3 if workflow_path.name == "earliest-balances.yml" else 2
+    assert len(intervening) == expected_count
     assert intervening[0] == "Requeue after coordination timeout"
     assert intervening[1].startswith("Refuse uncoordinated")
-    for name in intervening:
+    for name in intervening[:2]:
         assert "steps.orestar_wait.outcome == 'failure'" in _step_section(
             workflow, name
+        )
+    if expected_count == 3:
+        assert intervening[2] == "Validate F5 retry handoff"
+        assert "startsWith(inputs.retry_handoff, 'blocked:')" in _step_section(
+            workflow, intervening[2]
         )
     assert '--ref "${{ github.ref_name }}"' in _step_section(
         workflow, "Requeue after coordination timeout"

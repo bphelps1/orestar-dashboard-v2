@@ -31,9 +31,10 @@ inputs:
       skipping: a skipped daily refresh means a day with no data, and the
       scrapers' own failure guards will catch a genuinely bad overlap.
 
-      A cooled identity-backfill retry is the exception: its display title is
-      recognized below and never overlapped, because overlap would invalidate
-      the quiet interval and immediately recreate the F5 failure being healed.
+      A cooled identity-backfill or account-summary retry is the exception: its
+      display title is recognized below and never overlapped, because overlap
+      would invalidate the quiet interval and immediately recreate the F5
+      failure being healed.
 
       MUST be comfortably below the calling job's own timeout-minutes, with
       room left for the work itself. Waiting consumes the job's budget like any
@@ -164,7 +165,7 @@ runs:
               continue
             fi
             case "$display_title" in
-              "Historical Backfill startup retry "*)
+              "Historical Backfill startup retry "*|"Account Summary F5 retry "*)
                 # Cooled retry children may legitimately outlast a peer's
                 # ordinary fail-open deadline. Overlapping one would destroy
                 # the quiet interval it exists to provide, so remember it even
