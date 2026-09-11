@@ -105,6 +105,13 @@ scrape timestamp, so refreshing 2026 cannot make untouched 2006–2025 pages loo
 current. Per-year live deltas remain diagnostic only until per-year app values
 are captured too; they must not drive warnings or automated backfills.
 
+Exact transaction-ID evidence uses the same rule. After a successful current
+summary sweep, `atomic-balance-evidence.yml` pulls transaction, summary, and
+auxiliary state once; captures fresh summaries; then exact-diffs only complete
+canonical scopes without another pull or checkout. Multi-ID scopes are staged,
+certified, and saved all-or-none. A summary refusal prevents the heavier diff,
+and a partial scope remains unknown. Only a clean batch self-chains.
+
 ## 5. Compare like with like, or the difference is your own
 
 Recurring source of phantom discrepancies. Before treating a delta as real,

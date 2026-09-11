@@ -55,12 +55,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import io
 import json
 import logging
+import os
 import re
 import sys
+import tempfile
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -84,6 +87,11 @@ from balance_snapshot import (
     transaction_snapshot_id,
     utc_timestamp,
 )
+from atomic_balance_evidence import (
+    AtomicEvidenceError,
+    requirements_from_ready_plan,
+)
+from exact_coverage_evidence import certify_exact_scope_rows
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 DIFF_PATH = DATA_DIR / "coverage_diff.json"
@@ -151,6 +159,10 @@ class CollectionDeadlineExceeded(RuntimeError):
 
 class PartitionMismatchError(RuntimeError):
     """Disjoint child searches did not reproduce their parent's true count."""
+
+
+class AtomicSnapshotDrift(AtomicEvidenceError):
+    """The immutable local transaction window changed during an atomic run."""
 
 
 def _current_transaction_snapshot_id() -> str | None:
@@ -1603,10 +1615,68 @@ def _load() -> dict:
         return {}
 
 
+def _load_atomic_entries() -> dict[str, dict]:
+    """Load auxiliary evidence without the legacy lossy fallback.
+
+    Ordinary reporting historically treated malformed state as empty. An
+    atomic writer cannot: saving after that fallback would erase every prior
+    observation. Missing state is a valid empty start; corrupt or duplicate
+    state is a hard refusal.
+    """
+    if not DIFF_PATH.exists():
+        return {}
+    try:
+        rows = json.loads(DIFF_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AtomicEvidenceError(
+            f"Could not read existing exact evidence {DIFF_PATH}: {exc}"
+        ) from exc
+    if not isinstance(rows, list):
+        raise AtomicEvidenceError("Existing exact evidence is not a list")
+    entries: dict[str, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            raise AtomicEvidenceError("Existing exact evidence has a non-object row")
+        raw_fid = str(row.get("filer_id") or "")
+        fid = raw_fid.strip()
+        if not fid or fid != raw_fid or not fid.isdigit():
+            raise AtomicEvidenceError(
+                "Existing exact evidence has an invalid filer ID"
+            )
+        if fid in entries:
+            raise AtomicEvidenceError(
+                f"Existing exact evidence duplicates filer {fid}"
+            )
+        entries[fid] = row
+    return entries
+
+
 def _save(entries: dict) -> None:
     DIFF_PATH.parent.mkdir(parents=True, exist_ok=True)
     rows = sorted(entries.values(), key=lambda e: -(len(e.get("surplus") or [])))
-    DIFF_PATH.write_text(json.dumps(rows, indent=1))
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=DIFF_PATH.parent,
+            prefix=f".{DIFF_PATH.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = handle.name
+            json.dump(rows, handle, indent=1)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, DIFF_PATH)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                Path(temporary).unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _target_name(entries: dict, target: dict) -> str:
@@ -1795,14 +1865,406 @@ def _retryable_gate_targets(
     return inconclusive
 
 
+def _load_atomic_scope_plan(
+    path: Path,
+    transaction_id: str,
+    end: date,
+) -> tuple[list[list[dict]], dict[str, dict]]:
+    """Load whole scopes and their just-captured summary requirements."""
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AtomicEvidenceError(f"Could not read atomic scope plan {path}: {exc}") \
+            from exc
+    scope_ids, requirements, _active_ranges = requirements_from_ready_plan(
+        payload,
+        transaction_id,
+        end_date=end.isoformat(),
+    )
+    return [
+        [
+            {
+                "filer_id": filer_id,
+                "name": str(raw_scope.get("name") or ""),
+            }
+            for filer_id in ids
+        ]
+        for ids, raw_scope in zip(scope_ids, payload["scopes"], strict=True)
+    ], requirements
+
+
+def _persist_failed_scope(
+    entries: dict,
+    targets: list[dict],
+    reasons: dict[str, str],
+    *,
+    transaction_id: str,
+    local_digests: dict[str, str],
+    start: date,
+    end: date,
+    collection_starts: dict[str, str],
+) -> dict:
+    """Persist one failed scope without any newly usable partial member."""
+    ids = {str(target.get("filer_id") or "") for target in targets}
+    if "" in ids or set(collection_starts) != ids:
+        raise ValueError("failed scope lacks per-member collection start times")
+    if transaction_snapshot_id(TRANSACTION_DIR) != transaction_id:
+        raise AtomicSnapshotDrift(
+            "transaction snapshot changed before failed-scope commit"
+        )
+    staged = copy.deepcopy(entries)
+    for target in targets:
+        fid = str(target["filer_id"])
+        _record_failure(
+            staged,
+            target,
+            reasons.get(fid, "scope_incomplete"),
+            transaction_id=transaction_id,
+            filer_digest=local_digests.get(fid),
+            start=start,
+            end=end,
+            collection_started_at=collection_starts[fid],
+        )
+    _save(staged)
+    return staged
+
+
+def _persist_usable_scope(
+    entries: dict,
+    results: list[dict],
+    requirements: dict[str, dict],
+    *,
+    transaction_id: str,
+    start: date,
+    end: date,
+) -> dict:
+    """Certify and atomically save a complete canonical scope."""
+    ids = {str(result.get("filer_id") or "") for result in results}
+    if not ids or "" in ids or len(ids) != len(results):
+        raise ValueError("atomic scope results have missing or duplicate filer IDs")
+    staged = copy.deepcopy(entries)
+    for result in results:
+        _store_usable_result(
+            staged,
+            result,
+            active_requirements=requirements,
+        )
+    certified, blocked, scan_error = certify_exact_scope_rows(
+        list(staged.values()),
+        requirements,
+        ids,
+        TRANSACTION_DIR,
+        active_ranges={filer_id: end.isoformat() for filer_id in ids},
+    )
+    if scan_error:
+        raise AtomicSnapshotDrift(f"exact evidence scan failed: {scan_error}")
+    if set(certified) != ids or blocked.intersection(ids):
+        detail = f"certified={sorted(certified)} blocked={sorted(blocked)}"
+        raise ValueError(f"complete scope did not certify: {detail}")
+    if transaction_snapshot_id(TRANSACTION_DIR) != transaction_id:
+        raise AtomicSnapshotDrift("transaction snapshot changed before scope commit")
+    if any(
+        result.get("range_start") != start.isoformat()
+        or result.get("range_end") != end.isoformat()
+        or result.get("transaction_snapshot_id") != transaction_id
+        for result in results
+    ):
+        raise ValueError("atomic scope result provenance changed before commit")
+    _save(staged)
+    return staged
+
+
+def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
+    """Diff ready canonical scopes with all-or-none usable persistence.
+
+    The ordinary CLI remains per-filer.  This mode is deliberately stricter:
+    it honors the soft budget and the runner breaker only between scopes, uses
+    the ready plan's fresh paired-capture requirements, and saves usable rows
+    only after every physical member of a scope completed.
+    """
+    start = date(args.start_year, 1, 1)
+    end = args.end_date
+    if end is None:
+        raise AtomicEvidenceError("--scope-plan requires a frozen --end-date")
+    if end < start:
+        raise AtomicEvidenceError("--end-date must not precede --start-year")
+
+    # The ready plan is the authority for this same-job window. Do not reread
+    # generated database details here: they intentionally trail the summary
+    # capture until this workflow's final publish and aggregation.
+    transaction_id = transaction_snapshot_id(TRANSACTION_DIR)
+    if transaction_id is None:
+        log.error("Refusing to write coverage evidence without an exact local snapshot.")
+        return 1
+    groups, active_requirements = _load_atomic_scope_plan(
+        args.scope_plan, transaction_id, end
+    )
+    targets = [target for group in groups for target in group]
+    if not targets:
+        log.info("No ready scopes to diff.")
+        print("RUN_RESULT attempted=0 usable=0 unusable=0 blocked=0 "
+              "retryable=0 retry_ids= attempted_scopes=0 usable_scopes=0 "
+              "unusable_scopes=0 remaining_scopes=0")
+        return 0
+
+    entries = _load_atomic_entries()
+    try:
+        local_snapshots = transaction_filer_snapshots(
+            TRANSACTION_DIR,
+            [str(target["filer_id"]) for target in targets],
+            start,
+            end,
+        )
+    except (OSError, EOFError, csv.Error, UnicodeError, ValueError) as exc:
+        log.error("Cannot read exact local transaction identities: %s", exc)
+        return 1
+    if transaction_snapshot_id(TRANSACTION_DIR) != transaction_id:
+        log.error("Local transaction shards changed while identities were loaded.")
+        return 1
+    local_digests = {
+        fid: row["filer_transaction_digest"]
+        for fid, row in local_snapshots.items()
+    }
+    if set(local_digests) != {
+        str(target["filer_id"]) for target in targets
+    }:
+        log.error("The atomic scope plan has a filer without a local identity digest.")
+        return 1
+
+    deadline = time.monotonic() + args.max_minutes * 60 \
+        if args.max_minutes else None
+    attempted = 0
+    done = 0
+    unusable = 0
+    attempted_scopes = 0
+    usable_scopes = 0
+    unusable_scopes = 0
+    retry_scope_ids: set[str] = set()
+    consecutive_failed_scopes = 0
+    blocked = False
+    fatal = False
+    browser_needs_restart = False
+
+    with sync_playwright() as p:
+        browser, context, page = F.setup_browser_retrying(p)
+        try:
+            for targets_in_scope in groups:
+                # A soft deadline is a scope admission check. Once admitted,
+                # every member gets the same chance to complete; the job-level
+                # timeout remains the hard backstop.
+                if deadline is not None and time.monotonic() >= deadline:
+                    log.info(
+                        "Time budget reached between scopes — stopping with %d "
+                        "complete scopes.", usable_scopes,
+                    )
+                    break
+                if transaction_snapshot_id(TRANSACTION_DIR) != transaction_id:
+                    log.error("Transaction snapshot changed between atomic scopes.")
+                    fatal = True
+                    break
+                if browser_needs_restart:
+                    log.warning("Restarting the browser between atomic scopes.")
+                    try:
+                        browser.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    browser, context, page = F.setup_browser_retrying(p)
+                    browser_needs_restart = False
+                attempted_scopes += 1
+                staged_results: list[dict] = []
+                collection_starts: dict[str, str] = {}
+                member_failures: dict[str, str] = {}
+                retryable_failure = False
+
+                for target in targets_in_scope:
+                    if browser_needs_restart:
+                        log.warning("Restarting the browser inside the admitted scope.")
+                        try:
+                            browser.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        browser, context, page = F.setup_browser_retrying(p)
+                        browser_needs_restart = False
+                    fid = str(target["filer_id"])
+                    log.info("=== Atomic diff filer %s ===", fid)
+                    attempted += 1
+                    collection_started_at = utc_timestamp()
+                    collection_starts[fid] = collection_started_at
+                    failure_reason: str | None = None
+                    try:
+                        # No per-member soft deadline: cutting a multi-ID scope
+                        # in half would create unusable, churn-prone evidence.
+                        theirs = orestar_ids(
+                            page,
+                            fid,
+                            start,
+                            end,
+                            deadline=None,
+                            context=context,
+                            raise_partition_error=True,
+                        )
+                    except PartitionMismatchError as exc:
+                        log.warning(
+                            "Filer %s: deterministic partition refusal (%s)",
+                            fid,
+                            exc,
+                        )
+                        failure_reason = "partition_mismatch"
+                        theirs = None
+                    except F.SessionExpiredError as exc:
+                        log.warning("Filer %s: session expired (%s)", fid, exc)
+                        failure_reason = "session_expired"
+                        retryable_failure = True
+                        theirs = None
+
+                    if theirs is None:
+                        failure_reason = failure_reason or "unusable_window"
+                        member_failures[fid] = failure_reason
+                        if failure_reason in RETRYABLE_GATE_FAILURES:
+                            retryable_failure = True
+                            # The breaker is evaluated only after the scope.
+                            # Restart lazily, and only if another admitted
+                            # member or scope is actually going to run.
+                            browser_needs_restart = True
+                        continue
+
+                    local = local_snapshots[fid]
+                    ours = local.get("held_ids") or set()
+                    superseded_by_us = local.get("superseded_ids") or set()
+                    surplus = sorted(ours - set(theirs))
+                    absent = set(theirs) - ours
+                    result = {
+                        "filer_id": fid,
+                        "name": _target_name(entries, target),
+                        "orestar": len(theirs),
+                        "held": len(ours),
+                        "complete": not surplus and not (absent - superseded_by_us),
+                        "surplus": surplus,
+                        "missing": sorted(absent - superseded_by_us),
+                        "superseded": sorted(absent & superseded_by_us),
+                        **_evidence_fields(
+                            transaction_id,
+                            local_digests[fid],
+                            start,
+                            end,
+                            collection_started_at=collection_started_at,
+                        ),
+                    }
+                    staged_results.append(result)
+
+                if not member_failures:
+                    try:
+                        entries = _persist_usable_scope(
+                            entries,
+                            staged_results,
+                            active_requirements,
+                            transaction_id=transaction_id,
+                            start=start,
+                            end=end,
+                        )
+                    except AtomicSnapshotDrift as exc:
+                        log.error("Atomic scope aborted: %s", exc)
+                        fatal = True
+                    except ValueError as exc:
+                        log.error("Atomic scope refused before commit: %s", exc)
+                        member_failures = {
+                            str(target["filer_id"]): "evidence_certification_refusal"
+                            for target in targets_in_scope
+                        }
+
+                if fatal:
+                    break
+
+                if member_failures:
+                    unusable_scopes += 1
+                    unusable += len(targets_in_scope)
+                    try:
+                        entries = _persist_failed_scope(
+                            entries,
+                            targets_in_scope,
+                            member_failures,
+                            transaction_id=transaction_id,
+                            local_digests=local_digests,
+                            start=start,
+                            end=end,
+                            collection_starts=collection_starts,
+                        )
+                    except (AtomicSnapshotDrift, ValueError) as exc:
+                        log.error("Atomic failed-scope state was not saved: %s", exc)
+                        fatal = True
+                        break
+                    if retryable_failure:
+                        retry_scope_ids.update(
+                            str(target["filer_id"])
+                            for target in targets_in_scope
+                        )
+                        consecutive_failed_scopes += 1
+                    else:
+                        consecutive_failed_scopes = 0
+                    if consecutive_failed_scopes >= MAX_CONSECUTIVE_FAILURES:
+                        blocked = True
+                        log.warning(
+                            "%d atomic scopes in a row hit a retryable refusal; "
+                            "stopping at the scope boundary.",
+                            consecutive_failed_scopes,
+                        )
+                        break
+                    continue
+
+                # Every member was certified and persisted in one scope save.
+                ids = {str(result["filer_id"]) for result in staged_results}
+                done += len(ids)
+                usable_scopes += 1
+                consecutive_failed_scopes = 0
+                log.info(
+                    "Atomic scope complete: filers=%s missing=%d surplus=%d",
+                    ",".join(sorted(ids)),
+                    sum(len(result["missing"]) for result in staged_results),
+                    sum(len(result["surplus"]) for result in staged_results),
+                )
+        finally:
+            browser.close()
+
+    retry_ids = sorted(retry_scope_ids)
+    # A scope admitted but aborted during certification is still outstanding.
+    # Count terminal scope outcomes, not merely site admission attempts.
+    remaining_scopes = len(groups) - usable_scopes - unusable_scopes
+    incomplete = remaining_scopes > 0
+    log.info(
+        "Atomic diff: %d/%d scopes usable; %d/%d filers committed; blocked %s",
+        usable_scopes,
+        attempted_scopes,
+        done,
+        attempted,
+        "yes" if blocked else "no",
+    )
+    print(
+        f"RUN_RESULT attempted={attempted} usable={done} unusable={unusable} "
+        f"blocked={1 if blocked else 0} "
+        f"retryable={1 if retry_ids else 0} "
+        f"retry_ids={','.join(retry_ids)} "
+        f"attempted_scopes={attempted_scopes} usable_scopes={usable_scopes} "
+        f"unusable_scopes={unusable_scopes} remaining_scopes={remaining_scopes}"
+    )
+    return 1 if unusable_scopes or incomplete or fatal else 0
+
+
 # ---------------------------------------------------------------------------
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--filer-ids", nargs="*", default=None)
-    ap.add_argument("--flagged", action="store_true",
-                    help="diff every currently-flagged committee")
+    target_mode = ap.add_mutually_exclusive_group()
+    target_mode.add_argument("--filer-ids", nargs="*", default=None)
+    target_mode.add_argument("--flagged", action="store_true",
+                             help="diff every currently-flagged committee")
+    target_mode.add_argument(
+        "--scope-plan",
+        type=Path,
+        default=None,
+        help=("ready atomic-evidence JSON; preserve each canonical scope as "
+              "one all-or-none persistence unit"),
+    )
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--start-year", type=int, default=2006)
     ap.add_argument(
@@ -1830,6 +2292,16 @@ def main() -> int:
                         datefmt="%H:%M:%S")
     if args.report:
         return report()
+    if args.scope_plan and not args.recheck:
+        ap.error("--scope-plan requires --recheck for fresh evidence")
+    if args.scope_plan and args.start_year != 2006:
+        ap.error("--scope-plan requires --start-year=2006")
+    if args.scope_plan and args.limit:
+        ap.error("--scope-plan cannot be combined with --limit")
+    if args.scope_plan and args.require_no_missing:
+        ap.error("--scope-plan performs its own complete-scope verification")
+    if args.scope_plan and args.end_date is None:
+        ap.error("--scope-plan requires a frozen --end-date")
     if args.require_no_missing and not args.filer_ids:
         ap.error("--require-no-missing requires explicit --filer-ids")
     if args.require_no_missing and not args.recheck:
@@ -1842,6 +2314,13 @@ def main() -> int:
         ap.error("--require-no-missing cannot be combined with --limit")
     if args.require_no_missing and args.end_date is None:
         ap.error("--require-no-missing requires a frozen --end-date")
+
+    if args.scope_plan:
+        try:
+            return _run_atomic_scope_plan(args)
+        except AtomicEvidenceError as exc:
+            log.error("Atomic scope plan refused: %s", exc)
+            return 1
 
     if args.filer_ids:
         targets = [{"filer_id": f, "name": ""} for f in args.filer_ids]

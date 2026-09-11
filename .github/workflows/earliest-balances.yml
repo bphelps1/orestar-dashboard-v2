@@ -462,6 +462,7 @@ jobs:
         run: python scripts/pipeline_state.py pull transactions auxiliary
 
       - name: Re-aggregate with updated beginning balances (final batch only)
+        id: final_aggregation
         # A breaker exits the scrape nonzero while preserving partial cache
         # writes. Never let its control signal masquerade as sweep completion.
         if: always() && steps.orestar_wait.outcome == 'success' && steps.scrape.outcome == 'success' && steps.remaining.outputs.remaining == '0' && steps.aggregation_state.outcome == 'success'
@@ -549,3 +550,21 @@ jobs:
             -f refresh_before_ts="$REFRESH_BEFORE" \
             -f chain_index="$((BATCH + 1))"
           echo "Retrigger dispatched."
+
+      - name: Hand off completed current sweep to atomic evidence
+        if: >-
+          success() && env.current_only == 'true' && env.targeted != 'true' &&
+          steps.remaining.outputs.remaining == '0' &&
+          steps.final_aggregation.outcome == 'success' &&
+          steps.summary_publish.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Current account-summary sweep is complete; starting a new atomic evidence window."
+          # Do not retry an ambiguous accepted dispatch: two children for the
+          # same logical kickoff are worse than one loudly failed handoff.
+          gh workflow run atomic-balance-evidence.yml \
+            --ref "${{ github.ref_name }}" \
+            -f filer_ids= \
+            -f max_scopes=40 \
+            -f chain_index=1
