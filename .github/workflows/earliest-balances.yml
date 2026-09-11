@@ -1,4 +1,5 @@
 name: Scrape ORESTAR Account Balances
+run-name: ${{ startsWith(inputs.retry_handoff, 'blocked:') && format('Account Summary F5 retry {0}', inputs.retry_handoff) || 'Scrape ORESTAR Account Balances' }}
 
 on:
   schedule:
@@ -50,6 +51,11 @@ on:
         description: "Internal: which batch of the chain this is"
         required: false
         default: "1"
+      retry_handoff:
+        description: "Internal: authenticated F5-block retry handoff"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -65,17 +71,70 @@ concurrency:
   # serialization is handled by await-orestar below; a shared concurrency key
   # lets GitHub retain only one pending run, so a weekly child could evict a
   # monthly historical sweep before it starts.
-  group: account-summary-${{ github.run_id }}
+  group: ${{ startsWith(inputs.retry_handoff, 'blocked:') && format('account-summary-retry-{0}', inputs.retry_handoff) || format('account-summary-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
-  scrape:
+  elect_retry:
     if: github.event_name == 'workflow_dispatch' || vars.PIPELINE_SCHEDULES_ENABLED == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.elect.outputs.proceed }}
+    steps:
+      - name: Coalesce duplicate F5 retries
+        id: elect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HANDOFF: ${{ inputs.retry_handoff }}
+        run: |
+          if [[ "$HANDOFF" != blocked:* ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # dispatch_retry.sh is intentionally at-least-once. Logical retry
+          # duplicates share a concurrency group; only the oldest one that
+          # reached the actual scraper may own this retry generation.
+          EXPECTED_TITLE="Account Summary F5 retry $HANDOFF"
+          RAW=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/earliest-balances.yml/runs?event=workflow_dispatch&per_page=100" \
+            --jq '.workflow_runs[] | [.id, .display_title] | @tsv')
+          while IFS=$'\t' read -r RUN_ID DISPLAY_TITLE; do
+            [ -n "$RUN_ID" ] || continue
+            if [ "$DISPLAY_TITLE" = "$EXPECTED_TITLE" ] && \
+               [ "$RUN_ID" -lt "$GITHUB_RUN_ID" ]; then
+              SCRAPE_STATE=$(gh api \
+                "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" \
+                --jq '[([.jobs[] | select(.name == "scrape") | .steps[]? | select(.name == "Scrape account summaries" and .conclusion != "skipped")] | length), ([.jobs[] | select(.name == "scrape" and .conclusion != "skipped")] | length)] | @tsv')
+              IFS=$'\t' read -r SCRAPE_STEPS SCRAPE_JOBS <<< "$SCRAPE_STATE"
+              if [ "$SCRAPE_STEPS" -gt 0 ]; then
+                echo "Duplicate of earlier logical retry run $RUN_ID — coalescing."
+                echo "proceed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              EARLIER_CONCLUSION=$(gh api \
+                "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" \
+                --jq '.conclusion // ""')
+              if [ "$EARLIER_CONCLUSION" = "cancelled" ] && \
+                 [ "$SCRAPE_JOBS" -gt 0 ]; then
+                echo "Earlier logical retry run $RUN_ID was cancelled — coalescing."
+                echo "proceed=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "Earlier logical retry $RUN_ID never entered the scrape job; taking over."
+            fi
+          done <<< "$RAW"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+  scrape:
+    needs: elect_retry
+    if: needs.elect_retry.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
     # Worst case is a 45-minute exclusive-access wait, 25-minute browser
-    # install, and the scraper's 150-minute soft deadline. Keep enough margin
-    # for setup, aggregation, and final state publication after that soft stop.
-    timeout-minutes: 260
+    # install, a retry child's 20-minute quiet cooldown, and the scraper's
+    # 150-minute soft deadline. Keep enough margin for setup, aggregation, and
+    # final state publication after that soft stop.
+    timeout-minutes: 300
     env:
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -89,6 +148,8 @@ jobs:
           fetch-depth: 1
 
       - name: Resolve sweep parameters
+        env:
+          RAW_RETRY_HANDOFF: ${{ inputs.retry_handoff }}
         run: |
           MAX="${{ github.event.inputs.max_filers || '200' }}"
           FORCE="${{ github.event.inputs.force || 'false' }}"
@@ -97,6 +158,16 @@ jobs:
           REFRESH_BEFORE="${{ github.event.inputs.refresh_before_ts }}"
           FILER_IDS="${{ github.event.inputs.filer_ids }}"
           BATCH="${{ github.event.inputs.chain_index || '1' }}"
+          RETRY_HANDOFF="$RAW_RETRY_HANDOFF"
+
+          # This new control value is carried through GITHUB_ENV and later
+          # workflow dispatches. Reject shell/newline payloads before either
+          # boundary; the child performs the parent/API checks separately.
+          if [ -n "$RETRY_HANDOFF" ] && \
+             [[ ! "$RETRY_HANDOFF" =~ ^blocked:[12]:[0-9]+:[0-9]+:[0-9]+:[0-9]+([.][0-9]+)?:[0-9]+:[0-9]+:(true|false)$ ]]; then
+            echo "::error::Invalid account-summary F5 retry handoff."
+            exit 1
+          fi
 
           # Translate a schedule exactly once. If exclusive access times out,
           # the replacement is a workflow_dispatch run and therefore must
@@ -128,6 +199,7 @@ jobs:
           echo "refresh_before_ts=$REFRESH_BEFORE" >> "$GITHUB_ENV"
           echo "filer_ids=$FILER_IDS" >> "$GITHUB_ENV"
           echo "chain_index=$BATCH" >> "$GITHUB_ENV"
+          echo "retry_handoff=$RETRY_HANDOFF" >> "$GITHUB_ENV"
 
       # Never let two ORESTAR scrapers run at once — see
       # .github/actions/await-orestar for why this is a runtime check rather
@@ -154,13 +226,83 @@ jobs:
             -f force="${{ env.force }}" \
             -f current_only="${{ env.current_only }}" \
             -f refresh_before_ts="${{ env.refresh_before_ts }}" \
-            -f chain_index="${{ env.chain_index }}"
+            -f chain_index="${{ env.chain_index }}" \
+            -f retry_handoff="${{ env.retry_handoff }}"
 
       - name: Refuse uncoordinated account-summary scrape
         if: steps.orestar_wait.outcome == 'failure'
         run: |
           echo "::error::ORESTAR remained busy; queued a replacement account-summary run instead of overlapping it."
           exit 1
+
+      - name: Validate F5 retry handoff
+        id: retry_handoff
+        if: startsWith(inputs.retry_handoff, 'blocked:')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HANDOFF: ${{ inputs.retry_handoff }}
+          FILER_IDS: ${{ env.filer_ids }}
+          FORCE: ${{ env.force }}
+          MAX_FILERS: ${{ env.max_filers }}
+          MAX_AGE_DAYS: ${{ env.max_age_days }}
+          CURRENT_ONLY: ${{ env.current_only }}
+          REFRESH_BEFORE: ${{ env.refresh_before_ts }}
+          CHAIN_INDEX: ${{ env.chain_index }}
+        run: |
+          if [[ ! "$HANDOFF" =~ ^blocked:[12]:[0-9]+:[0-9]+:[0-9]+:[0-9]+([.][0-9]+)?:[0-9]+:[0-9]+:(true|false)$ ]]; then
+            echo "::error::Invalid account-summary F5 retry handoff."
+            exit 1
+          fi
+          IFS=: read -r HANDOFF_KIND RETRY_INDEX SOURCE_RUN SOURCE_ATTEMPT HANDOFF_CHAIN HANDOFF_CUTOFF HANDOFF_MAX HANDOFF_AGE HANDOFF_CURRENT HANDOFF_EXTRA <<< "$HANDOFF"
+          if [ "$HANDOFF_KIND" != "blocked" ] || [ -n "$HANDOFF_EXTRA" ] || \
+             [ -n "$FILER_IDS" ] || [ "$FORCE" != "false" ] || \
+             [ "$CHAIN_INDEX" != "$HANDOFF_CHAIN" ] || \
+             [ "$REFRESH_BEFORE" != "$HANDOFF_CUTOFF" ] || \
+             [ "$MAX_FILERS" != "$HANDOFF_MAX" ] || \
+             [ "$MAX_AGE_DAYS" != "$HANDOFF_AGE" ] || \
+             [ "$CURRENT_ONLY" != "$HANDOFF_CURRENT" ]; then
+            echo "::error::Invalid functional inputs for an account-summary F5 retry."
+            exit 1
+          fi
+
+          # Authenticate the exact failed attempt. A rerun or cancellation of
+          # the source invalidates its child rather than reviving stale work.
+          STATE=""
+          LATEST=""
+          for ATTEMPT in 1 2 3; do
+            STATE=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/attempts/$SOURCE_ATTEMPT" \
+              --jq '[.id, .run_attempt, .path, .event, .head_branch, .status, (.conclusion // "")] | @tsv' \
+              2>/dev/null || true)
+            LATEST=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" \
+              --jq '[.run_attempt, .status, (.conclusion // "")] | @tsv' \
+              2>/dev/null || true)
+            [ -n "$STATE" ] && [ -n "$LATEST" ] && break
+            sleep 5
+          done
+          if [ -z "$STATE" ] || [ -z "$LATEST" ]; then
+            echo "::error::Could not read F5 retry source $SOURCE_RUN attempt $SOURCE_ATTEMPT."
+            exit 1
+          fi
+          IFS=$'\t' read -r ACTUAL_RUN ACTUAL_ATTEMPT SOURCE_PATH SOURCE_EVENT SOURCE_BRANCH STATUS CONCLUSION <<< "$STATE"
+          IFS=$'\t' read -r LATEST_ATTEMPT LATEST_STATUS LATEST_CONCLUSION <<< "$LATEST"
+          if [ "$ACTUAL_RUN" != "$SOURCE_RUN" ] || \
+             [ "$ACTUAL_ATTEMPT" != "$SOURCE_ATTEMPT" ] || \
+             [ "$SOURCE_PATH" != ".github/workflows/earliest-balances.yml" ] || \
+             ( [ "$SOURCE_EVENT" != "workflow_dispatch" ] && [ "$SOURCE_EVENT" != "schedule" ] ) || \
+             [ "$SOURCE_BRANCH" != "$GITHUB_REF_NAME" ] || \
+             [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "failure" ] || \
+             [ "$LATEST_ATTEMPT" != "$SOURCE_ATTEMPT" ] || \
+             [ "$LATEST_STATUS" != "completed" ] || \
+             [ "$LATEST_CONCLUSION" != "failure" ]; then
+            echo "::error::Invalid F5 retry source: path=$SOURCE_PATH event=$SOURCE_EVENT branch=$SOURCE_BRANCH exact=$STATUS/$CONCLUSION latest=$LATEST_ATTEMPT:$LATEST_STATUS/$LATEST_CONCLUSION."
+            exit 1
+          fi
+
+          echo "retry_index=$RETRY_INDEX" >> "$GITHUB_OUTPUT"
+          echo "parent_run=$SOURCE_RUN" >> "$GITHUB_OUTPUT"
+          echo "parent_attempt=$SOURCE_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Refresh branch after coordination wait
         # Checkout happens before the local wait action can run. A transaction
@@ -181,6 +323,7 @@ jobs:
         run: pip install -r scraper/requirements.txt
 
       - name: Hydrate account-summary state
+        id: summary_state
         run: python scripts/pipeline_state.py pull summaries
 
       - name: Install Playwright browser + system dependencies
@@ -193,15 +336,47 @@ jobs:
       - name: Install Xvfb (virtual display for headed browser)
         run: sudo apt-get install -y xvfb
 
+      - name: Hold account-summary F5 cooldown
+        if: steps.retry_handoff.outputs.parent_run != ''
+        env:
+          COOLDOWN_SECONDS: "1200"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN: ${{ steps.retry_handoff.outputs.parent_run }}
+          SOURCE_ATTEMPT: ${{ steps.retry_handoff.outputs.parent_attempt }}
+        run: |
+          echo "::warning::Holding the ORESTAR lane quiet for ${COOLDOWN_SECONDS}s before account-summary retry ${{ steps.retry_handoff.outputs.retry_index }}/2."
+          sleep "$COOLDOWN_SECONDS"
+
+          # A maintainer can rerun or cancel the source during the cooldown.
+          # Recheck immediately before touching ORESTAR.
+          LATEST=""
+          for ATTEMPT in 1 2 3; do
+            LATEST=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" \
+              --jq '[.run_attempt, .status, (.conclusion // "")] | @tsv' \
+              2>/dev/null || true)
+            [ -n "$LATEST" ] && break
+            sleep 5
+          done
+          IFS=$'\t' read -r LATEST_ATTEMPT LATEST_STATUS LATEST_CONCLUSION <<< "$LATEST"
+          if [ "$LATEST_ATTEMPT" != "$SOURCE_ATTEMPT" ] || \
+             [ "$LATEST_STATUS" != "completed" ] || \
+             [ "$LATEST_CONCLUSION" != "failure" ]; then
+            echo "::error::Account-summary retry became stale during cooldown: latest=$LATEST_ATTEMPT:$LATEST_STATUS/$LATEST_CONCLUSION."
+            exit 1
+          fi
+
       - name: Scrape account summaries
         id: scrape
         run: |
+          set -o pipefail
           MAX="${{ env.max_filers }}"
           FORCE="${{ env.force }}"
           CURRENT_ONLY="${{ env.current_only }}"
           MAX_AGE="${{ env.max_age_days }}"
           REFRESH_BEFORE="${{ env.refresh_before_ts }}"
           FILER_IDS="${{ env.filer_ids }}"
+          TARGETED=false
 
           if [ -n "$FILER_IDS" ]; then
             # Targeted repair. --force so a cached-but-incomplete filer is
@@ -211,25 +386,62 @@ jobs:
               ARGS="$ARGS --current-only"
             fi
             echo "Targeted scrape of: $FILER_IDS"
-            xvfb-run --auto-servernum python scraper/fetch_earliest_balances.py $ARGS
             echo "targeted=true" >> "$GITHUB_ENV"
-            exit 0
+            TARGETED=true
+          else
+            # Comfortably inside the job's 300-minute timeout, including a
+            # retry child's cooldown, so the script stops on its own terms.
+            # A cancelled step is not successful and never dispatches a child.
+            ARGS="--max-age-days $MAX_AGE --refresh-before-ts $REFRESH_BEFORE --max-minutes 150"
+            if [ "$MAX" != "0" ]; then
+              ARGS="$ARGS --max-filers $MAX"
+            fi
+            if [ "$FORCE" = "true" ]; then
+              ARGS="$ARGS --force"
+            fi
+            if [ "$CURRENT_ONLY" = "true" ]; then
+              ARGS="$ARGS --current-only"
+            fi
           fi
-          # Comfortably inside the job's 260-minute timeout, so the script
-          # always stops itself rather than being cancelled. A cancelled step
-          # fails the success() gate on the retrigger, which is how a sweep of
-          # 5,454 filers previously did one partial batch and stopped.
-          ARGS="--max-age-days $MAX_AGE --refresh-before-ts $REFRESH_BEFORE --max-minutes 150"
-          if [ "$MAX" != "0" ]; then
-            ARGS="$ARGS --max-filers $MAX"
+
+          # Preserve the scraper's exit status while retaining its exact F5
+          # marker for a narrowly authorized cooled retry.
+          rm -f /tmp/account-summary.log
+          set +e
+          xvfb-run --auto-servernum python scraper/fetch_earliest_balances.py $ARGS 2>&1 | tee /tmp/account-summary.log
+          PIPE_STATUSES=("${PIPESTATUS[@]}")
+          set -e
+          SCRAPE_STATUS=${PIPE_STATUSES[0]}
+          TEE_STATUS=${PIPE_STATUSES[1]:-0}
+          if [ "$SCRAPE_STATUS" -eq 0 ] && [ "$TEE_STATUS" -ne 0 ]; then
+            SCRAPE_STATUS=$TEE_STATUS
           fi
-          if [ "$FORCE" = "true" ]; then
-            ARGS="$ARGS --force"
+
+          RESULT=$(grep '^ACCOUNT_SUMMARY_RESULT ' /tmp/account-summary.log | tail -1 || true)
+          ATTEMPTED=0
+          COMPLETED=0
+          FAILED=0
+          BLOCKED=0
+          F5_RETRYABLE=0
+          for KV in $RESULT; do
+            case "$KV" in
+              attempted=*)    ATTEMPTED=${KV#attempted=} ;;
+              completed=*)    COMPLETED=${KV#completed=} ;;
+              failed=*)       FAILED=${KV#failed=} ;;
+              blocked=*)      BLOCKED=${KV#blocked=} ;;
+              f5_retryable=*) F5_RETRYABLE=${KV#f5_retryable=} ;;
+            esac
+          done
+          if [ "$TARGETED" = "true" ] || [ "$TEE_STATUS" -ne 0 ]; then
+            F5_RETRYABLE=0
           fi
-          if [ "$CURRENT_ONLY" = "true" ]; then
-            ARGS="$ARGS --current-only"
-          fi
-          xvfb-run --auto-servernum python scraper/fetch_earliest_balances.py $ARGS
+          echo "attempted=$ATTEMPTED" >> "$GITHUB_OUTPUT"
+          echo "completed=$COMPLETED" >> "$GITHUB_OUTPUT"
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "blocked=$BLOCKED" >> "$GITHUB_OUTPUT"
+          echo "f5_retryable=$F5_RETRYABLE" >> "$GITHUB_OUTPUT"
+          echo "Account-summary result: attempted=$ATTEMPTED completed=$COMPLETED failed=$FAILED blocked=$BLOCKED f5_retryable=$F5_RETRYABLE."
+          exit "$SCRAPE_STATUS"
 
       - name: Check remaining filers
         id: remaining
@@ -263,8 +475,36 @@ jobs:
           SUPABASE_STORAGE_BUCKET: exports
 
       - name: Publish account-summary state
-        if: always() && steps.orestar_wait.outcome == 'success'
+        id: summary_publish
+        if: >-
+          always() && steps.orestar_wait.outcome == 'success' &&
+          steps.summary_state.outcome == 'success' &&
+          (steps.scrape.outcome == 'success' || steps.scrape.outcome == 'failure')
         run: python scripts/pipeline_state.py push summaries
+
+      - name: Queue cooled retry after F5 refusal
+        if: >-
+          always() && !cancelled() &&
+          steps.orestar_wait.outcome == 'success' &&
+          steps.scrape.outcome == 'failure' &&
+          steps.scrape.outputs.f5_retryable == '1' &&
+          steps.remaining.outcome == 'success' &&
+          steps.remaining.outputs.remaining != '0' &&
+          steps.summary_publish.outcome == 'success' &&
+          env.targeted != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/retry_account_summary.sh \
+            "${{ steps.retry_handoff.outputs.retry_index || '0' }}" \
+            "${{ github.ref_name }}" \
+            "${{ env.max_filers }}" \
+            "${{ env.max_age_days }}" \
+            "${{ env.current_only }}" \
+            "${{ env.refresh_before_ts }}" \
+            "${{ env.chain_index }}" \
+            "${{ github.run_id }}" \
+            "${{ github.run_attempt }}"
 
       # Bounded chain. Each run hands off to the next, but only up to
       # MAX_CHAIN batches; after that it stops and the next scheduled run picks

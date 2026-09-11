@@ -73,6 +73,14 @@ CHALLENGE_WAIT = 20
 # How many times to re-request a page that never gets past the challenge.
 PAGE_LOAD_ATTEMPTS = 3
 
+# Three consecutive pages that exhaust every recognized F5 challenge attempt
+# are a site-level refusal, not three coincidentally bad committees. Stop at the
+# canonical scope boundary so the workflow can publish completed captures and
+# retry on a fresh runner after a real cooldown. Without this guard, each
+# refused filer consumes roughly seven minutes and a blocked batch burns its
+# entire 150-minute budget before reaching the existing percentage breaker.
+CONSECUTIVE_CHALLENGE_ABORT = 3
+
 # Wait between "Prev" clicks
 PREV_CLICK_WAIT = 1.5
 # Retries for a single Prev click. A flaky navigation must not be able to
@@ -88,6 +96,43 @@ FILER_DELAY = 1.0
 
 _YEAR_RE = re.compile(r"Account Summary Information for the year\s+(\d{4})")
 SUMMARY_FIELD_VERSION = 2
+
+
+class BotChallengeExhausted(RuntimeError):
+    """The current account-summary page never escaped ORESTAR's F5 gate."""
+
+
+_BOT_CHALLENGE_MARKERS = (
+    "checking your browser",
+    "/tspd/",
+    "tspd_",
+)
+
+
+def _is_bot_challenge(html: str) -> bool:
+    """Recognize F5's challenge without treating every bad page as retryable."""
+    lowered = html.lower()
+    return any(marker in lowered for marker in _BOT_CHALLENGE_MARKERS)
+
+
+def _next_challenge_streak(previous: int, challenge_exhausted: bool) -> int:
+    """Advance the site-refusal circuit, resetting it after a real response."""
+    return previous + 1 if challenge_exhausted else 0
+
+
+def _batch_block_state(
+    attempted: int,
+    failed: int,
+    challenge_circuit_open: bool,
+) -> tuple[bool, bool]:
+    """Return (hard-stop, cooled-retry-authorized) for a completed batch."""
+    generic_failure_stop = bool(
+        attempted and failed / attempted >= BATCH_FAILURE_ABORT
+    )
+    return (
+        challenge_circuit_open or generic_failure_stop,
+        challenge_circuit_open,
+    )
 
 
 def _parse_year(html: str) -> int | None:
@@ -214,6 +259,7 @@ def _load_summary_page(page, url: str, filer_id: str) -> str | None:
     actually matters — the year heading — reloading a few times to give the
     challenge room. A failure now means the data genuinely never arrived.
     """
+    last_nonempty_html = ""
     for attempt in range(1, PAGE_LOAD_ATTEMPTS + 1):
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=45_000)
@@ -230,12 +276,25 @@ def _load_summary_page(page, url: str, filer_id: str) -> str | None:
                 html = ""
             if _YEAR_RE.search(html):
                 return html
+            if html:
+                last_nonempty_html = html
             time.sleep(0.5)
 
         log.debug("Filer %s: challenge not cleared on attempt %d/%d",
                   filer_id, attempt, PAGE_LOAD_ATTEMPTS)
 
-    log.warning("Filer %s: page never resolved past the bot challenge after %d attempts",
+    if _is_bot_challenge(last_nonempty_html):
+        log.warning(
+            "Filer %s: recognized bot challenge never resolved after %d attempts",
+            filer_id,
+            PAGE_LOAD_ATTEMPTS,
+        )
+        raise BotChallengeExhausted(filer_id)
+
+    # Absence of the expected heading is not, by itself, evidence of F5. Keep
+    # server errors, redirects, and malformed financial pages on the ordinary
+    # failure path so they cannot authorize an automatic retry.
+    log.warning("Filer %s: Account Summary never rendered after %d attempts",
                 filer_id, PAGE_LOAD_ATTEMPTS)
     return None
 
@@ -327,6 +386,7 @@ def _scrape_filer_earliest(
         # last 30 seconds. Waiting on "networkidle" is the same wrong success
         # condition as before: wait for the year heading to come back instead.
         html, new_year = None, None
+        last_nonempty_html = ""
         for attempt in range(PREV_CLICK_RETRIES):
             try:
                 prev_btn.click()
@@ -341,6 +401,8 @@ def _scrape_filer_earliest(
                     html = page.content()
                 except Exception:
                     html = ""
+                if html:
+                    last_nonempty_html = html
                 candidate_year = _parse_year(html)
                 # The old DOM remains readable while navigation is in flight.
                 # Seeing the SAME heading is therefore not the ORESTAR floor;
@@ -356,6 +418,8 @@ def _scrape_filer_earliest(
                         filer_id, year, attempt + 1, PREV_CLICK_RETRIES)
 
         if not new_year:
+            if _is_bot_challenge(last_nonempty_html):
+                raise BotChallengeExhausted(filer_id)
             log.error("Filer %s: lost the year after Prev click %d — opening balance "
                       "NOT trustworthy", filer_id, click_num + 1)
             break
@@ -1102,6 +1166,8 @@ def main():
         done = 0
         failed = 0
         completed = 0
+        consecutive_challenge_failures = 0
+        challenge_blocked = False
         # Stop on our own terms, before the job's timeout stops us.
         #
         # This sweep has no natural end inside one run — it walks thousands of
@@ -1130,9 +1196,23 @@ def main():
             group_results: dict[str, dict | None] = {}
             group_had_data = False
             for fid in group:
-                result, yearly_data, current_capture = _scrape_filer_earliest(
-                    page, fid, current_only=args.current_only
-                )
+                try:
+                    result, yearly_data, current_capture = _scrape_filer_earliest(
+                        page, fid, current_only=args.current_only
+                    )
+                except BotChallengeExhausted:
+                    # Keep the failed member selected by the frozen sweep.
+                    # The stable result marker below is the only condition that
+                    # authorizes an automatic cooled retry; unrelated parse,
+                    # state, or browser failures remain ordinary hard stops.
+                    result, yearly_data, current_capture = None, {}, None
+                    consecutive_challenge_failures = _next_challenge_streak(
+                        consecutive_challenge_failures, True
+                    )
+                else:
+                    consecutive_challenge_failures = _next_challenge_streak(
+                        consecutive_challenge_failures, False
+                    )
                 done += 1
                 group_results[fid] = result
 
@@ -1201,6 +1281,15 @@ def main():
                 log.info("Progress: %d / %d done (%d failed), cache saved",
                          done, len(ids_to_fetch), failed)
 
+            if consecutive_challenge_failures >= CONSECUTIVE_CHALLENGE_ABORT:
+                challenge_blocked = True
+                log.warning(
+                    "ORESTAR bot challenge exhausted for %d consecutive filers; "
+                    "stopping at the scope boundary for a cooled retry.",
+                    consecutive_challenge_failures,
+                )
+                break
+
         browser.close()
 
     # Final cache save
@@ -1222,11 +1311,27 @@ def main():
     if args.max_filers > 0 and still_remaining > 0:
         log.info("REMAINING: %d filers still need scraping", still_remaining)
 
-    batch_blocked = bool(done and failed / done >= BATCH_FAILURE_ABORT)
+    # The percentage breaker catches every kind of bad batch and remains a hard
+    # stop. Only the consecutive, explicitly recognized challenge circuit may
+    # authorize a cooled automatic retry.
+    batch_blocked, f5_retryable = _batch_block_state(
+        done, failed, challenge_blocked
+    )
 
     # Write remaining count to a file for the workflow to read
     remaining_path = DATA_DIR / "earliest_balances_remaining.txt"
     remaining_path.write_text(str(still_remaining))
+
+    # Stable workflow contract.  A human warning is not permission to retry:
+    # only this exact marker, emitted after truthful remaining/progress state is
+    # persisted, may create a cooled child run.
+    print(
+        "ACCOUNT_SUMMARY_RESULT "
+        f"attempted={done} completed={completed} failed={failed} "
+        f"remaining={still_remaining} blocked={int(batch_blocked)} "
+        f"f5_retryable={int(f5_retryable)}",
+        flush=True,
+    )
 
     # A batch where nearly everything failed is not a batch that ran.
     #
