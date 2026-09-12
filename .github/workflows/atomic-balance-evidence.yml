@@ -38,9 +38,9 @@ concurrency:
 jobs:
   evidence:
     runs-on: ubuntu-latest
-    # 45m coordination + 25m browser install + bounded summary pages + 70m
-    # exact diff + publication/aggregation, with a generous hard backstop.
-    timeout-minutes: 240
+    # Coordination/setup plus at most three real summary/exact passes. Each
+    # exact collector has a 70-minute soft budget; six hours is the hard cap.
+    timeout-minutes: 360
     env:
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -169,14 +169,40 @@ jobs:
         if: always() && steps.publish.outcome == 'success'
         run: python scraper/process.py
 
+      - name: Stabilize captured cash against fresh exact evidence
+        id: stabilize
+        if: >-
+          always() && !cancelled() && steps.aggregate.outcome == 'success' &&
+          steps.summaries.outcome == 'success' &&
+          steps.diff.outcome == 'success' &&
+          steps.ready.outputs.ready_scopes == steps.plan.outputs.selected_scopes &&
+          steps.verify.outputs.certified_scopes == steps.plan.outputs.selected_scopes &&
+          steps.plan.outputs.filer_ids != ''
+        run: |
+          xvfb-run --auto-servernum python scraper/stabilize_atomic_balances.py \
+            --plan "$READY_PATH" --max-passes 3
+
       # If a prior run published both profiles but died during process.py, its
       # exact rows may make this plan empty. Re-running must still be able to
       # finish projecting that already-durable evidence into the app caches.
       - name: Recover aggregation when the atomic plan is empty
+        id: recover_aggregate
         if: >-
           steps.plan.outcome == 'success' &&
           steps.plan.outputs.filer_ids == ''
         run: python scraper/process.py
+
+      - name: Replan after recovering empty-plan aggregation
+        id: recovery_plan
+        if: steps.recover_aggregate.outcome == 'success'
+        env:
+          MAX_SCOPES: ${{ inputs.max_scopes }}
+        run: |
+          python scraper/atomic_balance_evidence.py plan \
+            --max-scopes "$MAX_SCOPES" --output /tmp/atomic-recovery-plan.json
+          SELECTED=$(jq -r '.selected_scope_count' /tmp/atomic-recovery-plan.json)
+          echo "selected_scopes=$SELECTED" >> "$GITHUB_OUTPUT"
+          echo "Recovered aggregation exposed $SELECTED scopes needing another real capture window."
 
       - name: Enforce truthful terminal status
         if: always() && steps.plan.outputs.filer_ids != ''
@@ -205,13 +231,19 @@ jobs:
             echo "::error::Not every selected scope produced certifiable same-window evidence."
             exit 1
           fi
+          if [ "${{ steps.stabilize.outcome }}" != "success" ]; then
+            echo "::error::Captured cash did not settle against the freshly projected exact evidence."
+            exit 1
+          fi
           echo "Atomic batch certified ${{ steps.verify.outputs.certified_scopes }} complete scopes."
 
       - name: Continue bounded evidence chain
         if: >-
           success() && !cancelled() && inputs.filer_ids == '' &&
-          steps.verify.outputs.certified_scopes != '' &&
-          steps.verify.outputs.certified_scopes != '0'
+          ((steps.verify.outputs.certified_scopes != '' &&
+          steps.verify.outputs.certified_scopes != '0') ||
+          (steps.recovery_plan.outputs.selected_scopes != '' &&
+          steps.recovery_plan.outputs.selected_scopes != '0'))
         env:
           GH_TOKEN: ${{ github.token }}
           MAX_CHAIN: "12"
@@ -226,7 +258,11 @@ jobs:
             echo "Reached the $MAX_CHAIN-batch evidence-chain limit; yielding the ORESTAR lane."
             exit 0
           fi
-          echo "Certified ${{ steps.verify.outputs.certified_scopes }} scopes; queueing atomic batch $((CHAIN + 1))."
+          if [ "${{ steps.recovery_plan.outputs.selected_scopes || '0' }}" -gt 0 ]; then
+            echo "Recovered aggregation left ${{ steps.recovery_plan.outputs.selected_scopes }} scopes to capture; queueing atomic batch $((CHAIN + 1))."
+          else
+            echo "Certified ${{ steps.verify.outputs.certified_scopes }} scopes; queueing atomic batch $((CHAIN + 1))."
+          fi
           # One dispatch attempt is deliberate. Retrying an ambiguous accepted
           # request can create two children for the same logical batch.
           gh workflow run atomic-balance-evidence.yml \
