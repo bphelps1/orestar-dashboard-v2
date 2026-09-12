@@ -5,12 +5,15 @@ The account summary and the exact transaction-ID diff must describe the same
 application transaction snapshot, and the diff query must begin after the
 summary capture.  This helper keeps that contract out of workflow shell:
 
-* ``plan`` selects whole actionable canonical scopes that do not already have
-  certifiable exact evidence and freezes the local transaction fingerprint.
+* ``plan`` selects whole actionable scopes needing exact evidence and paired
+  scopes needing a fresh capture after app state changed, including zero-delta
+  captures. It freezes the local transaction fingerprint for either case.
 * ``ready`` keeps only scopes whose complete current summaries were freshly
   paired to that fingerprint during this batch.
 * ``verify`` accepts only complete-scope exact evidence collected afterward
   against the same fingerprint and date range.
+* ``assess_stabilization`` checks the later aggregation against the genuine
+  capture so changed cash or annual treatment can request a bounded recapture.
 
 The workflow deliberately runs both network collectors in one job without a
 second checkout or state hydration.  A transaction snapshot mismatch is a hard
@@ -34,6 +37,8 @@ import supabase_sync
 from balance_snapshot import (
     CALCULATION_VERSION,
     FORMAT_VERSION,
+    exact_evidence_identifier_is_valid,
+    source_year_transaction_digest,
     paired_comparison,
     scope_key,
     transaction_snapshot_id,
@@ -140,7 +145,7 @@ def _diff_entries(rows: Any) -> dict[str, dict]:
     return entries
 
 
-def _scope_record(row: dict, source: dict) -> dict | None:
+def _scope_record(row: dict, source: dict, *, allow_zero: bool = False) -> dict | None:
     if (
         row.get("comparison_status") != "paired"
         or row.get("newer_app_data")
@@ -151,7 +156,7 @@ def _scope_record(row: dict, source: dict) -> dict | None:
         delta = float(row.get("delta") or 0)
     except (TypeError, ValueError, OverflowError):
         return None
-    if not math.isfinite(delta) or abs(delta) <= 0.01:
+    if not math.isfinite(delta) or (not allow_zero and abs(delta) <= 0.01):
         return None
 
     raw_ids = row.get("filer_ids") or [row.get("filer_id")]
@@ -208,6 +213,26 @@ def _scope_record(row: dict, source: dict) -> dict | None:
     }
 
 
+def _unique_source_scope(source: dict, ids: list[str]) -> dict | None:
+    """Reject missing, partial, ambiguous, or overlapping canonical ownership."""
+    scopes = source.get("scopes") or {}
+    key = scope_key(ids)
+    row = scopes.get(key)
+    if (not isinstance(row, dict) or row.get("status") == "ambiguous"
+            or not isinstance(row.get("filer_ids"), list)
+            or sorted({str(fid).strip() for fid in row["filer_ids"]}) != ids
+            or not exact_evidence_identifier_is_valid(
+                row.get("app_scope_transaction_digest"))):
+        return None
+    for other_key, other in scopes.items():
+        if other_key == key or not isinstance(other, dict):
+            continue
+        values = other.get("filer_ids")
+        if isinstance(values, list) and set(ids).intersection(map(str, values)):
+            return None
+    return row
+
+
 def _latest_attempt(scope: dict, entries: dict[str, dict]) -> str:
     values = []
     for filer_id in scope["filer_ids"]:
@@ -241,8 +266,13 @@ def build_plan(
     max_scopes: int,
     requested_ids: Iterable[str] = (),
     planned_at: str | None = None,
+    yearly_cache: Any = None,
 ) -> dict:
-    """Return a bounded whole-scope plan against the current local snapshot."""
+    """Plan actionable or paired-refresh scopes against the frozen local ledger.
+
+    A paired refresh may have zero frozen delta and already-certified evidence:
+    its current app treatment still needs a genuine capture to settle.
+    """
     if not 1 <= max_scopes <= 100:
         raise AtomicEvidenceError("max_scopes must be between 1 and 100")
     snapshot_id = _current_snapshot(transaction_dir)
@@ -261,8 +291,54 @@ def build_plan(
     scopes = []
     seen_scopes: set[tuple[str, ...]] = set()
     owners: dict[str, set[tuple[str, ...]]] = {}
-    for row in _payload_rows(balance_payload):
-        record = _scope_record(row, source)
+    normal_rows = _payload_rows(balance_payload)
+    refresh_rows = balance_payload.get("refresh_rows", [])
+    if not isinstance(refresh_rows, list):
+        raise AtomicEvidenceError("balance_discrepancies refresh_rows is not a list")
+    refresh_records = []
+    if isinstance(yearly_cache, dict):
+        for row in refresh_rows:
+            if (not isinstance(row, dict)
+                    or row.get("reason") != "app_state_changed_since_capture"
+                    or row.get("comparison_status") != "paired"
+                    or row.get("closed")):
+                continue
+            ids = row.get("filer_ids")
+            if not isinstance(ids, list) or not ids:
+                continue
+            ids = sorted({str(fid).strip() for fid in ids})
+            if any(not fid.isdigit() for fid in ids):
+                continue
+            current = _unique_source_scope(source, ids)
+            if current is None:
+                continue
+            try:
+                comparison = paired_comparison(
+                    ids, yearly_cache, current_transaction_id=snapshot_id,
+                    current_scope_digest=current.get("app_scope_transaction_digest"),
+                )
+                if (comparison.get("status") != "paired"
+                        or sorted(comparison.get("filer_ids") or []) != ids
+                        or comparison.get("orestar_data_changed_since_capture")):
+                    continue
+                refreshed = {
+                    **row,
+                    "newer_app_data": False,
+                    "transaction_snapshot_id": comparison.get("app_transaction_snapshot_id"),
+                    "scrape_ts": comparison.get("captured_at"),
+                    "tran_count": comparison.get("app_tran_count"),
+                    "delta": comparison.get("delta_at_capture"),
+                }
+                record = _scope_record(refreshed, source, allow_zero=True)
+            except (TypeError, ValueError, OverflowError, KeyError):
+                continue
+            if record is not None:
+                record["needs_stabilization"] = True
+                refresh_records.append(record)
+    records = refresh_records + [
+        _scope_record(row, source) for row in normal_rows
+    ]
+    for record in records:
         # An unrelated committee can change the global fingerprint while this
         # scope remains actionable. Keep its prior capture for certifying old
         # evidence; ready_plan requires a fresh capture against this run's
@@ -299,7 +375,7 @@ def build_plan(
         missing = sorted(requested - represented)
         if missing:
             raise AtomicEvidenceError(
-                "Requested filers are not in an actionable unambiguous scope: "
+                "Requested filers are not in an eligible unambiguous scope: "
                 + " ".join(missing)
             )
 
@@ -310,8 +386,9 @@ def build_plan(
     }
     candidate_ids = set(requirements)
     certified: dict[str, dict] = {}
+    blocked: set[str] = set()
     if candidate_ids:
-        certified, _blocked, scan_error = certify_exact_scope_rows(
+        certified, blocked, scan_error = certify_exact_scope_rows(
             list(entries.values()),
             requirements,
             candidate_ids,
@@ -324,14 +401,16 @@ def build_plan(
 
     unresolved = [
         scope for scope in scopes
-        if requested or not set(scope["filer_ids"]).issubset(certified)
+        if requested or scope.get("needs_stabilization")
+        or not set(scope["filer_ids"]).issubset(certified)
     ]
     for scope in unresolved:
         scope["last_exact_attempt_at"] = _latest_attempt(scope, entries)
         scope.pop("requirement", None)
     # An automatic chain must not spend every child on the same F5 casualty.
-    # Explicit filer IDs remain a deliberate operator override, but ordinary
-    # planning cools any scope attempted during the current UTC day.
+    # Explicit filer IDs remain a deliberate operator override. Automatic
+    # planning cools same-day failed or incomplete attempts, but may recapture
+    # an unsettled refresh scope after its complete exact evidence succeeded.
     instant = planned_at or utc_timestamp()
     instant_epoch = _iso_epoch(instant)
     all_unresolved = list(unresolved)
@@ -340,6 +419,11 @@ def build_plan(
         unresolved = [
             scope for scope in unresolved
             if (_attempt_day(scope["last_exact_attempt_at"]) or date.min) < today
+            or (scope.get("needs_stabilization")
+                and set(scope["filer_ids"]).issubset(certified)
+                and not set(scope["filer_ids"]).intersection(blocked)
+                and not any((entries.get(fid) or {}).get("last_failure")
+                            for fid in scope["filer_ids"]))
         ]
     deferred_count = len(all_unresolved) - len(unresolved)
     unresolved.sort(key=lambda scope: (
@@ -423,6 +507,10 @@ def ready_plan(
                 captured_at, tz=timezone.utc
             ).date().isoformat(),
         })
+        for key in ("scope_capture_id", "app_cash_on_hand", "app_tran_count"):
+            if key in comparison:
+                target = key if key == "scope_capture_id" else "captured_" + key
+                scope[target] = comparison[key]
         ready.append(scope)
 
     current_day = (now or datetime.now(timezone.utc)).astimezone(
@@ -574,6 +662,132 @@ def verify_plan(
     }
 
 
+def assess_stabilization(
+    ready: Any,
+    source: Any,
+    yearly_cache: Any,
+    transaction_dir: Path,
+) -> dict:
+    """Compare a real capture with its later aggregation without rewriting it.
+
+    A changed cash treatment requests another genuine capture/exact window.
+    Missing or untouched historical annual rows never drive this retry loop.
+    """
+    if not isinstance(ready, dict):
+        raise AtomicEvidenceError("Unsupported or malformed ready plan")
+    snapshot_id = _current_snapshot(
+        transaction_dir, str(ready.get("transaction_snapshot_id") or "")
+    )
+    requirements_from_ready_plan(ready, snapshot_id)
+    if (not isinstance(source, dict)
+            or source.get("version") != FORMAT_VERSION
+            or source.get("calculation_version") != CALCULATION_VERSION
+            or source.get("transaction_snapshot_id") != snapshot_id
+            or not isinstance(source.get("scopes"), dict)):
+        raise AtomicEvidenceError("Aggregation source does not match the frozen ledger")
+    if not isinstance(yearly_cache, dict):
+        raise AtomicEvidenceError("Yearly summary cache is not an object")
+    created_at = _iso_epoch(source.get("created_at"))
+    planned_at = _iso_epoch(ready.get("planned_at"))
+    results = []
+    unsettled_ids = set()
+    for scope in ready["scopes"]:
+        ids = scope["filer_ids"]
+        current = _unique_source_scope(source, ids)
+        if (current is None or current.get("app_scope_transaction_digest")
+                != scope.get("app_scope_transaction_digest")):
+            raise AtomicEvidenceError("Aggregation scope membership or digest changed")
+        if created_at < _epoch(scope["captured_at"]):
+            raise AtomicEvidenceError("Aggregation source predates the capture")
+        try:
+            comparison = paired_comparison(
+                ids, yearly_cache, current_transaction_id=snapshot_id,
+                current_scope_digest=current["app_scope_transaction_digest"],
+            )
+        except (TypeError, ValueError, OverflowError, KeyError) as exc:
+            raise AtomicEvidenceError("Malformed current comparison capture") from exc
+        if (comparison.get("status") != "paired"
+                or comparison.get("app_transaction_snapshot_id") != snapshot_id
+                or sorted(comparison.get("filer_ids") or []) != ids
+                or comparison.get("scope_digest_matches_capture") is not True
+                or comparison.get("orestar_data_changed_since_capture")
+                or _epoch(comparison.get("capture_started_at"))
+                != _epoch(scope["capture_started_at"])
+                or _epoch(comparison.get("captured_at")) != _epoch(scope["captured_at"])):
+            raise AtomicEvidenceError("Current capture no longer matches the ready window")
+        capture_id = comparison.get("scope_capture_id")
+        if (not exact_evidence_identifier_is_valid(capture_id)
+                or (scope.get("scope_capture_id") is not None
+                    and scope["scope_capture_id"] != capture_id)):
+            raise AtomicEvidenceError("Current scope capture identity changed")
+        try:
+            captured_cash = float(comparison["app_cash_on_hand"])
+            current_cash = float(current["cash_on_hand"])
+            captured_count = int(comparison["app_tran_count"])
+            current_count = int(current["tran_count"])
+            if (not math.isfinite(captured_cash) or not math.isfinite(current_cash)
+                    or captured_count < 0 or current_count < 0
+                    or float(comparison["app_tran_count"]) != captured_count
+                    or float(current["tran_count"]) != current_count):
+                raise ValueError("invalid cash/count")
+        except (TypeError, ValueError, OverflowError, KeyError) as exc:
+            raise AtomicEvidenceError("Invalid captured or aggregated cash/count") from exc
+        if ("captured_app_cash_on_hand" in scope
+                and captured_cash != scope["captured_app_cash_on_hand"]):
+            raise AtomicEvidenceError("Captured app cash changed after ready")
+        if ("captured_app_tran_count" in scope
+                and captured_count != scope["captured_app_tran_count"]):
+            raise AtomicEvidenceError("Captured transaction count changed after ready")
+        mismatched_years = set()
+        for fid in ids:
+            entry = yearly_cache.get(fid) or {}
+            years = entry.get("years")
+            if not isinstance(years, dict):
+                raise AtomicEvidenceError("Captured member has no annual cache")
+            capture = entry.get("comparison_capture") or {}
+            current_year = str(capture.get("orestar_year"))
+            if ((years.get(current_year) or {}).get("scope_capture_id") != capture_id):
+                raise AtomicEvidenceError("Current capture lacks its fresh annual row")
+            for year, row in years.items():
+                if not isinstance(row, dict) or row.get("scope_capture_id") != capture_id:
+                    continue
+                row_time = _epoch(row.get("scrape_ts"))
+                digest = source_year_transaction_digest(current, year)
+                if (not planned_at < row_time <= created_at
+                        or row.get("calculation_version") != CALCULATION_VERSION
+                        or not exact_evidence_identifier_is_valid(
+                            row.get("app_year_transaction_digest"))
+                        or not exact_evidence_identifier_is_valid(digest)):
+                    raise AtomicEvidenceError("Invalid fresh annual capture provenance")
+                if row["app_year_transaction_digest"] != digest:
+                    mismatched_years.add(str(year))
+        reasons = []
+        if abs(round(current_cash - captured_cash, 2)) > 0.01:
+            reasons.append("cash_changed")
+        if current_count != captured_count:
+            reasons.append("transaction_count_changed")
+        if mismatched_years:
+            reasons.append("fresh_annual_treatment_changed")
+        if reasons:
+            unsettled_ids.update(ids)
+        results.append({
+            "filer_ids": ids, "stable": not reasons, "reasons": reasons,
+            "captured_cash": round(captured_cash, 2),
+            "current_cash": round(current_cash, 2),
+            "captured_tran_count": captured_count,
+            "current_tran_count": current_count,
+            "fresh_annual_mismatch_years": sorted(mismatched_years),
+        })
+    _current_snapshot(transaction_dir, snapshot_id)
+    stable_count = sum(row["stable"] for row in results)
+    return {
+        "version": PLAN_VERSION, "transaction_snapshot_id": snapshot_id,
+        "stable_scope_count": stable_count,
+        "unsettled_scope_count": len(results) - stable_count,
+        "unsettled_filer_ids": sorted(unsettled_ids), "scopes": results,
+    }
+
+
 def _load_plan(path: Path) -> dict:
     value = _read_json(path)
     if not isinstance(value, dict):
@@ -608,6 +822,7 @@ def main(argv: list[str] | None = None) -> int:
                 TRANSACTION_DIR,
                 max_scopes=args.max_scopes,
                 requested_ids=args.filer_ids,
+                yearly_cache=_read_json(YEARLY_PATH, {}),
             )
             _write_json(args.output, value)
             print(

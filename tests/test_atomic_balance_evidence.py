@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ SCRAPER_DIR = ROOT / "scraper"
 sys.path.insert(0, str(SCRAPER_DIR))
 
 import atomic_balance_evidence as ABE  # noqa: E402
+import balance_snapshot as BS  # noqa: E402
 
 
 SNAPSHOT = "sha256:" + "a" * 64
@@ -455,3 +457,182 @@ def test_completed_current_summary_sweep_hands_off_only_after_publication() -> N
 def test_atomic_workflow_is_in_shared_orestar_lane() -> None:
     action = (ROOT / ".github" / "actions" / "await-orestar" / "action.yml").read_text()
     assert ".github/workflows/atomic-balance-evidence.yml" in action
+
+
+def _stabilization_window(monkeypatch, tmp_path, ids=None):
+    ids = ids or ["10", "20"]
+    monkeypatch.setattr(ABE, "_current_snapshot", lambda *_a, **_k: SNAPSHOT)
+    planned = datetime(2026, 9, 12, 12, tzinfo=timezone.utc)
+    source = _source((ids, "sha256:scope"))
+    source["created_at"] = "2026-09-12T11:59:00Z"
+    source["scopes"]["|".join(ids)].update({
+        "cash_on_hand": 100.0, "tran_count": len(ids),
+        "app_year_transaction_digests": {"2026": "sha256:year"},
+    })
+    yearly = {}
+    for index, fid in enumerate(ids):
+        captured_at = planned.timestamp() + index + 1
+        summary = {"ending_cash_balance": 100.0 / len(ids),
+                   "scrape_ts": captured_at}
+        capture = BS.make_summary_capture(fid, 2026, summary, captured_at,
+                                          source, SNAPSHOT)
+        capture["scope_capture_id"] = "|".join(ids) + "@fresh"
+        yearly[fid] = {"comparison_capture": capture, "years": {"2026": {
+            **summary, "scope_capture_id": capture["scope_capture_id"],
+            "calculation_version": BS.CALCULATION_VERSION,
+            "app_year_transaction_digest": "sha256:year",
+        }}}
+    plan = {"version": 1, "planned_at": planned.isoformat(),
+            "transaction_snapshot_id": SNAPSHOT, "scopes": [{
+                "filer_ids": ids, "app_scope_transaction_digest": "sha256:scope",
+            }]}
+    ready = ABE.ready_plan(plan, yearly, tmp_path, now=planned)
+    source["created_at"] = "2026-09-12T12:01:00Z"
+    return ready, source, yearly
+
+
+def _refresh_payload(ids):
+    return {**_payload([]), "refresh_rows": [{
+        "name": "Changed cash", "filer_ids": ids,
+        "comparison_status": "paired", "closed": False,
+        "reason": "app_state_changed_since_capture",
+        "app_data_changed_since_capture": True, "delta": 0,
+        # This report is deliberately missing provenance; the real pair owns it.
+    }]}
+
+
+@pytest.mark.parametrize("ids", [["10"], ["10", "20"]])
+def test_plan_admits_zero_delta_refresh_from_real_pair(monkeypatch, tmp_path, ids):
+    ready, source, yearly = _stabilization_window(monkeypatch, tmp_path, ids)
+    source["scopes"]["|".join(ids)]["cash_on_hand"] = 150.0
+    result = ABE.build_plan(_refresh_payload(ids), [], source, tmp_path,
+                            max_scopes=10, yearly_cache=yearly,
+                            planned_at="2026-09-12T12:02:00Z")
+    assert result["selected_scope_count"] == 1
+    [scope] = result["scopes"]
+    assert scope["needs_stabilization"] is True
+    assert scope["delta"] == 0
+    assert scope["prior_transaction_snapshot_id"] == SNAPSHOT
+    assert scope["prior_captured_at"] == ready["scopes"][0]["captured_at"]
+    assert scope["filer_ids"] == ids
+
+
+@pytest.mark.parametrize("fault", ["no-cache", "partial", "new-attempt",
+                                     "mixed-capture", "overlap", "annual-only"])
+def test_refresh_admission_refuses_missing_pair_proof(monkeypatch, tmp_path, fault):
+    ready, source, yearly = _stabilization_window(monkeypatch, tmp_path)
+    payload = _refresh_payload(["10", "20"])
+    if fault == "no-cache":
+        yearly = None
+    elif fault == "partial":
+        yearly.pop("20")
+    elif fault == "new-attempt":
+        yearly["20"]["comparison_capture_attempt"] = {
+            "captured_at": ready["scopes"][0]["captured_at"] + 1}
+    elif fault == "mixed-capture":
+        yearly["20"]["comparison_capture"]["scope_capture_id"] = "other"
+    elif fault == "overlap":
+        source["scopes"]["20|30"] = {"filer_ids": ["20", "30"]}
+    else:
+        payload["refresh_rows"][0]["reason"] = "annual_summary_years_unpaired"
+    result = ABE.build_plan(payload, [], source, tmp_path, max_scopes=10,
+                            yearly_cache=yearly,
+                            planned_at="2026-09-12T12:02:00Z")
+    assert result["selected_scope_count"] == 0
+
+
+@pytest.mark.parametrize("proof, failed, expected", [
+    ([], False, 0), (["10"], False, 0), (["10", "20"], False, 1),
+    (["10", "20"], True, 0),
+])
+def test_same_day_refresh_requires_complete_proof_without_later_failure(
+    monkeypatch, tmp_path, proof, failed, expected,
+):
+    _ready, source, yearly = _stabilization_window(monkeypatch, tmp_path)
+    entries = [{"filer_id": fid, "complete": False,
+                "checked_at": "2026-09-12T12:01:00Z"} for fid in ["10", "20"]]
+    if failed:
+        entries[1].update(last_failure="unusable_window",
+                          last_attempt_at="2026-09-12T12:01:30Z")
+    monkeypatch.setattr(ABE, "certify_exact_scope_rows", lambda *_a, **_k: (
+        {fid: {"filer_id": fid} for fid in proof}, set(), None))
+    result = ABE.build_plan(_refresh_payload(["10", "20"]), entries, source,
+                            tmp_path, max_scopes=10, yearly_cache=yearly,
+                            planned_at="2026-09-12T12:02:00Z")
+    assert result["selected_scope_count"] == expected
+    assert result["remaining_scope_count"] == 1
+    assert result["deferred_scope_count"] == 1 - expected
+
+
+@pytest.mark.parametrize("change, reason", [
+    ("none", None), ("cash", "cash_changed"),
+    ("count", "transaction_count_changed"),
+    ("year", "fresh_annual_treatment_changed"),
+])
+def test_assessment_detects_settlement_without_rewriting_capture(
+    monkeypatch, tmp_path, change, reason,
+):
+    ready, source, yearly = _stabilization_window(monkeypatch, tmp_path)
+    scope = source["scopes"]["10|20"]
+    if change == "cash":
+        scope["cash_on_hand"] = 150.0
+    elif change == "count":
+        scope["tran_count"] = 3
+    elif change == "year":
+        scope["app_year_transaction_digests"]["2026"] = "sha256:new-treatment"
+    # A missing sibling or stale row in an untouched historical year must not
+    # keep a successful recapture looping indefinitely.
+    yearly["10"]["years"]["2012"] = {"scope_capture_id": "old", "scrape_ts": 1}
+    original = copy.deepcopy((ready, source, yearly))
+    result = ABE.assess_stabilization(ready, source, yearly, tmp_path)
+    assert (ready, source, yearly) == original
+    assert result["stable_scope_count"] == int(reason is None)
+    assert result["unsettled_scope_count"] == int(reason is not None)
+    assert result["unsettled_filer_ids"] == ([] if reason is None else ["10", "20"])
+    assert result["scopes"][0]["reasons"] == ([] if reason is None else [reason])
+
+
+@pytest.mark.parametrize("fault", [
+    "source-version", "source-calculation", "source-snapshot", "source-old",
+    "scope-partial", "scope-overlap", "scope-digest", "member-missing",
+    "capture-time", "capture-cash", "capture-id", "new-attempt",
+    "current-year-missing", "fresh-year-time", "year-source-missing",
+])
+def test_assessment_refuses_provenance_drift(monkeypatch, tmp_path, fault):
+    ready, source, yearly = _stabilization_window(monkeypatch, tmp_path)
+    scope = source["scopes"]["10|20"]
+    if fault == "source-version":
+        source["version"] = 0
+    elif fault == "source-calculation":
+        source["calculation_version"] = "old"
+    elif fault == "source-snapshot":
+        source["transaction_snapshot_id"] = "sha256:" + "b" * 64
+    elif fault == "source-old":
+        source["created_at"] = "2026-09-12T11:59:00Z"
+    elif fault == "scope-partial":
+        scope["filer_ids"] = ["10"]
+    elif fault == "scope-overlap":
+        source["scopes"]["20|30"] = {"filer_ids": ["20", "30"]}
+    elif fault == "scope-digest":
+        scope["app_scope_transaction_digest"] = "sha256:changed"
+    elif fault == "member-missing":
+        yearly.pop("20")
+    elif fault == "capture-time":
+        yearly["20"]["comparison_capture"]["captured_at"] += 1
+    elif fault == "capture-cash":
+        for entry in yearly.values():
+            entry["comparison_capture"]["app_cash_on_hand"] += 5
+    elif fault == "capture-id":
+        for entry in yearly.values():
+            entry["comparison_capture"]["scope_capture_id"] = "other"
+    elif fault == "new-attempt":
+        yearly["20"]["comparison_capture_attempt"] = {
+            "captured_at": ready["scopes"][0]["captured_at"] + 1}
+    elif fault == "current-year-missing":
+        yearly["20"]["years"].pop("2026")
+    elif fault == "fresh-year-time":
+        yearly["20"]["years"]["2026"]["scrape_ts"] = 1
+    else:
+        scope.pop("app_year_transaction_digests")
+    with pytest.raises(ABE.AtomicEvidenceError):
+        ABE.assess_stabilization(ready, source, yearly, tmp_path)
