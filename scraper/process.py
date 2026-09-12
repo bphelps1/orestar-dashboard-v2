@@ -1873,9 +1873,18 @@ def aggregate_filers(
     balance_adjust: pd.DataFrame,  # type O "Cash Balance Adjustment" only
     filer_col: str,
     contrib_col: str,
-    donor_col: str,
+    donor_col: str | None = None,
 ) -> None:
     """Generate filer_index.json and per-filer detail files under data/aggregated/filers/."""
+    if donor_col is None:
+        # Direct callers can pass contribution frames created before donor
+        # normalization. Label both frames without mutating their source data.
+        donor_col = "_donor_label"
+        df = df.assign(**{donor_col: _donor_grouping_labels(df)})
+        contributions = contributions.assign(
+            **{donor_col: _donor_grouping_labels(contributions)}
+        )
+
     filers_dir = AGG_DIR / "filers"
     filers_dir.mkdir(parents=True, exist_ok=True)
 

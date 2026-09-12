@@ -112,3 +112,51 @@ def test_every_donor_output_groups_variants_before_ranking(tmp_path, monkeypatch
     check_types(filer["by_contributor_type_by_year"]["2026"])
     check_types(filer["by_contributor_type_by_month"]["2026-01"])
     pd.testing.assert_frame_equal(frame, original)
+
+
+def test_legacy_filer_aggregation_normalizes_separate_contributions_without_mutation(tmp_path, monkeypatch):
+    aggregate_dir = tmp_path / "aggregated"
+    aggregate_dir.mkdir()
+    monkeypatch.setattr(P, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(P, "AGG_DIR", aggregate_dir)
+    monkeypatch.setattr(P, "COMMITTEES", tmp_path / "committees.csv")
+    monkeypatch.setattr(P.supabase_sync, "upsert_dashboard_cache", lambda *args, **kwargs: None)
+    monkeypatch.setattr(P.supabase_sync, "bulk_upsert_filer_detail", lambda *args, **kwargs: None)
+    monkeypatch.setattr(P.supabase_sync, "get_dashboard_cache", lambda *args, **kwargs: None)
+
+    frame = pd.DataFrame({
+        "contributor_payee": ["Miscellaneous Cash Contributions $100 and under ",
+                              " miscellaneous  cash contributions $100 and UNDER",
+                              "In-kind Donor", "Vendor"],
+        "amount": [75.0, 75.0, 1000.0, 20.0],
+        "tran_type": ["C", "C", "C", "E"],
+        "sub_type": ["Cash Contribution", "Cash Contribution", "In-Kind Contribution", "Cash Expenditure"],
+        "filed_date": pd.to_datetime(["2026-01-15"] * 4),
+        "filer": ["Recipient"] * 4,
+        "year": [2026] * 4, "month": ["2026-01"] * 4,
+        "book_type": ["Individual"] * 4,
+        "is_out_of_state": [False] * 4, "_undated": [False] * 4,
+    })
+    # These independent frames do not acquire a column when df is relabeled.
+    contributions = frame[frame["tran_type"] == "C"].copy()
+    inkind = contributions[contributions["sub_type"] == "In-Kind Contribution"].copy()
+    expenditures = frame[frame["tran_type"] == "E"].copy()
+    empty = frame.iloc[0:0].copy()
+    originals = [part.copy(deep=True) for part in [frame, contributions, inkind, expenditures, empty]]
+
+    P.aggregate_filers(frame, contributions, inkind, expenditures, empty, empty, empty,
+                       "filer", "contributor_payee")
+
+    detail = json.loads((aggregate_dir / "filers/recipient.json").read_text())
+    expected = [{"name": MISC_CASH_LABEL, "total": 150.0}]
+    assert detail["top_donors"] == expected
+    assert detail["top_donors_by_year"]["2026"] == expected
+    for groups in [detail["by_contributor_type"], detail["by_contributor_type_by_year"]["2026"],
+                   detail["by_contributor_type_by_month"]["2026-01"]]:
+        assert groups == [{"type": "Individual", "total": 150.0, "top_donors": expected}]
+    assert detail["total_in"] == 150.0
+    assert detail["total_inkind"] == 1000.0
+    assert detail["cash_on_hand"] == 130.0
+    assert detail["top_payees"] == [{"name": "Vendor", "total": 20.0}]
+    for part, original in zip([frame, contributions, inkind, expenditures, empty], originals):
+        pd.testing.assert_frame_equal(part, original)
