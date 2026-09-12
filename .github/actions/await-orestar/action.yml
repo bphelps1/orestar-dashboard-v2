@@ -76,6 +76,7 @@ runs:
         .github/workflows/backfill.yml
         .github/workflows/coverage-diff.yml
         .github/workflows/coverage-survey.yml
+        .github/workflows/atomic-balance-evidence.yml
         .github/workflows/verify-filers.yml'
 
         ME_STARTED=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
