@@ -2758,6 +2758,9 @@ def aggregate_filers(
                 for _y in range(first_txn_year, scraped_year):
                     yearly_nets.pop(str(_y), None)
                     _balance_excluded_years.add(_y)
+                    # The opening supersedes these years' cash, so missing
+                    # annual loan fields cannot affect the current balance.
+                    _summary_treatment_pending_years.discard(str(_y))
                 log.info(
                     "%s: anchoring on ORESTAR's %d opening $%.2f; our %d-%d rows "
                     "net $%.2f (%s) and are superseded by it",

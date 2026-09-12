@@ -476,6 +476,7 @@ def _aggregate_cash_rows(
     yearly: dict | None = None,
     *,
     paired_summary: bool = False,
+    earliest: dict | None = None,
     capture_rows: list[dict] | None = None,
     captured_app_cash: float | None = None,
     paired_years: set[str] | None = None,
@@ -489,6 +490,8 @@ def _aggregate_cash_rows(
     agg_dir.mkdir(parents=True)
     transaction_dir.mkdir()
     df = pd.DataFrame(rows)
+    if earliest is not None:
+        (data_dir / "earliest_balances.json").write_text(json.dumps(earliest))
     if yearly is not None:
         # Summary-derived cash treatment is valid only when the capture names
         # the exact canonical transaction rows it was read against.
@@ -602,6 +605,76 @@ def _timeline_net(detail: dict) -> float:
         row_net(row)
         for row in detail["timeline"]
     ), 2)
+
+
+@pytest.mark.parametrize("tran_type, sub_type", [
+    ("C", "Loan Received (Non-Exempt)"),
+    ("OR", "Loan Received (Exempt)"),
+])
+@pytest.mark.parametrize(
+    "anchor_year, reached_earliest, later_loan, expected_cash, pending_years",
+    [
+        (2006, True, False, 125.0, []),
+        (2006, True, True, 325.0, ["2007"]),
+        (2006, False, False, 1025.0, ["2005"]),
+        (None, False, False, 1025.0, ["2005"]),
+        (2005, True, False, 1125.0, ["2005"]),
+    ],
+    ids=["superseded", "later-year-still-needed", "unconfirmed", "no-anchor",
+         "anchor-year-still-needed"],
+)
+def test_annual_refresh_requires_only_loan_years_used_after_verified_opening(
+    tmp_path, tran_type, sub_type, anchor_year, reached_earliest, later_loan,
+    expected_cash, pending_years,
+) -> None:
+    old_loan = _cash_row("pre-statement-loan", 1000.0, tran_type, sub_type)
+    old_loan.update(
+        year=2005, month="2005-01", filed_date=pd.Timestamp("2005-01-01"),
+    )
+    rows = [old_loan, _cash_row("current-cash", 25.0, "C", "Cash Contribution")]
+    if later_loan:
+        loan = _cash_row("post-opening-loan", 200.0, tran_type, sub_type)
+        loan.update(
+            year=2007, month="2007-01", filed_date=pd.Timestamp("2007-01-01"),
+        )
+        rows.append(loan)
+    earliest = None if anchor_year is None else {"1": {
+        "earliest_year": anchor_year,
+        "beginning_balance": 100.0,
+        "reached_earliest": reached_earliest,
+    }}
+    # The current page and app cash agree. The older loan years have no annual
+    # pages; only years actually used after the official opening need them.
+    yearly = {"1": {"ts": 1_800_000_000.0, "years": {"2026": {
+        "summary_field_version": 2,
+        "beginning_balance": expected_cash - 25.0,
+        "ending_cash_balance": expected_cash,
+        "contributions": 25.0,
+        "expenditures": 0.0,
+        "loans_received": 0.0,
+        "loans_received_exempt": 0.0,
+        "loan_payments_exempt": 0.0,
+    }}}}
+
+    detail = _aggregate_cash_rows(
+        tmp_path, rows, set(), yearly, paired_summary=True, earliest=earliest,
+        captured_app_cash=expected_cash,
+    )
+
+    comparison = detail["orestar_comparison"]
+    assert detail["cash_on_hand"] == expected_cash
+    assert detail["tran_count"] == len(rows)
+    opening = 100.0 if reached_earliest else 0.0
+    assert _timeline_net(detail) == expected_cash - opening
+    pre_statement = [row for row in detail["timeline"] if row["month"] == "2005-01"]
+    assert len(pre_statement) == 1  # retained history remains visible
+    excluded = reached_earliest and anchor_year == 2006
+    assert pre_statement[0]["cash_balance_net"] == (0.0 if excluded else 1000.0)
+    assert comparison["delta_at_capture"] == 0.0
+    assert comparison["app_data_changed_since_capture"] is False
+    assert comparison["annual_summary_refresh_years"] == pending_years
+    assert comparison["annual_summary_refresh_needed"] is bool(pending_years)
+    assert comparison["actionable"] is (not pending_years)
 
 
 def test_absent_cash_expenditure_is_omitted_from_stored_and_timeline_cash(
