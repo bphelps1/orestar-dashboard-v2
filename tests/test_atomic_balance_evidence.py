@@ -117,6 +117,48 @@ def test_plan_orders_old_attempts_then_cheaper_scopes(monkeypatch, tmp_path) -> 
     assert [scope["filer_ids"] for scope in result["scopes"]] == [["20"], ["10"]]
 
 
+@pytest.mark.parametrize("filer_ids", [["10"], ["10", "20"]])
+@pytest.mark.parametrize("requested_ids", [(), ("10",)])
+def test_plan_refreshes_unchanged_scopes_after_unrelated_snapshot_change(
+    monkeypatch, tmp_path, filer_ids, requested_ids,
+) -> None:
+    monkeypatch.setattr(ABE, "_current_snapshot", lambda *_args, **_kwargs: SNAPSHOT)
+    prior_snapshot = "sha256:" + "b" * 64
+    unchanged = _row(filer_ids, delta=100, count=5)
+    unchanged["transaction_snapshot_id"] = prior_snapshot
+    changed = _row(["30"], delta=200, count=1)
+    changed["transaction_snapshot_id"] = prior_snapshot
+    changed["newer_app_data"] = True
+    source = _source((filer_ids, "sha256:" + "c" * 64),
+                     (["30"], "sha256:" + "d" * 64))
+    kwargs = dict(
+        balance_payload=_payload([unchanged, changed]),
+        diff_rows=[],
+        source=source,
+        transaction_dir=tmp_path,
+        max_scopes=10,
+        requested_ids=requested_ids,
+        planned_at="2026-09-12T12:00:00Z",
+    )
+
+    # An older global capture remains actionable when this scope is unchanged.
+    # No existing exact evidence means the real certifier requires a new capture.
+    result = ABE.build_plan(**kwargs)
+
+    assert result["candidate_scope_count"] == 1
+    assert result["remaining_scope_count"] == 1
+    assert result["selected_scope_count"] == 1
+    assert result["transaction_snapshot_id"] == SNAPSHOT
+    assert result["scopes"][0]["filer_ids"] == filer_ids
+    assert result["scopes"][0]["prior_transaction_snapshot_id"] == prior_snapshot
+
+    # Only the previous capture may be old: the source used for the new window
+    # must still match the transaction shards hydrated for this run.
+    source["transaction_snapshot_id"] = prior_snapshot
+    with pytest.raises(ABE.AtomicEvidenceError, match="does not match the local ledger"):
+        ABE.build_plan(**kwargs)
+
+
 def test_automatic_plan_defers_same_day_failure_but_explicit_target_overrides(
     monkeypatch, tmp_path,
 ) -> None:

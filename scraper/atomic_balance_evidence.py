@@ -263,10 +263,11 @@ def build_plan(
     owners: dict[str, set[tuple[str, ...]]] = {}
     for row in _payload_rows(balance_payload):
         record = _scope_record(row, source)
-        if (
-            record is None
-            or record["prior_transaction_snapshot_id"] != snapshot_id
-        ):
+        # An unrelated committee can change the global fingerprint while this
+        # scope remains actionable. Keep its prior capture for certifying old
+        # evidence; ready_plan requires a fresh capture against this run's
+        # frozen snapshot before any new exact diff can begin.
+        if record is None:
             continue
         key = tuple(record["filer_ids"])
         if key in seen_scopes:
