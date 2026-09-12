@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pandas as pd
 from rapidfuzz import fuzz, process as rfuzz_process
+from donor_labels import build_donor_label_map, donor_label_key, normalize_donor_label
 
 from balance_snapshot import (
     CALCULATION_VERSION,
@@ -1243,6 +1244,21 @@ def to_float(x) -> float:
         return 0.0
 
 
+def _donor_grouping_labels(df: pd.DataFrame) -> pd.Series:
+    """Normalize all donor labels before any totals or top-N cutoffs.
+
+    Backfilled rows can have an empty canonical value even when the canonical
+    column exists. Fall back row by row without rewriting transaction fields.
+    """
+    labels = df.get("contributor_payee_canonical", pd.Series("", index=df.index))
+    labels = labels.map(normalize_donor_label)
+    missing = labels.eq("")
+    if "contributor_payee" in df.columns:
+        labels.loc[missing] = df.loc[missing, "contributor_payee"].map(normalize_donor_label)
+    display = build_donor_label_map(labels.unique())
+    return labels.map(donor_label_key).map(display)
+
+
 def aggregate(df: pd.DataFrame) -> None:
     log.info("Aggregating data for dashboard JSON files…")
 
@@ -1326,6 +1342,8 @@ def aggregate(df: pd.DataFrame) -> None:
     # Use canonical names if available, fall back to raw
     contrib_col = "contributor_payee_canonical" if "contributor_payee_canonical" in df.columns else "contributor_payee"
     filer_col   = "filer_canonical" if "filer_canonical" in df.columns else "filer"
+    donor_col = "_donor_label"
+    df[donor_col] = _donor_grouping_labels(df)
 
     ttype = df["tran_type"].str.strip().str.upper()
     contributions   = df[ttype == "C"]
@@ -1401,11 +1419,11 @@ def aggregate(df: pd.DataFrame) -> None:
 
     # ── top_donors.json ───────────────────────────────────────────────────────
     top_donors_all = (
-        cash_contribs.groupby(contrib_col)["amount"]
+        cash_contribs.groupby(donor_col)["amount"]
         .sum()
         .nlargest(1000)
         .reset_index()
-        .rename(columns={contrib_col: "name", "amount": "total"})
+        .rename(columns={donor_col: "name", "amount": "total"})
     )
     top_donors_all["total"] = top_donors_all["total"].round(2)
 
@@ -1413,11 +1431,11 @@ def aggregate(df: pd.DataFrame) -> None:
     for yr in sorted(cash_contribs["year"].unique()):
         yr_df = cash_contribs[cash_contribs["year"] == yr]
         top = (
-            yr_df.groupby(contrib_col)["amount"]
+            yr_df.groupby(donor_col)["amount"]
             .sum()
             .nlargest(1000)
             .reset_index()
-            .rename(columns={contrib_col: "name", "amount": "total"})
+            .rename(columns={donor_col: "name", "amount": "total"})
         )
         top["total"] = top["total"].round(2)
         by_year_donors[str(yr)] = top.to_dict(orient="records")
@@ -1503,18 +1521,18 @@ def aggregate(df: pd.DataFrame) -> None:
             if iv:
                 sub_in = frame[~oos & (frame["book_type"] == t)]
                 top_in = (
-                    sub_in.groupby(contrib_col)["amount"].sum()
+                    sub_in.groupby(donor_col)["amount"].sum()
                     .nlargest(5).reset_index()
-                    .rename(columns={contrib_col: "name", "amount": "total"})
+                    .rename(columns={donor_col: "name", "amount": "total"})
                 )
                 top_in["total"] = top_in["total"].round(2)
                 rows.append({"type": t, "total": iv, "top_donors": top_in.to_dict(orient="records")})
             if ov:
                 sub_oos = frame[oos & (frame["book_type"] == t)]
                 top_oos = (
-                    sub_oos.groupby(contrib_col)["amount"].sum()
+                    sub_oos.groupby(donor_col)["amount"].sum()
                     .nlargest(5).reset_index()
-                    .rename(columns={contrib_col: "name", "amount": "total"})
+                    .rename(columns={donor_col: "name", "amount": "total"})
                 )
                 top_oos["total"] = top_oos["total"].round(2)
                 rows.append({"type": t + " (out of state)", "total": ov, "top_donors": top_oos.to_dict(orient="records")})
@@ -1554,7 +1572,7 @@ def aggregate(df: pd.DataFrame) -> None:
     # ── per-filer index + detail files ───────────────────────────────────────
     global_coh_data = aggregate_filers(df, contributions, inkind_contribs, expenditures,
                                        other_receipts, other_disburse, balance_adjust,
-                                       filer_col, contrib_col)
+                                       filer_col, contrib_col, donor_col)
 
     # Add the exact, per-filer-derived cash trajectory to the visible global
     # component timeline. Synthetic January rows are possible when a committee
@@ -1855,6 +1873,7 @@ def aggregate_filers(
     balance_adjust: pd.DataFrame,  # type O "Cash Balance Adjustment" only
     filer_col: str,
     contrib_col: str,
+    donor_col: str,
 ) -> None:
     """Generate filer_index.json and per-filer detail files under data/aggregated/filers/."""
     filers_dir = AGG_DIR / "filers"
@@ -1883,18 +1902,18 @@ def aggregate_filers(
             if iv:
                 sub_in = frame[~oos & (frame["book_type"] == t)]
                 top_in = (
-                    sub_in.groupby(contrib_col)["amount"].sum()
+                    sub_in.groupby(donor_col)["amount"].sum()
                     .nlargest(5).reset_index()
-                    .rename(columns={contrib_col: "name", "amount": "total"})
+                    .rename(columns={donor_col: "name", "amount": "total"})
                 )
                 top_in["total"] = top_in["total"].round(2)
                 rows.append({"type": t, "total": iv, "top_donors": top_in.to_dict(orient="records")})
             if ov:
                 sub_oos = frame[oos & (frame["book_type"] == t)]
                 top_oos = (
-                    sub_oos.groupby(contrib_col)["amount"].sum()
+                    sub_oos.groupby(donor_col)["amount"].sum()
                     .nlargest(5).reset_index()
-                    .rename(columns={contrib_col: "name", "amount": "total"})
+                    .rename(columns={donor_col: "name", "amount": "total"})
                 )
                 top_oos["total"] = top_oos["total"].round(2)
                 rows.append({"type": t + " (out of state)", "total": ov, "top_donors": top_oos.to_dict(orient="records")})
@@ -3635,24 +3654,30 @@ def aggregate_filers(
                 f"{_first_balance_year}-01"
             ] += float(first_year_begin)
 
+        # Donor tables use the same cash-only scope as the global leaderboard.
+        # Keep the broader contribution frame for account calculations above.
+        _filer_cash_donors = filer_contrib[
+            ~filer_contrib["sub_type"].isin(INKIND_SUBTYPES)
+        ] if not filer_contrib.empty else filer_contrib
+
         # Top donors (who gave TO this filer) — all-time and by year
-        if not filer_contrib.empty and contrib_col in filer_contrib.columns:
+        if not _filer_cash_donors.empty and donor_col in _filer_cash_donors.columns:
             td = (
-                filer_contrib.groupby(contrib_col)["amount"]
+                _filer_cash_donors.groupby(donor_col)["amount"]
                 .sum().nlargest(1000).reset_index()
-                .rename(columns={contrib_col: "name", "amount": "total"})
+                .rename(columns={donor_col: "name", "amount": "total"})
             )
             td["total"] = td["total"].round(2)
             top_donors_list = td.to_dict(orient="records")
 
             top_donors_by_year: dict[str, list] = {}
-            if "year" in filer_contrib.columns:
-                for yr in sorted(filer_contrib["year"].dropna().unique()):
-                    yr_df = filer_contrib[filer_contrib["year"] == yr]
+            if "year" in _filer_cash_donors.columns:
+                for yr in sorted(_filer_cash_donors["year"].dropna().unique()):
+                    yr_df = _filer_cash_donors[_filer_cash_donors["year"] == yr]
                     td_yr = (
-                        yr_df.groupby(contrib_col)["amount"]
+                        yr_df.groupby(donor_col)["amount"]
                         .sum().nlargest(1000).reset_index()
-                        .rename(columns={contrib_col: "name", "amount": "total"})
+                        .rename(columns={donor_col: "name", "amount": "total"})
                     )
                     td_yr["total"] = td_yr["total"].round(2)
                     top_donors_by_year[str(int(yr))] = td_yr.to_dict(orient="records")
@@ -3685,17 +3710,17 @@ def aggregate_filers(
             top_payees_by_year = {}
 
         # By contributor type — all-time (with top_donors), by year, and by month
-        by_type_list = _filer_type_rows(filer_contrib)
+        by_type_list = _filer_type_rows(_filer_cash_donors)
         by_type_by_year_filer: dict[str, list] = {}
         by_type_by_month_filer: dict[str, list] = {}
-        if not filer_contrib.empty:
-            if "year" in filer_contrib.columns:
-                for yr in sorted(filer_contrib["year"].dropna().unique()):
-                    yr_rows = _filer_type_rows(filer_contrib[filer_contrib["year"] == yr])
+        if not _filer_cash_donors.empty:
+            if "year" in _filer_cash_donors.columns:
+                for yr in sorted(_filer_cash_donors["year"].dropna().unique()):
+                    yr_rows = _filer_type_rows(_filer_cash_donors[_filer_cash_donors["year"] == yr])
                     by_type_by_year_filer[str(int(yr))] = yr_rows
-            if "month" in filer_contrib.columns:
-                for mo in sorted(filer_contrib["month"].dropna().unique()):
-                    by_type_by_month_filer[str(mo)] = _filer_type_rows(filer_contrib[filer_contrib["month"] == mo])
+            if "month" in _filer_cash_donors.columns:
+                for mo in sorted(_filer_cash_donors["month"].dropna().unique()):
+                    by_type_by_month_filer[str(mo)] = _filer_type_rows(_filer_cash_donors[_filer_cash_donors["month"] == mo])
 
         # Build ORESTAR account summary block for frontend display
         _acct_summary = {}

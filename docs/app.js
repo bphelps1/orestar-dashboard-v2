@@ -1303,9 +1303,10 @@ function fmtNum(n) {
   return Number(n).toLocaleString("en-US");
 }
 
-function showError(msg) {
+function showError(msg, scope = null) {
   const el = document.createElement("div");
   el.className = "error-msg";
+  if (scope) el.dataset.errorScope = scope;
   el.textContent = "⚠ " + msg;
   document.querySelector("main").prepend(el);
 }
@@ -1347,12 +1348,17 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
   });
 });
 
+let activeTabLoadVersion = 0;
 async function renderActiveTab() {
+  const tab = activeTab;
+  const version = ++activeTabLoadVersion;
+  document.querySelectorAll('.error-msg[data-error-scope="tab-load"]').forEach(el => el.remove());
   try {
-    await loaders[activeTab]();
+    await loaders[tab]();
   } catch (err) {
-    console.error(`Error loading ${activeTab}:`, err);
-    showError(`Could not load data for "${activeTab}" tab. ${err.message}`);
+    if (version !== activeTabLoadVersion || tab !== activeTab) return;
+    console.error(`Error loading ${tab}:`, err);
+    showError(`Could not load data for "${tab}" tab. ${err.message}`, "tab-load");
   }
 }
 
@@ -1553,11 +1559,22 @@ function hidePreviewPopover() {
 
 async function showPreviewPopover(slug, anchorEl) {
   hidePreviewPopover();
+  const filterKey = donorFilterKey();
+  const start = state.dateStart || null;
+  const end = state.dateEnd || null;
   const pop = document.createElement("div");
   pop.className = "donor-preview-popover";
   pop.innerHTML = '<div class="preview-loading">Loading…</div>';
   document.body.appendChild(pop);
   _previewPopover = pop;
+  const isCurrent = () => {
+    if (_previewPopover !== pop) return false;
+    if (filterKey !== donorFilterKey()) {
+      hidePreviewPopover();
+      return false;
+    }
+    return true;
+  };
 
   // Position near the anchor
   const rect = anchorEl.getBoundingClientRect();
@@ -1567,7 +1584,7 @@ async function showPreviewPopover(slug, anchorEl) {
 
   try {
     const profile = await loadFilerProfile(slug);
-    if (_previewPopover !== pop) return; // stale
+    if (!isCurrent()) return;
 
     // Always compute from timeline for consistency
     const hasDate = state.dateStart || state.dateEnd;
@@ -1578,11 +1595,12 @@ async function showPreviewPopover(slug, anchorEl) {
       hasDate ? activeCashThroughMonth() : null,
     );
 
-    // Top 5 donors (respect date filter)
-    const years = yearsInRange();
-    const donors = years
-      ? mergeByYear(profile.top_donors_by_year || {}, years).slice(0, 5)
-      : (profile.top_donors || []).slice(0, 5);
+    // Match the Donors tab's exact transaction dates for the top-five snippet.
+    const donorData = hasDate ? await DL.getDonors({
+      start, end, filerIds: donorFilerIds(profile, { slug }),
+    }) : { all_time: profile.top_donors };
+    if (!isCurrent()) return;
+    const donors = normalizeDonorRows(donorData.all_time).slice(0, 5);
 
     pop.innerHTML = `
       <div class="preview-header">${esc(profile.name)}</div>
@@ -1603,7 +1621,7 @@ async function showPreviewPopover(slug, anchorEl) {
       pop.style.left = Math.max(8, rect.left - popRect.width - 8) + "px";
     }
   } catch {
-    if (_previewPopover === pop) {
+    if (isCurrent()) {
       pop.innerHTML = '<div class="preview-loading">Could not load preview</div>';
     }
   }
@@ -1777,7 +1795,7 @@ function buildSortableTable(tableId, rows, columns, searchEl = null) {
 
   // Header sort listeners
   table.querySelectorAll("th.sortable").forEach(th => {
-    th.addEventListener("click", () => {
+    th.onclick = () => {
       const col = th.dataset.col;
       if (sortCol === col) {
         sortDir = sortDir === "asc" ? "desc" : "asc";
@@ -1790,13 +1808,10 @@ function buildSortableTable(tableId, rows, columns, searchEl = null) {
       });
       th.classList.add("sort-" + sortDir);
       render();
-    });
+    };
   });
 
-  if (searchEl && !searchEl._listenerAttached) {
-    searchEl.addEventListener("input", render);
-    searchEl._listenerAttached = true;
-  }
+  if (searchEl) searchEl.oninput = render;
 
   render();
 }
@@ -3028,14 +3043,95 @@ function renderOverviewMultiFiler(profiles) {
 
 // ── Donors ────────────────────────────────────────────────────────────────────
 
-async function loadDonors() {
-  if (!donorsData) {
-    donorsData = await DL.getBlob("top_donors");
-  }
-  await ensureDonorFilerMap();
+let donorsLoadVersion = 0;
 
-  const n = state.selectedFilers.length;
-  const years = yearsInRange();
+function donorFilterKey() {
+  return JSON.stringify([state.dateStart || null, state.dateEnd || null,
+    state.selectedFilers.map(f => [f.slug, f.filer_id ?? null])]);
+}
+
+function cleanDonorName(name) {
+  const clean = String(name || "").trim().replace(/\s+/g, " ");
+  return clean.toLowerCase() === "miscellaneous cash contributions $100 and under"
+    ? "Miscellaneous Cash Contributions $100 and under" : clean;
+}
+
+function donorRowKey(donor) {
+  const name = cleanDonorName(donor.name).toLowerCase();
+  // This is a pooled reporting category, never a distinct person or committee.
+  if (name === "miscellaneous cash contributions $100 and under") return `name:${name}`;
+  return donor.donor_id != null ? `id:${donor.donor_id}` : `name:${name}`;
+}
+
+// Normalize before grouping, sorting, or limiting legacy cache/profile rows.
+// Keep resolved people with the same display name separate.
+function normalizeDonorRows(rows) {
+  const merged = new Map();
+  (rows || []).forEach(donor => {
+    const name = cleanDonorName(donor.name);
+    if (!name) return;
+    const key = donorRowKey(donor);
+    if (!merged.has(key)) merged.set(key, { ...donor, name, cents: 0 });
+    merged.get(key).cents += Math.round((Number(donor.total) || 0) * 100);
+  });
+  return [...merged.values()].map(({ cents, ...donor }) => ({ ...donor, total: cents / 100 }))
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+}
+
+function normalizeDonorData(data) {
+  return {
+    all_time: normalizeDonorRows(data?.all_time),
+    by_year: Object.fromEntries(Object.entries(data?.by_year || {})
+      .map(([year, rows]) => [year, normalizeDonorRows(rows)])),
+  };
+}
+
+function donorFilerIds(profile, entry) {
+  const profileIds = (profile.filer_ids || [])
+    .filter(id => id !== null && id !== undefined && String(id).trim());
+  const fallback = entry.filer_id ?? filerIndex.find(f => f.slug === entry.slug)?.filer_id;
+  const ids = profileIds.length ? profileIds : [fallback];
+  const validIds = ids.filter(id => id !== null && id !== undefined && String(id).trim());
+  if (!validIds.length) throw new Error(`No filer ID available for ${profile.name || entry.slug}.`);
+  return [...new Set(validIds.map(id => String(id).trim()))];
+}
+
+async function loadDonors() {
+  const version = ++donorsLoadVersion;
+  const filterKey = donorFilterKey();
+  const isCurrent = () => version === donorsLoadVersion && filterKey === donorFilterKey();
+  const selected = state.selectedFilers.map(f => ({ ...f }));
+  const start = state.dateStart || null;
+  const end = state.dateEnd || null;
+  const hasDates = !!(start || end);
+  const n = selected.length;
+  const viewMode = n > 1 ? "summary" : donorsViewMode;
+  let profiles, donorSets;
+  // Hide prior results while their replacement loads, including when loading fails.
+  document.getElementById("donors-global-view").hidden = true;
+  document.getElementById("donors-multi-view").hidden = true;
+  try {
+    await ensureDonorFilerMap();
+    profiles = await Promise.all(selected.map(f => loadFilerProfile(f.slug)));
+    if (hasDates) {
+      donorSets = await Promise.all(n ? profiles.map((profile, i) => DL.getDonors({
+        start, end, filerIds: donorFilerIds(profile, selected[i]),
+      })) : [DL.getDonors({ start, end })]);
+    } else if (!n) {
+      if (!donorsData) donorsData = normalizeDonorData(await DL.getBlob("top_donors"));
+      donorSets = [donorsData];
+    } else {
+      donorSets = profiles.map(profile => ({
+        all_time: profile.top_donors,
+        by_year: profile.top_donors_by_year,
+      }));
+    }
+  } catch (error) {
+    if (!isCurrent()) return;
+    throw error;
+  }
+  if (!isCurrent()) return;
+  donorSets = donorSets.map(normalizeDonorData);
 
   // Attach toggle button listeners once (works for both global and single-filer views)
   const toggleBtns = document.querySelectorAll("#donors-view-toggle .toggle-btn");
@@ -3057,56 +3153,36 @@ async function loadDonors() {
     document.getElementById("donors-view-toggle").hidden      = false;
 
     // Hide year selector when date range is active (date range takes precedence)
-    document.getElementById("donor-year-group").hidden = donorsViewMode === "by-year" || !!years;
+    document.getElementById("donor-year-group").hidden = viewMode === "by-year" || hasDates;
 
     const sel = document.getElementById("donor-year");
-    if (!sel._listenerAttached) {
+    if (!hasDates && !sel._listenerAttached) {
       Object.keys(donorsData.by_year || {}).sort().reverse().forEach(yr => {
         sel.insertAdjacentHTML("beforeend", `<option value="${yr}">${yr}</option>`);
       });
       sel.addEventListener("change", () => {
-        if (donorsViewMode === "summary") renderDonors(sel.value);
+        if (donorsViewMode === "summary" && !state.dateStart && !state.dateEnd) renderDonors(sel.value);
       });
       sel._listenerAttached = true;
     }
 
-    renderGlobalDonorsView(years);
+    renderGlobalDonorsView(donorSets[0], hasDates, viewMode);
 
   } else if (n === 1) {
-    const profile = await loadFilerProfile(state.selectedFilers[0].slug);
     document.getElementById("donors-global-view").hidden      = false;
     document.getElementById("donors-multi-view").hidden       = true;
     document.getElementById("donors-view-toggle").hidden      = false;
     document.getElementById("donor-year-group").hidden        = true;
 
-    const isByYear = donorsViewMode === "by-year";
+    const isByYear = viewMode === "by-year";
     document.getElementById("donors-chart-box").hidden      = isByYear;
     document.getElementById("donors-summary-table").hidden  = isByYear;
     document.getElementById("donors-by-year-view").hidden   = !isByYear;
 
-    // Date-filtered or all-time donor list
-    const allTimeDonors = years
-      ? mergeByYear(profile.top_donors_by_year || {}, years).slice(0, 50)
-      : (profile.top_donors || []);
-
     if (isByYear) {
-      const relevantYears = years || Object.keys(profile.top_donors_by_year || {});
-      const filteredByYear = {};
-      relevantYears.forEach(yr => {
-        if ((profile.top_donors_by_year || {})[yr]) filteredByYear[yr] = profile.top_donors_by_year[yr];
-      });
-      renderDonorsByYear(filteredByYear, allTimeDonors);
+      renderDonorsByYear(donorSets[0].by_year, donorSets[0].all_time, hasDates);
     } else {
-      const top20 = allTimeDonors.slice(0, 20);
-      makeBarChart("chart-top-donors",
-        top20.map(r => r.name), top20.map(r => r.total),
-        "Total Contributions", "#3182ce");
-      const searchEl = document.getElementById("donors-summary-search");
-      if (searchEl) searchEl.value = "";
-      buildSortableTable("table-donors", allTimeDonors, [
-        { key: "name",  label: "Donor", linkDonor: true },
-        { key: "total", label: "Total ($)", fmt: fmt$, cls: "num" },
-      ], searchEl);
+      renderDonorSummary(donorSets[0].all_time);
     }
 
   } else {
@@ -3116,26 +3192,15 @@ async function loadDonors() {
     document.getElementById("donors-global-view").hidden      = true;
     document.getElementById("donors-multi-view").hidden       = false;
 
-    const profiles = await Promise.all(state.selectedFilers.map(f => loadFilerProfile(f.slug)));
     const filerNames = profiles.map(p => p.name);
 
-    // Build a lookup map per filer: donor name (lowercased) → total
-    const filerDonorMaps = profiles.map(profile => {
-      const donors = years
-        ? mergeByYear(profile.top_donors_by_year || {}, years)
-        : (profile.top_donors || []);
-      return new Map(donors.map(d => [d.name.toLowerCase(), { name: d.name, total: d.total }]));
-    });
-
-    // Use global top-1000 donors as the row universe so the table reaches 1000 rows
-    const globalDonors = years
-      ? mergeByYear(donorsData.by_year || {}, years).slice(0, 1000)
-      : (donorsData.all_time || []).slice(0, 1000);
-
-    const pivotRows = globalDonors.map(d => {
+    const filerDonorMaps = donorSets.map(data => new Map(data.all_time.map(d => [donorRowKey(d), d])));
+    // Include donors to any selected committee, even outside the statewide top 1000.
+    const selectedDonors = normalizeDonorRows(donorSets.flatMap(data => data.all_time));
+    const pivotRows = selectedDonors.map(d => {
       const byFiler = {};
       filerDonorMaps.forEach((map, i) => {
-        const hit = map.get(d.name.toLowerCase());
+        const hit = map.get(donorRowKey(d));
         if (hit) byFiler[filerNames[i]] = hit.total;
       });
       const total = Object.values(byFiler).reduce((s, v) => s + v, 0);
@@ -3194,63 +3259,48 @@ async function loadDonors() {
       </tr>`).join("");
     }
 
-    if (multiSearchEl && !multiSearchEl._listenerAttached) {
-      multiSearchEl.addEventListener("input", renderMultiPivot);
-      multiSearchEl._listenerAttached = true;
-    }
+    if (multiSearchEl) multiSearchEl.oninput = renderMultiPivot;
 
     buildMultiThead();
     renderMultiPivot();
   }
 }
 
-function renderGlobalDonorsView(years) {
-  const isByYear = donorsViewMode === "by-year";
-  document.getElementById("donor-year-group").hidden    = isByYear || !!years;
+function renderGlobalDonorsView(data, hasDates, viewMode = donorsViewMode) {
+  const isByYear = viewMode === "by-year";
+  document.getElementById("donor-year-group").hidden    = isByYear || hasDates;
   document.getElementById("donors-chart-box").hidden    = isByYear;
   document.getElementById("donors-summary-table").hidden = isByYear;
   document.getElementById("donors-by-year-view").hidden = !isByYear;
 
   if (isByYear) {
-    const relevantYears = years || Object.keys(donorsData.by_year || {});
-    const filteredByYear = {};
-    relevantYears.forEach(yr => {
-      if (donorsData.by_year[yr]) filteredByYear[yr] = donorsData.by_year[yr];
-    });
-    renderDonorsByYear(filteredByYear, mergeByYear(donorsData.by_year, years));
-  } else if (years) {
-    const rows  = mergeByYear(donorsData.by_year, years);
-    const top20 = rows.slice(0, 20);
-    makeBarChart("chart-top-donors",
-      top20.map(r => r.name), top20.map(r => r.total),
-      "Total Contributions", "#3182ce");
-    buildSortableTable("table-donors", rows, [
-      { key: "name",  label: "Donor", linkDonor: true },
-      { key: "total", label: "Total ($)", fmt: fmt$, cls: "num" },
-    ]);
+    renderDonorsByYear(data.by_year, data.all_time, hasDates);
+  } else if (hasDates) {
+    renderDonorSummary(data.all_time);
   } else {
     const sel = document.getElementById("donor-year");
     renderDonors(sel.value || "all");
   }
 }
 
-function renderDonorsByYear(byYear, allTime) {
+function renderDonorsByYear(byYear, allTime, hasDates = false) {
   const years = Object.keys(byYear || {}).sort();
 
   // Build map: donor name → { [year]: total }
   const donorYearMap = new Map();
   years.forEach(yr => {
-    (byYear[yr] || []).forEach(d => {
-      if (!donorYearMap.has(d.name)) donorYearMap.set(d.name, {});
-      donorYearMap.get(d.name)[yr] = d.total;
+    normalizeDonorRows(byYear[yr]).forEach(d => {
+      const key = donorRowKey(d);
+      if (!donorYearMap.has(key)) donorYearMap.set(key, {});
+      donorYearMap.get(key)[yr] = d.total;
     });
   });
 
   // Rows from allTime (sorted by total desc, capped at 1000); fill in per-year from map
-  const allRows = (allTime || []).slice(0, 1000).map(d => ({
+  const allRows = normalizeDonorRows(allTime).slice(0, 1000).map(d => ({
     name: d.name,
     total: d.total,
-    ...Object.fromEntries(years.map(yr => [yr, donorYearMap.get(d.name)?.[yr] ?? null])),
+    ...Object.fromEntries(years.map(yr => [yr, donorYearMap.get(donorRowKey(d))?.[yr] ?? null])),
   }));
 
   let sortCol = "total";
@@ -3264,7 +3314,7 @@ function renderDonorsByYear(byYear, allTime) {
     <th>#</th>
     <th class="sortable" data-col="name">Donor</th>
     ${years.map(yr => `<th class="num sortable" data-col="${yr}">${yr}</th>`).join("")}
-    <th class="num sortable" data-col="total">All Time</th>
+    <th class="num sortable" data-col="total">${hasDates ? "Selected Period" : "All Time"}</th>
   </tr>`;
 
   function getByYearRows() {
@@ -3305,10 +3355,7 @@ function renderDonorsByYear(byYear, allTime) {
   });
   thead.querySelector(`th[data-col="total"]`).classList.add("sort-desc");
 
-  if (searchEl && !searchEl._listenerAttached) {
-    searchEl.addEventListener("input", renderByYearTable);
-    searchEl._listenerAttached = true;
-  }
+  if (searchEl) searchEl.oninput = renderByYearTable;
 
   renderByYearTable();
 
@@ -3320,10 +3367,13 @@ function renderDonorsByYear(byYear, allTime) {
 }
 
 function renderDonors(year) {
-  const rows = (year === "all"
+  renderDonorSummary(year === "all"
     ? donorsData.all_time
-    : (donorsData.by_year[year] || [])).slice(0, 1000);
+    : donorsData.by_year[year]);
+}
 
+function renderDonorSummary(donors) {
+  const rows = normalizeDonorRows(donors).slice(0, 1000);
   const top20 = rows.slice(0, 20);
   makeBarChart(
     "chart-top-donors",

@@ -15,6 +15,8 @@
 "use strict";
 
 const DL = (() => {
+  const donorRequests = new Map();
+
   /** Fetch a whole-dashboard aggregate blob by key from dashboard_cache. */
   async function getBlob(key) {
     const sb = await getSupabase();
@@ -39,5 +41,30 @@ const DL = (() => {
     return data.detail;
   }
 
-  return { getBlob, getFilerDetail };
+  /** Rank donors using inclusive transaction dates, rather than calendar totals. */
+  function getDonors({ start = null, end = null, filerIds = null } = {}) {
+    const ids = filerIds === null ? null : [...new Set(filerIds
+      .filter(id => id !== null && id !== undefined && String(id).trim())
+      .map(id => String(id).trim()))].sort();
+    if (ids && !ids.length) {
+      return Promise.reject(new Error("A selected committee has no filer ID."));
+    }
+    const params = { p_start: start || null, p_end: end || null, p_filer_ids: ids };
+    const key = JSON.stringify(params);
+    if (!donorRequests.has(key)) {
+      const request = (async () => {
+        const sb = await getSupabase();
+        const { data, error } = await sb.rpc("donor_leaderboard", params);
+        if (error) throw new Error(`Failed to load donors: ${error.message}`);
+        return data;
+      })().catch(error => {
+        donorRequests.delete(key);
+        throw error;
+      });
+      donorRequests.set(key, request);
+    }
+    return donorRequests.get(key);
+  }
+
+  return { getBlob, getFilerDetail, getDonors };
 })();

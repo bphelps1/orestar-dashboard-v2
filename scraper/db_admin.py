@@ -28,6 +28,8 @@ MIGRATIONS = [
     "011_donor_search_and_inkind.sql",
     "012_election_results.sql",
     "013_candidate_committee_links.sql",
+    "014_donor_leaderboard.sql",
+    "015_donor_date_index.sql",
 ]
 
 
@@ -39,6 +41,20 @@ def apply():
         path = MIGRATIONS_DIR / name
         sql = path.read_text()
         print(f"→ applying {name} …", flush=True)
+        if name == "015_donor_date_index.sql":
+            # Build without blocking transaction imports. A cancelled concurrent
+            # build can leave an invalid index which IF NOT EXISTS would skip.
+            # Replace the earlier predicate that included forgiven in-kind rows.
+            cur.execute("""select i.indisvalid, pg_get_expr(i.indpred, i.indrelid)
+                           from pg_index i
+                           where i.indexrelid = to_regclass('public.idx_txn_cash_donor_dates')""")
+            row = cur.fetchone()
+            if row and (not row[0] or any(subtype not in (row[1] or "") for subtype in (
+                "In-Kind/Forgiven Account Payable",
+                "In-Kind/Forgiven Personal Expenditures",
+            ))):
+                cur.execute("drop index concurrently public.idx_txn_cash_donor_dates")
+            sql = sql.replace("create index if not exists", "create index concurrently if not exists")
         cur.execute(sql)
         print(f"  ✓ {name}")
     conn.close()
