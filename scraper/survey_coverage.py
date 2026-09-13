@@ -43,6 +43,7 @@ import sys
 import time
 from datetime import date, datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -237,6 +238,62 @@ def _return_to_form(page, deadline: float | None = None) -> None:
         )
 
 
+def _count_failure_page_diagnostics(url: str, body: str) -> dict:
+    """Return only safe page metadata and recognized text signals, not a verdict.
+
+    Body text can omit a script-only challenge. False signals therefore do not
+    establish a healthy page, and none of these flags changes count semantics.
+    """
+    host, path = "unknown", "unknown"
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname or ""
+        if (parsed.scheme not in {"http", "https"} or not parsed.netloc
+                or not re.fullmatch(r"[A-Za-z0-9.-]+", hostname)):
+            raise ValueError("Invalid HTTP authority")
+        # Validate the authority before using any path: malformed URLs can put
+        # credentials where a parser expects a relative path.
+        _ = parsed.port
+        segments = []
+        for raw_segment in parsed.path.split("/"):
+            segment = unquote(raw_segment)
+            # Strip literal and nested percent-encoded delimiters within each
+            # original segment, before encoded slashes can expose session data
+            # as a new segment. Ambiguous residual encodings are redacted below.
+            segment = re.split(
+                r"[;?#]|%(?:25)*(?:3b|3f|23)", segment, maxsplit=1, flags=re.I,
+            )[0]
+            segments.append(segment)
+        safe_path = "/".join(segments)
+        host = hostname.lower()
+        if re.fullmatch(r"[A-Za-z0-9._~/-]*", safe_path):
+            path = safe_path
+    except (TypeError, ValueError):
+        pass
+    lowered = " ".join(body.lower().split())
+    return {
+        "url_host": host,
+        "url_path": path,
+        "body_length": len(body),
+        "challenge_signal": any(marker in lowered for marker in (
+            "checking your browser", "verify you are human",
+            "please enable javascript to view the page content",
+            "the requested url was rejected", "request rejected",
+        )),
+        "maintenance_signal": any(marker in lowered for marker in (
+            "scheduled maintenance", "undergoing maintenance",
+            "down for maintenance", "system maintenance",
+        )),
+        "server_error_signal": any(marker in lowered for marker in (
+            "internal server error", "service unavailable", "bad gateway",
+            "gateway timeout",
+        )) or bool(re.search(
+            r"\b(?:http(?: status)?|status code)\s*[:=-]?\s*(?:500|502|503|504)\b",
+            lowered,
+        )),
+    }
+
+
 def orestar_count(
     page,
     filer_id: str,
@@ -370,7 +427,8 @@ def _orestar_count(
     # The flat PAGE_RENDER_WAIT this replaced was hiding the race by sleeping
     # through it. Waiting for the content itself is the fix; it also returns as
     # soon as the page is ready rather than always paying the full delay.
-    poll_deadline = time.monotonic() + 20
+    poll_started = time.monotonic()
+    poll_deadline = poll_started + 20
     if deadline is not None:
         poll_deadline = min(poll_deadline, deadline)
     text = ""
@@ -387,6 +445,18 @@ def _orestar_count(
         page.wait_for_timeout(500)
     if deadline is not None and time.monotonic() >= deadline:
         raise SearchDeadlineExceeded("ORESTAR search deadline reached")
+    # Reuse the final poll body. Diagnostics must never issue another search or
+    # DOM read, extend a deadline, or turn an unreadable count into zero.
+    poll_elapsed = time.monotonic() - poll_started
+    diagnostic = _count_failure_page_diagnostics(page.url, text)
+    diagnostic.update({
+        "filer_id": str(filer_id),
+        "window": {"tran_type": tran_type, "start": start.isoformat(),
+                   "end": end.isoformat(), "amt_from": amt_from,
+                   "amt_to": amt_to, "payee_prefix": payee_prefix},
+        "poll_elapsed_seconds": round(poll_elapsed, 3),
+    })
+    log.warning("COUNT_READ_EXHAUSTED %s", json.dumps(diagnostic, sort_keys=True))
     return None
 
 
