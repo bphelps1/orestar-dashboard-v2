@@ -233,6 +233,58 @@ def _unique_source_scope(source: dict, ids: list[str]) -> dict | None:
     return row
 
 
+def _explicit_recovery_record(
+    ids: list[str], source: dict, yearly_cache: Any,
+    snapshot_id: str, planned_epoch: float,
+) -> dict | None:
+    """Plan deliberate verification from a genuine pair, regardless of report category.
+
+    Closure controls automatic discrepancy actionability, not the integrity of
+    an explicitly requested summary/exact verification. No closure field is
+    required from the compact source or inferred from report-row absence.
+    """
+    current = _unique_source_scope(source, ids)
+    if current is None or not isinstance(yearly_cache, dict):
+        return None
+    try:
+        comparison = paired_comparison(
+            ids, yearly_cache, current_transaction_id=snapshot_id,
+            current_scope_digest=current["app_scope_transaction_digest"],
+        )
+        if (comparison.get("status") != "paired"
+                or comparison.get("filer_ids") != ids
+                or comparison.get("app_transaction_snapshot_id") != snapshot_id
+                or comparison.get("scope_digest_matches_capture") is not True
+                or comparison.get("orestar_data_changed_since_capture")
+                or not exact_evidence_identifier_is_valid(
+                    comparison.get("scope_capture_id"))):
+            return None
+        for fid in ids:
+            capture = yearly_cache[fid]["comparison_capture"]
+            captured_at = _epoch(capture.get("captured_at"))
+            if not 0 < _iso_epoch(capture.get("app_snapshot_created_at")) <= captured_at <= planned_epoch:
+                return None
+            # paired_comparison normalizes legacy null values. Recovery needs
+            # actual captured values, never an inferred zero cash or count.
+            for key in ("app_cash_on_hand", "orestar_ending_cash_balance", "app_tran_count"):
+                value = capture.get(key)
+                if isinstance(value, bool) or not math.isfinite(float(value)):
+                    return None
+            count = float(capture["app_tran_count"])
+            if count < 0 or not count.is_integer():
+                return None
+        return _scope_record({
+            "name": current.get("name", ""), "filer_ids": ids,
+            "comparison_status": "paired",
+            "delta": comparison["delta_at_capture"],
+            "tran_count": comparison["app_tran_count"],
+            "scrape_ts": comparison["captured_at"],
+            "transaction_snapshot_id": comparison["app_transaction_snapshot_id"],
+        }, source, allow_zero=True)
+    except (AtomicEvidenceError, TypeError, ValueError, OverflowError, KeyError, AttributeError):
+        return None
+
+
 def _latest_attempt(scope: dict, entries: dict[str, dict]) -> str:
     values = []
     for filer_id in scope["filer_ids"]:
@@ -271,7 +323,8 @@ def build_plan(
     """Plan actionable or paired-refresh scopes against the frozen local ledger.
 
     A paired refresh may have zero frozen delta and already-certified evidence:
-    its current app treatment still needs a genuine capture to settle.
+    its current app treatment still needs a genuine capture to settle. Explicit
+    requests can also recover paired scopes absent from discrepancy rows.
     """
     if not 1 <= max_scopes <= 100:
         raise AtomicEvidenceError("max_scopes must be between 1 and 100")
@@ -365,6 +418,26 @@ def build_plan(
     if requested and any(not filer_id.isdigit() for filer_id in requested):
         raise AtomicEvidenceError("Requested filer IDs must be numeric")
     if requested:
+        # A failed exact collector can leave a genuine zero-delta capture that
+        # disappears from discrepancy rows. Only an explicit request may recover
+        # that scope, using current canonical ownership and the saved real pair.
+        represented = {fid for scope in scopes for fid in scope["filer_ids"]}
+        missing_requested = requested - represented
+        if missing_requested:
+            recovery_epoch = _iso_epoch(planned_at or utc_timestamp())
+            for current in source["scopes"].values():
+                if not isinstance(current, dict) or not isinstance(current.get("filer_ids"), list):
+                    continue
+                ids = sorted({str(fid).strip() for fid in current["filer_ids"]})
+                if (not missing_requested.intersection(ids)
+                        or any(not fid.isdigit() for fid in ids)):
+                    continue
+                record = _explicit_recovery_record(
+                    ids, source, yearly_cache, snapshot_id, recovery_epoch,
+                )
+                if record is not None:
+                    scopes.append(record)
+                    missing_requested.difference_update(ids)
         scopes = [
             scope for scope in scopes
             if requested & set(scope["filer_ids"])

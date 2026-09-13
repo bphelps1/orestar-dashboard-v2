@@ -636,3 +636,148 @@ def test_assessment_refuses_provenance_drift(monkeypatch, tmp_path, fault):
         scope.pop("app_year_transaction_digests")
     with pytest.raises(ABE.AtomicEvidenceError):
         ABE.assess_stabilization(ready, source, yearly, tmp_path)
+
+
+@pytest.mark.parametrize("ids", [["10"], ["10", "20"]])
+def test_explicit_recovery_admits_matching_pair_absent_from_report(
+    monkeypatch, tmp_path, ids,
+):
+    ready, source, yearly = _stabilization_window(monkeypatch, tmp_path, ids)
+    original = copy.deepcopy((source, yearly))
+    # A failed exact attempt can leave no discrepancy or refresh row at all.
+    failed = [{"filer_id": ids[0], "last_failure": "incomplete_collection",
+               "last_attempt_at": "2026-09-12T12:01:30Z"}]
+    result = ABE.build_plan(_payload([]), failed, source, tmp_path,
+                            requested_ids=[ids[-1]], max_scopes=1,
+                            yearly_cache=yearly,
+                            planned_at="2026-09-12T12:02:00Z")
+    assert result["selected_scope_count"] == 1
+    assert result["remaining_scope_count"] == 1
+    assert result["deferred_scope_count"] == 0
+    [scope] = result["scopes"]
+    assert scope["filer_ids"] == ids
+    assert scope["delta"] == 0
+    assert scope["prior_captured_at"] == ready["scopes"][0]["captured_at"]
+    assert scope["prior_transaction_snapshot_id"] == SNAPSHOT
+    assert (source, yearly) == original
+    automatic = ABE.build_plan(_payload([]), failed, source, tmp_path,
+                               max_scopes=1, yearly_cache=yearly,
+                               planned_at="2026-09-12T12:02:00Z")
+    assert automatic["candidate_scope_count"] == 0
+    assert automatic["selected_scope_count"] == 0
+
+
+@pytest.mark.parametrize("fault", [
+    "no-cache", "missing-member", "partial-membership", "overlap",
+    "source-version", "source-calculation", "source-snapshot", "source-digest",
+    "capture-version", "capture-calculation", "capture-snapshot",
+    "capture-membership", "capture-id-missing", "capture-id-mixed",
+    "capture-time-future", "capture-time-nan", "capture-source-time-missing",
+    "capture-source-time-future", "capture-cash-missing", "capture-count-fraction",
+    "new-attempt",
+])
+def test_explicit_recovery_refuses_unproven_scope(monkeypatch, tmp_path, fault):
+    ready, source, yearly = _stabilization_window(monkeypatch, tmp_path)
+    payload = _payload([])
+    current = source["scopes"]["10|20"]
+    capture = yearly["20"]["comparison_capture"]
+    if fault == "no-cache":
+        yearly = None
+    elif fault == "missing-member":
+        yearly.pop("20")
+    elif fault == "partial-membership":
+        current["filer_ids"] = ["10"]
+    elif fault == "overlap":
+        source["scopes"]["20|30"] = {"filer_ids": ["20", "30"]}
+    elif fault == "source-version":
+        source["version"] = 0
+    elif fault == "source-calculation":
+        source["calculation_version"] = "old"
+    elif fault == "source-snapshot":
+        source["transaction_snapshot_id"] = "sha256:" + "b" * 64
+    elif fault == "source-digest":
+        current["app_scope_transaction_digest"] = "sha256:changed"
+    elif fault == "capture-version":
+        capture["version"] = 0
+    elif fault == "capture-calculation":
+        capture["calculation_version"] = "old"
+    elif fault == "capture-snapshot":
+        for entry in yearly.values():
+            entry["comparison_capture"]["app_transaction_snapshot_id"] = "sha256:" + "b" * 64
+    elif fault == "capture-membership":
+        capture["app_scope_filer_ids"] = ["20"]
+    elif fault == "capture-id-missing":
+        for entry in yearly.values():
+            entry["comparison_capture"].pop("scope_capture_id")
+    elif fault == "capture-id-mixed":
+        capture["scope_capture_id"] = "different"
+    elif fault == "capture-time-future":
+        capture["captured_at"] += 3600
+    elif fault == "capture-time-nan":
+        capture["captured_at"] = float("nan")
+    elif fault == "capture-source-time-missing":
+        capture.pop("app_snapshot_created_at")
+    elif fault == "capture-source-time-future":
+        capture["app_snapshot_created_at"] = "2026-09-12T12:01:00Z"
+    elif fault == "capture-cash-missing":
+        for entry in yearly.values():
+            entry["comparison_capture"].pop("app_cash_on_hand")
+    elif fault == "capture-count-fraction":
+        capture["app_tran_count"] = 2.5
+    elif fault == "new-attempt":
+        yearly["20"]["comparison_capture_attempt"] = {
+            "captured_at": ready["scopes"][0]["captured_at"] + 1}
+    with pytest.raises(ABE.AtomicEvidenceError):
+        ABE.build_plan(payload, [], source, tmp_path, max_scopes=1,
+                       requested_ids=["10"], yearly_cache=yearly,
+                       planned_at="2026-09-12T12:02:00Z")
+
+
+def test_explicit_recovery_enforces_scope_limit_after_expansion(monkeypatch, tmp_path):
+    _ready, source, yearly = _stabilization_window(monkeypatch, tmp_path, ["10", "20"])
+    _other, other_source, other_yearly = _stabilization_window(monkeypatch, tmp_path, ["30"])
+    source["scopes"].update(other_source["scopes"])
+    yearly.update(other_yearly)
+    with pytest.raises(ABE.AtomicEvidenceError, match="more scopes than max_scopes"):
+        ABE.build_plan(_payload([]), [], source, tmp_path, max_scopes=1,
+                       requested_ids=["20", "30"], yearly_cache=yearly,
+                       planned_at="2026-09-12T12:02:00Z")
+    result = ABE.build_plan(_payload([]), [], source, tmp_path, max_scopes=2,
+                            requested_ids=["20", "30"], yearly_cache=yearly,
+                            planned_at="2026-09-12T12:02:00Z")
+    assert result["selected_scope_count"] == 2
+    assert {tuple(row["filer_ids"]) for row in result["scopes"]} == {("10", "20"), ("30",)}
+
+
+@pytest.mark.parametrize("delta", [0, 50])
+def test_explicit_closed_scope_verification_uses_production_source_without_changing_automatic_selection(
+    monkeypatch, tmp_path, delta,
+):
+    _ready, source, yearly = _stabilization_window(monkeypatch, tmp_path, ["10"])
+    # Production's compact source omits closure metadata. A balanced closed
+    # scope is also absent from all report lists; a nonzero closed difference
+    # appears only among non-actionable rows. Both remain deliberate explicit
+    # verification targets, while neither becomes an automatic candidate.
+    closed_detail = {**source["scopes"]["10"], "closed": True}
+    source = BS.build_source(SNAPSHOT, [closed_detail], created_at=source["created_at"])
+    assert "closed" not in source["scopes"]["10"]
+    yearly["10"]["comparison_capture"]["orestar_ending_cash_balance"] = 100 - delta
+    yearly["10"]["years"]["2026"]["ending_cash_balance"] = 100 - delta
+    payload = _payload([])
+    if delta:
+        payload["non_actionable_rows"] = [{
+            "filer_ids": ["10"], "closed": True, "delta": delta,
+            "reason": "closed_trailing_summary",
+        }]
+    original = copy.deepcopy((source, yearly, payload))
+    kwargs = dict(balance_payload=payload, diff_rows=[], source=source,
+                  transaction_dir=tmp_path, max_scopes=1, yearly_cache=yearly,
+                  planned_at="2026-09-12T12:02:00Z")
+    explicit = ABE.build_plan(**kwargs, requested_ids=["10"])
+    assert explicit["selected_scope_count"] == 1
+    assert explicit["scopes"][0]["filer_ids"] == ["10"]
+    assert explicit["scopes"][0]["delta"] == delta
+    automatic = ABE.build_plan(**kwargs)
+    assert automatic["candidate_scope_count"] == 0
+    assert automatic["selected_scope_count"] == 0
+    assert (source, yearly, payload) == original

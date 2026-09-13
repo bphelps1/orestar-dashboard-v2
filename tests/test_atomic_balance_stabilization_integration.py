@@ -29,6 +29,7 @@ class EvidenceWindow:
         self.transactions = self.data / "transactions"
         self.transactions.mkdir(parents=True)
         self.members = members
+        self.official_cash = {}
         self.rows = [self.row("1", "101", 100), self.row("1", "102", 50)]
         if "2" in members:
             self.rows.append(self.row("2", "201", 100))
@@ -96,8 +97,9 @@ class EvidenceWindow:
         self.tick()
         capture_id = BS.scope_key(self.members) + "@" + self.now.isoformat()
         for fid in self.members:
-            summary = {"beginning_balance": 0.0, "ending_cash_balance": 100.0,
-                       "contributions": 100.0, "expenditures": 0.0,
+            official_cash = self.official_cash.get(fid, 100.0)
+            summary = {"beginning_balance": 0.0, "ending_cash_balance": official_cash,
+                       "contributions": official_cash, "expenditures": 0.0,
                        "other_receipts": 0.0, "other_disbursements": 0.0,
                        "balance_adjustments": 0.0}
             capture = BS.make_summary_capture(fid, 2026, summary,
@@ -282,3 +284,31 @@ def test_empty_plan_recovery_exposes_scope_that_requires_new_evidence_window(tmp
     _, assessment = window.atomic_pass(recovery_plan)
     assert assessment["stable_scope_count"] == 1
     assert window.report["refresh_needed"] == 0
+
+
+@pytest.mark.parametrize("members", [["1"], ["1", "2"]])
+def test_explicit_recovery_verifies_matching_scope_missing_exact_evidence(tmp_path, monkeypatch, members):
+    window = EvidenceWindow(tmp_path, monkeypatch, members)
+    window.official_cash = {"1": 150.0, "2": 100.0}
+    expected = sum(window.official_cash[fid] for fid in members)
+    assert window.aggregate() == expected
+    window.capture()
+    assert window.aggregate() == expected
+    assert window.report["flagged"] == 0
+    assert window.report["refresh_needed"] == 0
+    assert not window.observations
+    assert window.plan()["selected_scope_count"] == 0
+
+    window.tick()
+    explicit = ABE.build_plan(window.report, window.observations, window.source,
+                              window.transactions, max_scopes=1,
+                              requested_ids=["1"], planned_at=window.now.isoformat(),
+                              yearly_cache=window.yearly)
+    assert explicit["selected_scope_count"] == 1
+    assert explicit["scopes"][0]["filer_ids"] == members
+    assert explicit["scopes"][0]["delta"] == 0
+    cash, assessment = window.atomic_pass(explicit, absent=False)
+    assert cash == expected
+    assert assessment["stable_scope_count"] == 1
+    assert assessment["unsettled_scope_count"] == 0
+    assert window.report["flagged"] == window.report["refresh_needed"] == 0

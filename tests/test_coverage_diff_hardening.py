@@ -11,7 +11,7 @@ import gzip
 import io
 import json
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -30,7 +30,7 @@ def _ids(targets: list[dict]) -> list[str]:
 
 def _assert_attempt_is_today(value: str) -> None:
     """Accept either a date or an ISO datetime for diagnostic timestamps."""
-    assert datetime.fromisoformat(value).date() == date.today()
+    assert datetime.fromisoformat(value).date() == datetime.now(timezone.utc).date()
 
 
 def test_split_can_divide_a_two_day_window() -> None:
