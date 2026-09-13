@@ -1319,7 +1319,9 @@ def aggregate(df: pd.DataFrame) -> None:
     # All transactions for a given filer ID adopt the committee name from the
     # most recent transaction with that ID, so renames are reflected everywhere.
     # Uses the raw "filer" column (always populated) to build the map, since
-    # backfilled rows may have blank filer_canonical values.
+    # backfilled rows may have blank filer_canonical values. Trim boundary
+    # whitespace after choosing each ID's latest name, so historical raw names
+    # cannot split a canonical scope. Preserve substantive spelling and case.
     if "filer id" in df.columns:
         _fid = df["filer id"].fillna("").astype(str).str.strip()
         _has_id = _fid.ne("")
@@ -1329,6 +1331,7 @@ def aggregate(df: pd.DataFrame) -> None:
             .sort_values("filed_date")
             .groupby("_fid_tmp")["filer"]
             .last()
+            .str.strip()
             .to_dict()
         )
         _mapped = _fid.map(_id_map)
