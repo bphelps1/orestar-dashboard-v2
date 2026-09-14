@@ -65,6 +65,7 @@ def _replan(ready: dict, requested_ids: set[str]) -> dict:
         "transaction_snapshot_id": ready["transaction_snapshot_id"],
         "planned_at": ABE.utc_timestamp(),
         "selected_scope_count": len(scopes),
+        "reserved_exact_passes": ready.get("reserved_exact_passes", MAX_TOTAL_PASSES),
         "scopes": scopes,
     }
 
@@ -80,7 +81,7 @@ def run_stabilization(
     command_runner(argv) returns an exit code; cache_reader(key) reads the fresh
     dashboard cache. Both are injectable for offline ordering/failure tests.
     """
-    if isinstance(max_passes, bool) or not 1 <= max_passes <= MAX_TOTAL_PASSES:
+    if type(max_passes) is not int or not 1 <= max_passes <= MAX_TOTAL_PASSES:
         raise ABE.AtomicEvidenceError("max_passes must be between 1 and 3 total passes")
     root = Path(root)
     work_dir = Path(work_dir) if work_dir else root / ".atomic-stabilization"
@@ -90,6 +91,13 @@ def run_stabilization(
     diff_path = root / "data" / "coverage_diff.json"
     combined = copy.deepcopy(ready)
     original_scopes = _scope_map(combined)
+    # Legacy ready plans predate configurable reservation and imply the
+    # original three-pass contract. Dropping metadata cannot authorize one.
+    reserved = combined.get("reserved_exact_passes", MAX_TOTAL_PASSES)
+    if type(reserved) is not int or reserved not in (1, 3):
+        raise ABE.AtomicEvidenceError("Invalid reserved_exact_passes in ready plan")
+    if max_passes != reserved:
+        raise ABE.AtomicEvidenceError("max_passes must match the ready plan's reserved_exact_passes")
     snapshot = ABE._strict_snapshot_id(combined.get("transaction_snapshot_id"))
     try:
         search_budget = SearchBudget.from_environment()

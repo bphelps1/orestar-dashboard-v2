@@ -785,7 +785,7 @@ def test_explicit_closed_scope_verification_uses_production_source_without_chang
 
 
 def _budget_plan(monkeypatch, tmp_path, *, requested=(), excluded=(), costs=None,
-                 budget=9, hints=None):
+                 budget=9, hints=None, max_passes=3, single_pass_filer_ids=()):
     monkeypatch.setattr(ABE, "_current_snapshot", lambda *_a, **_k: SNAPSHOT)
     monkeypatch.setattr(ABE, "certify_exact_scope_rows",
                         lambda *_a, **_k: ({}, set(), None))
@@ -802,6 +802,7 @@ def _budget_plan(monkeypatch, tmp_path, *, requested=(), excluded=(), costs=None
         tmp_path, max_scopes=12, planned_at="2026-09-14T12:00:00Z",
         requested_ids=requested, excluded_ids=excluded,
         max_searches=budget, search_cost_hints=hints,
+        max_passes=max_passes, single_pass_filer_ids=single_pass_filer_ids,
     )
 
 
@@ -810,7 +811,79 @@ def test_search_budget_reserves_three_passes_for_every_physical_member(monkeypat
                         costs={"10": 1, "20": 1, "30": 1, "40": 1})
     assert [s["filer_ids"] for s in plan["scopes"]] == [["10", "20"], ["30"]]
     assert plan["estimated_total_searches"] == 9
+    assert plan["reserved_exact_passes"] == 3
     assert plan["budget_deferred_scopes"] == [{"filer_ids": ["40"], "reason": "search_budget"}]
+
+
+def test_one_pass_admits_measured_24_search_scope_that_three_passes_cannot_fit(monkeypatch, tmp_path):
+    args = dict(requested=["30"], costs={"30": 24}, budget=45, single_pass_filer_ids=["30"])
+    plan = _budget_plan(monkeypatch, tmp_path, max_passes=1, **args)
+    assert plan["reserved_exact_passes"] == 1
+    assert plan["estimated_total_searches"] == 24
+    assert plan["scopes"][0]["filer_ids"] == ["30"]
+    assert plan["scopes"][0]["estimated_exact_searches"] == 24
+    with pytest.raises(ABE.AtomicEvidenceError, match="cannot fit three exact passes"):
+        _budget_plan(monkeypatch, tmp_path, max_passes=3, **args)
+
+
+@pytest.mark.parametrize("limit", [0, 2, 4, True, 1.0, "1"])
+def test_invalid_planning_pass_count_fails_before_snapshot_read(monkeypatch, tmp_path, limit):
+    monkeypatch.setattr(ABE, "_current_snapshot", lambda *_a: pytest.fail("read before validation"))
+    with pytest.raises(ABE.AtomicEvidenceError, match="must be 1 or 3"):
+        ABE.build_plan({}, [], {}, tmp_path, max_scopes=1, max_passes=limit)
+
+
+def test_one_pass_requires_explicit_ids_and_one_expanded_canonical_scope(monkeypatch, tmp_path):
+    with pytest.raises(ABE.AtomicEvidenceError, match="requires explicit filer IDs"):
+        _budget_plan(monkeypatch, tmp_path, max_passes=1, single_pass_filer_ids=["30"])
+    with pytest.raises(ABE.AtomicEvidenceError, match="exactly one canonical scope"):
+        _budget_plan(monkeypatch, tmp_path, max_passes=1, requested=["30", "40"],
+                     single_pass_filer_ids=["30", "40"], costs={"30": 1, "40": 1})
+
+
+def test_one_pass_requires_budget_before_snapshot_read(monkeypatch, tmp_path):
+    monkeypatch.setattr(ABE, "_current_snapshot", lambda *_a: pytest.fail("read before validation"))
+    with pytest.raises(ABE.AtomicEvidenceError, match="requires a configured search budget"):
+        ABE.build_plan({}, [], {}, tmp_path, max_scopes=1, max_passes=1,
+                       requested_ids=["191"], single_pass_filer_ids=["191"])
+
+
+def test_one_pass_alias_cannot_omit_nonallowlisted_scope_member(monkeypatch, tmp_path):
+    with pytest.raises(ABE.AtomicEvidenceError, match="Every expanded member"):
+        _budget_plan(monkeypatch, tmp_path, max_passes=1, requested=["10"],
+                     single_pass_filer_ids=["10"], costs={"10": 1, "20": 2})
+    plan = _budget_plan(monkeypatch, tmp_path, max_passes=1, requested=["10"],
+                        single_pass_filer_ids=["10", "20"], costs={"10": 1, "20": 2})
+    assert plan["scopes"][0]["filer_ids"] == ["10", "20"]
+    assert plan["estimated_total_searches"] == 3
+    with pytest.raises(ABE.AtomicEvidenceError, match="contains deferred filers"):
+        _budget_plan(monkeypatch, tmp_path, max_passes=1, requested=["10"],
+                     single_pass_filer_ids=["10", "20"], excluded=["20"])
+
+
+@pytest.mark.parametrize("cost", [None, 46])
+def test_one_pass_preserves_unknown_cost_and_hard_search_limit_refusal(monkeypatch, tmp_path, cost):
+    with pytest.raises(ABE.AtomicEvidenceError, match="cannot fit one exact pass"):
+        _budget_plan(monkeypatch, tmp_path, max_passes=1, requested=["30"], budget=45,
+                     single_pass_filer_ids=["30"], costs={"30": cost})
+
+
+def test_one_pass_cli_forwards_validated_mode_and_allowlist(monkeypatch, tmp_path):
+    seen = {}
+    def plan(*_args, **kwargs):
+        seen.update(kwargs)
+        return {"transaction_snapshot_id": SNAPSHOT, "selected_scope_count": 1,
+                "remaining_scope_count": 1}
+    monkeypatch.setattr(ABE, "build_plan", plan)
+    monkeypatch.setattr(ABE.supabase_sync, "require_dashboard_cache", lambda _key: {})
+    monkeypatch.setattr(ABE, "_read_json", lambda *_args: {})
+    assert ABE.main(["plan", "--max-passes", "1", "--filer-ids", "10",
+                     "--single-pass-filer-ids", "10", "20", "--max-searches", "45",
+                     "--output", str(tmp_path / "plan.json")]) == 0
+    assert seen["max_passes"] == 1
+    assert seen["requested_ids"] == ["10"]
+    assert seen["single_pass_filer_ids"] == ["10", "20"]
+    assert seen["max_searches"] == 45
 
 
 def test_deferred_member_excludes_entire_scope_across_day_reset(monkeypatch, tmp_path):

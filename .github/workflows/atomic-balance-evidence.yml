@@ -19,6 +19,14 @@ on:
         required: false
         default: ""
         type: string
+      max_passes:
+        description: "Total capture/exact passes: 1 requires an explicit policy-authorized scope"
+        required: false
+        default: "3"
+        type: choice
+        options:
+          - "3"
+          - "1"
       max_scopes:
         description: "Maximum complete canonical scopes in this batch"
         required: false
@@ -87,8 +95,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EFFORT_ID: ${{ inputs.effort_id }}
+          MAX_PASSES: ${{ inputs.max_passes || '3' }}
+          REQUESTED_FILER_IDS: ${{ inputs.filer_ids }}
         run: |
-          python scripts/atomic_evidence_effort.py admit --effort-id "$EFFORT_ID"
+          case "$REQUESTED_FILER_IDS" in
+            *$'\n'*|*$'\r'*) echo "::error::Filer IDs must be one space-separated line."; exit 1 ;;
+          esac
+          read -r -a REQUESTED <<< "$REQUESTED_FILER_IDS"
+          for ID in "${REQUESTED[@]}"; do
+            if [[ ! "$ID" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Filer IDs must be positive numeric strings."
+              exit 1
+            fi
+          done
+          python scripts/atomic_evidence_effort.py admit --effort-id "$EFFORT_ID" \
+            --max-passes "$MAX_PASSES" --filer-ids "${REQUESTED[@]}"
 
       - name: Initialize shared exact search budget
         run: |
@@ -108,6 +129,8 @@ jobs:
           POLICY_MAX_SCOPES: ${{ steps.effort.outputs.max_scopes }}
           MAX_SEARCHES: ${{ steps.effort.outputs.max_searches }}
           EXCLUDED_FILER_IDS: ${{ steps.effort.outputs.excluded_filer_ids }}
+          MAX_PASSES: ${{ steps.effort.outputs.max_passes }}
+          SINGLE_PASS_FILER_IDS: ${{ steps.effort.outputs.single_pass_filer_ids }}
         run: |
           case "$MAX_SCOPES" in
             ''|*[!0-9]*) echo "::error::Invalid scope limit."; exit 1 ;;
@@ -116,7 +139,9 @@ jobs:
             MAX_SCOPES="$POLICY_MAX_SCOPES"
           fi
           read -r -a EXCLUDED <<< "$EXCLUDED_FILER_IDS"
+          read -r -a SINGLE_PASS <<< "$SINGLE_PASS_FILER_IDS"
           ARGS=(plan --max-scopes "$MAX_SCOPES" --max-searches "$MAX_SEARCHES"
+            --max-passes "$MAX_PASSES" --single-pass-filer-ids "${SINGLE_PASS[@]}"
             --search-cost-hints .github/atomic-search-costs.json
             --exclude-filer-ids "${EXCLUDED[@]}" --output "$PLAN_PATH")
           if [ -n "$REQUESTED_FILER_IDS" ]; then
@@ -212,7 +237,7 @@ jobs:
           steps.plan.outputs.filer_ids != ''
         run: |
           xvfb-run --auto-servernum python scraper/stabilize_atomic_balances.py \
-            --plan "$READY_PATH" --max-passes 3
+            --plan "$READY_PATH" --max-passes "${{ steps.effort.outputs.max_passes }}"
 
       # If a prior run published both profiles but died during process.py, its
       # exact rows may make this plan empty. Re-running must still be able to
@@ -231,10 +256,14 @@ jobs:
           MAX_SCOPES: ${{ steps.effort.outputs.max_scopes }}
           MAX_SEARCHES: ${{ steps.effort.outputs.max_searches }}
           EXCLUDED_FILER_IDS: ${{ steps.effort.outputs.excluded_filer_ids }}
+          MAX_PASSES: ${{ steps.effort.outputs.max_passes }}
+          SINGLE_PASS_FILER_IDS: ${{ steps.effort.outputs.single_pass_filer_ids }}
         run: |
           read -r -a EXCLUDED <<< "$EXCLUDED_FILER_IDS"
+          read -r -a SINGLE_PASS <<< "$SINGLE_PASS_FILER_IDS"
           python scraper/atomic_balance_evidence.py plan \
             --max-scopes "$MAX_SCOPES" --max-searches "$MAX_SEARCHES" \
+            --max-passes "$MAX_PASSES" --single-pass-filer-ids "${SINGLE_PASS[@]}" \
             --search-cost-hints .github/atomic-search-costs.json \
             --exclude-filer-ids "${EXCLUDED[@]}" --output /tmp/atomic-recovery-plan.json
           SELECTED=$(jq -r '.selected_scope_count' /tmp/atomic-recovery-plan.json)
@@ -277,6 +306,7 @@ jobs:
       - name: Continue bounded evidence chain
         if: >-
           success() && !cancelled() && inputs.filer_ids == '' &&
+          steps.effort.outputs.max_passes == '3' &&
           ((steps.verify.outputs.certified_scopes != '' &&
           steps.verify.outputs.certified_scopes != '0') ||
           (steps.recovery_plan.outputs.selected_scopes != '' &&
@@ -313,5 +343,6 @@ jobs:
             --ref "$GITHUB_REF_NAME" \
             -f effort_id="$EFFORT_ID" \
             -f filer_ids= \
+            -f max_passes=3 \
             -f max_scopes="$MAX_SCOPES" \
             -f chain_index="$((CHAIN + 1))"

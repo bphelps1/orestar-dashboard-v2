@@ -9,8 +9,8 @@ must remain available for accounting.
 
 The September 14 recovery effort permits at most 12 attempts, 12 complete
 canonical scopes per batch and 45 exact search submissions per workflow. Filers
-33 and 191 are explicitly deferred. A request containing another member of an
-excluded canonical scope is rejected before capture. This does not change the
+33 and 191 are deferred in the default three-pass mode. A request containing
+another member of an excluded canonical scope is rejected before capture. This does not change the
 ordinary scheduled coverage workflow.
 
 Every atomic dispatch must provide the configured `effort_id`. Admission runs
@@ -27,7 +27,7 @@ ambiguous timeouts, and is inherited by stabilization subprocesses. It cannot
 be reinitialized or increased by a later pass. Reaching the ceiling stops the
 collector without automatic refusal retries or partial-scope certification.
 
-Planning reserves estimated search cost for all three supported genuine
+Default planning reserves estimated search cost for three genuine
 capture/exact passes, counting every physical filer in a canonical scope.
 Unknown or oversized work is deferred. Successful collections record their
 actual search cost for later planning. A separately reviewed legacy hint in
@@ -44,6 +44,33 @@ balance comparison trustworthy; it does not prove cash agreement. Missing-ID
 remediation requires its own complete-scope verification and fresh aggregation
 and atomic proof after any transaction change. Preserve source exceptions and
 annual gaps until authoritative evidence supports their treatment.
+
+## Isolated single-pass recovery
+
+The reviewed policy allows filer 191 alone to request `max_passes=1` with an
+explicit `filer_ids=191`. This makes one real summary capture followed by one
+complete exact collection, publication, aggregation and stabilization
+assessment. The policy keeps 33 and 191 excluded from ordinary three-pass
+batches; this exception removes only the authorized IDs for the admitted
+attempt. Filer 33 remains deferred. Missing or empty `single_pass_filer_ids`
+policy configuration permits no exception.
+
+Admission requires the same enabled effort ID and complete GitHub attempt
+history. The planner independently requires exactly one complete canonical
+scope, every expanded physical member in the policy allowlist, and a supported
+search estimate that fits the unchanged 45-search ceiling. An alias cannot
+admit an unapproved scope member. The reviewed 191 scheduling hint is usable
+only while it matches the saved observation's identity; it grants no evidence.
+The plan records `reserved_exact_passes`, which the stabilization runner must
+match. Normal handoffs continue to reserve three passes.
+
+One pass can succeed only when final assessment finds the whole original scope
+stable. If cash, transaction count or fresh annual treatment remains unsettled,
+the run fails after preserving truthful published evidence. It cannot recapture
+or automatically dispatch another batch. A separately selected later attempt
+must obtain fresh complete evidence and consumes another attempt in the same
+12-attempt effort. Failed runs, cancellations and reruns all remain charged;
+selecting this mode or resetting `chain_index` does not renew the budget.
 
 ## Project a completed transaction recovery
 

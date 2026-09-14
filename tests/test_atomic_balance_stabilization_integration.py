@@ -23,14 +23,14 @@ import stabilize_atomic_balances as SAB
 
 
 class EvidenceWindow:
-    def __init__(self, tmp_path, monkeypatch, members):
+    def __init__(self, tmp_path, monkeypatch, members, *, surplus_amount=50):
         self.data = tmp_path / "data"
         self.aggregated = self.data / "aggregated"
         self.transactions = self.data / "transactions"
         self.transactions.mkdir(parents=True)
         self.members = members
         self.official_cash = {}
-        self.rows = [self.row("1", "101", 100), self.row("1", "102", 50)]
+        self.rows = [self.row("1", "101", 100), self.row("1", "102", surplus_amount)]
         if "2" in members:
             self.rows.append(self.row("2", "201", 100))
         self.df = pd.DataFrame(self.rows)
@@ -261,6 +261,59 @@ def test_runner_recaptures_real_cash_then_publishes_stable_result(tmp_path, monk
     assert window.report["refresh_needed"] == 0
     assert window.report["flagged"] == 0
     assert BS.transaction_snapshot_id(window.transactions) == window.snapshot
+
+
+@pytest.mark.parametrize("change, reason", [
+    ("token-only", None), ("cash", "cash_changed"),
+    ("count", "transaction_count_changed"),
+    ("annual", "fresh_annual_treatment_changed"),
+])
+def test_isolated_one_pass_assesses_real_published_window_without_recapture(
+    tmp_path, monkeypatch, change, reason,
+):
+    # A zero-value returned transaction changes annual treatment without cash.
+    window = EvidenceWindow(tmp_path, monkeypatch, ["1"],
+                            surplus_amount=0 if change == "annual" else 50)
+    window.aggregate()
+    for _ in range(2):
+        window.capture()
+        window.exact()
+        assert window.aggregate() == 100
+    prior_capture_id = window.yearly["1"]["comparison_capture"]["scope_capture_id"]
+    window.tick()
+    plan = ABE.build_plan(
+        window.report, window.observations, window.source, window.transactions,
+        max_scopes=1, requested_ids=["1"], planned_at=window.now.isoformat(),
+        yearly_cache=window.yearly, max_passes=1, single_pass_filer_ids=["1"],
+        max_searches=45,
+    )
+    assert plan["reserved_exact_passes"] == plan["estimated_total_searches"] == 1
+    cash, _ = window.atomic_pass(plan, absent=change not in ("cash", "annual"))
+    assert cash == (150 if change == "cash" else 100)
+    assert window.ready["reserved_exact_passes"] == 1
+    assert window.ready["scopes"][0]["scope_capture_id"] != prior_capture_id
+    if change == "count":
+        # Count is a separately checked source invariant even if cash is stable.
+        window.source["scopes"]["1"]["tran_count"] += 1
+    original = json.dumps([window.ready, window.yearly, window.observations], sort_keys=True)
+
+    def no_more_commands(argv):
+        pytest.fail(f"One-pass assessment attempted another command: {argv}")
+
+    kwargs = dict(root=tmp_path, max_passes=1, command_runner=no_more_commands,
+                  cache_reader=lambda _key: window.source)
+    if reason is None:
+        result = SAB.run_stabilization(window.ready, **kwargs)
+        assert result["stable_scope_count"] == 1
+        assert window.report["refresh_needed"] == 0
+    else:
+        with pytest.raises(ABE.AtomicEvidenceError, match="did not stabilize after 1"):
+            SAB.run_stabilization(window.ready, **kwargs)
+        result = json.loads((tmp_path / ".atomic-stabilization" / "assessment.json").read_text())
+        assert result["unsettled_scope_count"] == 1
+        assert reason in result["scopes"][0]["reasons"]
+    assert result["passes_completed"] == result["max_passes"] == 1
+    assert json.dumps([window.ready, window.yearly, window.observations], sort_keys=True) == original
 
 
 def test_empty_plan_recovery_exposes_scope_that_requires_new_evidence_window(tmp_path, monkeypatch):

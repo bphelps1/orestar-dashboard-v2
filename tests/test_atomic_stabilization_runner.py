@@ -113,8 +113,8 @@ class Harness:
         return {"certified_scope_count": 0 if self.uncertified else len(ready["scopes"]),
                 "blocked_filer_count": 1 if self.uncertified else 0}
 
-    def run(self, **kwargs):
-        return RUN.run_stabilization(_ready(), root=self.root, command_runner=self.command,
+    def run(self, *, ready=None, **kwargs):
+        return RUN.run_stabilization(_ready() if ready is None else ready, root=self.root, command_runner=self.command,
                                     cache_reader=self.cache, **kwargs)
 
 
@@ -154,7 +154,7 @@ def test_bound_includes_first_workflow_pass_and_runs_only_two_more(monkeypatch, 
     assert stored["unsettled_scope_count"] == 1
 
 
-@pytest.mark.parametrize("limit", [0, 4, 99, True])
+@pytest.mark.parametrize("limit", [0, 4, 99, True, 1.0])
 def test_invalid_bound_never_runs_collectors(monkeypatch, tmp_path, limit):
     h = Harness(monkeypatch, tmp_path, [])
     with pytest.raises(RUN.ABE.AtomicEvidenceError, match="between 1 and 3"):
@@ -164,9 +164,41 @@ def test_invalid_bound_never_runs_collectors(monkeypatch, tmp_path, limit):
 
 def test_one_total_pass_means_assessment_only(monkeypatch, tmp_path):
     h = Harness(monkeypatch, tmp_path, [["10"]])
+    ready = {**_ready(), "reserved_exact_passes": 1}
     with pytest.raises(RUN.ABE.AtomicEvidenceError, match="after 1 total"):
-        h.run(max_passes=1)
+        h.run(ready=ready, max_passes=1)
     assert h.events == ["assess"]
+
+
+def test_one_pass_stable_assessment_runs_no_collectors(monkeypatch, tmp_path):
+    h = Harness(monkeypatch, tmp_path, [[]])
+    result = h.run(ready={**_ready(), "reserved_exact_passes": 1}, max_passes=1)
+    assert result["passes_completed"] == result["max_passes"] == 1
+    assert h.events == ["assess"]
+    assert h.commands == []
+
+
+@pytest.mark.parametrize("reservation,chosen", [(1, 3), (3, 1), (None, 3), (True, 1), (2, 2), (1.0, 1)])
+def test_reservation_disagreement_or_corruption_stops_before_assessment(monkeypatch, tmp_path, reservation, chosen):
+    h = Harness(monkeypatch, tmp_path, [])
+    with pytest.raises(RUN.ABE.AtomicEvidenceError, match="reserved_exact_passes"):
+        h.run(ready={**_ready(), "reserved_exact_passes": reservation}, max_passes=chosen)
+    assert h.events == []
+    assert h.commands == []
+
+
+def test_legacy_ready_plan_defaults_to_three_and_cannot_authorize_one(monkeypatch, tmp_path):
+    h = Harness(monkeypatch, tmp_path, [[]])
+    assert h.run()["max_passes"] == 3
+    refused = Harness(monkeypatch, tmp_path, [])
+    with pytest.raises(RUN.ABE.AtomicEvidenceError, match="reserved_exact_passes"):
+        refused.run(max_passes=1)
+    assert refused.events == []
+
+
+def test_replan_preserves_original_reserved_pass_count():
+    ready = {**_ready(), "reserved_exact_passes": 3}
+    assert RUN._replan(ready, {"10"})["reserved_exact_passes"] == 3
 
 
 def _budget_rows(root, counts):
@@ -320,7 +352,7 @@ def test_workflow_stabilizes_only_after_complete_first_pass_and_blocks_chaining(
     assert "steps.diff.outcome == 'success'" in block
     assert "steps.verify.outputs.certified_scopes == steps.plan.outputs.selected_scopes" in block
     assert "xvfb-run --auto-servernum python scraper/stabilize_atomic_balances.py" in block
-    assert '--plan "$READY_PATH" --max-passes 3' in block
+    assert '--plan "$READY_PATH" --max-passes "${{ steps.effort.outputs.max_passes }}"' in block
     terminal = text.split("      - name: Enforce truthful terminal status", 1)[1]
     assert 'if [ "${{ steps.stabilize.outcome }}" != "success" ]; then' in terminal
     assert "success() && !cancelled()" in terminal
