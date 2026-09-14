@@ -349,6 +349,8 @@ def build_plan(
     excluded_ids: Iterable[str] = (),
     max_searches: int | None = None,
     search_cost_hints: dict | None = None,
+    max_passes: int = RESERVED_EXACT_PASSES,
+    single_pass_filer_ids: Iterable[str] = (),
 ) -> dict:
     """Plan actionable or paired-refresh scopes against the frozen local ledger.
 
@@ -358,16 +360,28 @@ def build_plan(
     """
     if not 1 <= max_scopes <= 100:
         raise AtomicEvidenceError("max_scopes must be between 1 and 100")
+    if type(max_passes) is not int or max_passes not in (1, 3):
+        raise AtomicEvidenceError("max_passes must be 1 or 3 total passes")
     if max_searches is not None and (
         isinstance(max_searches, bool) or not isinstance(max_searches, int)
         or not 1 <= max_searches <= 45
     ):
         raise AtomicEvidenceError("max_searches must be between 1 and 45")
+    if max_passes == 1 and max_searches is None:
+        raise AtomicEvidenceError("One-pass planning requires a configured search budget")
     excluded = {str(value).strip() for value in excluded_ids}
     if any(not fid.isdigit() for fid in excluded):
         raise AtomicEvidenceError("Excluded filer IDs must be numeric")
     if search_cost_hints is not None and not isinstance(search_cost_hints, dict):
         raise AtomicEvidenceError("Search cost hints must be an object")
+    single_pass_allowed = {str(value).strip() for value in single_pass_filer_ids}
+    if any(not fid.isdigit() for fid in single_pass_allowed):
+        raise AtomicEvidenceError("Single-pass filer IDs must be numeric")
+    requested = {str(value).strip() for value in requested_ids if str(value).strip()}
+    if requested and any(not filer_id.isdigit() for filer_id in requested):
+        raise AtomicEvidenceError("Requested filer IDs must be numeric")
+    if max_passes == 1 and not requested:
+        raise AtomicEvidenceError("One-pass planning requires explicit filer IDs")
     snapshot_id = _current_snapshot(transaction_dir)
     if (
         not isinstance(source, dict)
@@ -454,9 +468,6 @@ def build_plan(
         if not (set(scope["filer_ids"]) & ambiguous)
     ]
 
-    requested = {str(value).strip() for value in requested_ids if str(value).strip()}
-    if requested and any(not filer_id.isdigit() for filer_id in requested):
-        raise AtomicEvidenceError("Requested filer IDs must be numeric")
     if requested:
         # A failed exact collector can leave a genuine zero-delta capture that
         # disappears from discrepancy rows. Only an explicit request may recover
@@ -498,6 +509,12 @@ def build_plan(
             "Requested canonical scope contains deferred filers: "
             + " ".join(sorted({fid for s in excluded_scopes for fid in s["filer_ids"]})))
     scopes = [s for s in scopes if not excluded.intersection(s["filer_ids"])]
+    if max_passes == 1:
+        if len(scopes) != 1:
+            raise AtomicEvidenceError("One-pass planning requires exactly one canonical scope")
+        if not set(scopes[0]["filer_ids"]).issubset(single_pass_allowed):
+            raise AtomicEvidenceError(
+                "Every expanded member of the one-pass scope must be allowed")
 
     requirements = {
         filer_id: scope["requirement"]
@@ -560,19 +577,20 @@ def build_plan(
     for scope in unresolved:
         if max_searches is not None:
             cost = _scope_search_cost(scope, entries, search_cost_hints or {})
-            if cost is None or reserved_searches + RESERVED_EXACT_PASSES * cost > max_searches:
+            if cost is None or reserved_searches + max_passes * cost > max_searches:
                 reason = "unknown_search_cost" if cost is None else "search_budget"
                 budget_deferred.append({"filer_ids": scope["filer_ids"], "reason": reason})
                 if requested:
                     raise AtomicEvidenceError(
-                        "Requested complete scopes cannot fit three exact passes: "
+                        "Requested complete scopes cannot fit "
+                        + ("one exact pass: " if max_passes == 1 else "three exact passes: ")
                         + " ".join(scope["filer_ids"]) + f" ({reason})")
                 continue
         if len(selected) >= max_scopes:
             continue
         if max_searches is not None:
             scope["estimated_exact_searches"] = cost
-            reserved_searches += RESERVED_EXACT_PASSES * cost
+            reserved_searches += max_passes * cost
         selected.append(scope)
     return {
         "version": PLAN_VERSION,
@@ -585,7 +603,7 @@ def build_plan(
         "excluded_scope_count": len(excluded_scopes),
         "excluded_filer_ids": sorted(excluded),
         "search_budget_limit": max_searches,
-        "reserved_exact_passes": RESERVED_EXACT_PASSES,
+        "reserved_exact_passes": max_passes,
         "estimated_total_searches": reserved_searches,
         "budget_deferred_scopes": budget_deferred,
         "selected_scope_count": len(selected),
@@ -947,6 +965,8 @@ def main(argv: list[str] | None = None) -> int:
     plan_parser.add_argument("--filer-ids", nargs="*", default=[])
     plan_parser.add_argument("--exclude-filer-ids", nargs="*", default=[])
     plan_parser.add_argument("--max-searches", type=int)
+    plan_parser.add_argument("--max-passes", type=int, choices=(1, 3), default=RESERVED_EXACT_PASSES)
+    plan_parser.add_argument("--single-pass-filer-ids", nargs="*", default=[])
     plan_parser.add_argument("--search-cost-hints", type=Path)
     plan_parser.add_argument("--output", type=Path, required=True)
 
@@ -979,6 +999,8 @@ def main(argv: list[str] | None = None) -> int:
                 excluded_ids=args.exclude_filer_ids,
                 max_searches=args.max_searches,
                 search_cost_hints=hints,
+                max_passes=args.max_passes,
+                single_pass_filer_ids=args.single_pass_filer_ids,
             )
             _write_json(args.output, value)
             print(

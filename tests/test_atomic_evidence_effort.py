@@ -23,7 +23,7 @@ def policy(**updates):
     return {
         "version": 1, "effort_id": EFFORT, "enabled": True,
         "max_attempts": 12, "max_scopes": 12, "max_searches": 45,
-        "excluded_filer_ids": ["33", "191"], **updates,
+        "excluded_filer_ids": ["33", "191"], "single_pass_filer_ids": ["191"], **updates,
     }
 
 
@@ -57,11 +57,13 @@ class GitHub:
         return copy.deepcopy(self.current)
 
 
-def admit(rows, *, current=None, config=None, effort_id=EFFORT, attempt=None, api=None):
+def admit(rows, *, current=None, config=None, effort_id=EFFORT, attempt=None, api=None,
+          max_passes=3, requested_filer_ids=()):
     current = current or rows[-1]
     return E.admit(config or policy(), effort_id=effort_id, repository=REPOSITORY,
                    run_id=current["id"], run_attempt=current["run_attempt"] if attempt is None else attempt,
-                   api_reader=api or GitHub(rows, current))
+                   api_reader=api or GitHub(rows, current), max_passes=max_passes,
+                   requested_filer_ids=requested_filer_ids)
 
 
 def test_last_allowed_attempt_counts_failures_cancellations_and_reruns():
@@ -307,3 +309,111 @@ def test_duplicate_json_api_fields_fail_closed(monkeypatch):
 def test_current_environment_ids_cannot_be_coerced(value):
     with pytest.raises(E.EffortError):
         E._environment_int(value, "GITHUB_RUN_ATTEMPT")
+
+
+def test_optional_single_pass_policy_absence_preserves_old_default_and_denies_exception():
+    config = policy()
+    del config["single_pass_filer_ids"]
+    assert E.validate_policy(config)["single_pass_filer_ids"] == []
+    assert admit([run(1)], config=config)["excluded_filer_ids"] == ["33", "191"]
+    with pytest.raises(E.EffortError, match="explicit policy-authorized"):
+        admit([run(1)], config=config, max_passes=1, requested_filer_ids=["191"])
+
+
+@pytest.mark.parametrize("value", [None, "191", 191, True, [191], [True], ["0191"],
+                                    ["191\n33"], ["191", "191"], [""], ("191",)])
+def test_single_pass_policy_requires_unambiguous_numeric_list(value):
+    with pytest.raises(E.EffortError):
+        E.validate_policy(policy(single_pass_filer_ids=value))
+
+
+def test_authorized_isolated_attempt_does_not_mutate_policy_or_later_handoff():
+    config = policy()
+    original = copy.deepcopy(config)
+    rows = [run(1, attempt=8, conclusion="failure"),
+            run(2, attempt=3, conclusion="cancelled"), run(3)]
+    isolated = admit(rows, config=config, max_passes=1, requested_filer_ids=["191"])
+    assert isolated["max_passes"] == 1
+    assert isolated["single_pass_filer_ids"] == ["191"]
+    assert isolated["excluded_filer_ids"] == ["33"]
+    assert isolated["attempts_used"] == 12 and isolated["attempts_remaining"] == 0
+    assert isolated["max_searches"] == 45
+    assert config == original
+    ordinary = admit(rows, config=config)
+    assert ordinary["max_passes"] == 3
+    assert ordinary["single_pass_filer_ids"] == []
+    assert ordinary["excluded_filer_ids"] == ["33", "191"]
+    next_request = E.handoff(config, repository=REPOSITORY, api_reader=GitHub(rows))
+    assert next_request["can_dispatch"] is False
+    assert next_request["max_passes"] == 3
+    assert next_request["excluded_filer_ids"] == ["33", "191"]
+
+
+@pytest.mark.parametrize("requested", [[], ["33"], ["191", "33"], ["alias-of-191"],
+                                        ["192"], [191], ["0191"], ["191", "191"]])
+def test_single_pass_bad_or_unapproved_input_fails_before_remote_read(requested):
+    def unexpected(_endpoint):
+        pytest.fail("Unauthorized mode must fail before GitHub or collector access")
+    with pytest.raises(E.EffortError):
+        admit([run(1)], max_passes=1, requested_filer_ids=requested, api=unexpected)
+
+
+@pytest.mark.parametrize("value", [True, False, "1", "3", 1.0, 2, 0, 4, None])
+def test_mode_cannot_be_coerced_or_expand_supported_pass_count(value):
+    with pytest.raises(E.EffortError, match="exactly 1 or 3"):
+        admit([run(1)], max_passes=value, requested_filer_ids=["191"])
+
+
+def test_single_pass_failure_and_rerun_cannot_reset_existing_effort_budget():
+    rows = [run(1, attempt=11, conclusion="failure"),
+            run(2, attempt=2, status="in_progress", conclusion=None, chain_index=1)]
+    with pytest.raises(E.EffortError, match="13 attempts exceed"):
+        admit(rows, max_passes=1, requested_filer_ids=["191"])
+
+
+@pytest.mark.parametrize("case", ["disabled", "effort", "history"])
+def test_single_pass_authorization_does_not_bypass_other_admission_guards(case):
+    kwargs = {"max_passes": 1, "requested_filer_ids": ["191"]}
+    if case == "disabled":
+        kwargs["config"] = policy(enabled=False)
+    elif case == "effort":
+        kwargs["effort_id"] = "new-counter"
+    else:
+        kwargs["api"] = lambda _endpoint: None
+    with pytest.raises(E.EffortError):
+        admit([run(1)], **kwargs)
+
+
+def test_cli_single_pass_outputs_match_admitted_mode(tmp_path, monkeypatch, capsys):
+    config = tmp_path / "policy.json"
+    config.write_text(json.dumps(policy()))
+    output = tmp_path / "outputs"
+    monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
+    monkeypatch.setenv("GITHUB_RUN_ID", "7")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    api = GitHub([run(7, status="in_progress", conclusion=None)])
+    monkeypatch.setattr(E.subprocess, "run", lambda argv, **_k: SimpleNamespace(
+        returncode=0, stdout=json.dumps(api(argv[4]))))
+    assert E.main(["admit", "--policy", str(config), "--effort-id", EFFORT,
+                   "--max-passes", "1", "--filer-ids", "191"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["max_passes"] == 1 and result["single_pass_filer_ids"] == ["191"]
+    assert "max_passes=1\n" in output.read_text()
+    assert "single_pass_filer_ids=191\n" in output.read_text()
+    assert "excluded_filer_ids=33\n" in output.read_text()
+
+
+@pytest.mark.parametrize("command", ["handoff", "policy"])
+def test_cli_handoff_cannot_implicitly_request_single_pass(command, monkeypatch, capsys):
+    monkeypatch.setattr(E.subprocess, "run", lambda *_a, **_k: pytest.fail("No API read expected"))
+    assert E.main([command, "--max-passes", "1", "--filer-ids", "191"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "Only admission" in captured.err
+
+
+@pytest.mark.parametrize("value", ["01", "1.0", "true", "2", "4"])
+def test_cli_pass_choice_rejects_nonliteral_mode(value):
+    with pytest.raises(SystemExit) as caught:
+        E.main(["admit", "--max-passes", value])
+    assert caught.value.code == 2

@@ -22,6 +22,7 @@ WORKFLOW = "atomic-balance-evidence.yml"
 WORKFLOW_PATH = ".github/workflows/" + WORKFLOW
 TITLE_PREFIX = "Atomic balance evidence: "
 PAGE_SIZE = 100
+OPTIONAL_POLICY_FIELDS = {"single_pass_filer_ids"}
 POLICY_FIELDS = {
     "version", "effort_id", "enabled", "max_attempts", "max_scopes",
     "max_searches", "excluded_filer_ids",
@@ -53,8 +54,18 @@ def _environment_int(value: str | None, label: str) -> int:
     return int(value)
 
 
+def _filer_ids(value: Any, label: str) -> list[str]:
+    if (not isinstance(value, (list, tuple))
+            or any(not isinstance(fid, str) or not re.fullmatch(r"[1-9][0-9]*", fid)
+                   for fid in value)
+            or len(set(value)) != len(value)):
+        raise EffortError(f"{label} must contain unique positive numeric strings")
+    return list(value)
+
+
 def validate_policy(value: Any, effort_id: str | None = None, *, allow_disabled: bool = False) -> dict:
-    if not isinstance(value, dict) or set(value) != POLICY_FIELDS:
+    if (not isinstance(value, dict) or not POLICY_FIELDS <= set(value)
+            or set(value) - POLICY_FIELDS - OPTIONAL_POLICY_FIELDS):
         raise EffortError("Malformed atomic evidence policy fields")
     if type(value["version"]) is not int or value["version"] != 1:
         raise EffortError("Unsupported atomic evidence policy version")
@@ -75,13 +86,29 @@ def validate_policy(value: Any, effort_id: str | None = None, *, allow_disabled:
         raise EffortError("max_searches exceeds the planner's 45-search limit")
     if value["max_scopes"] > 100:
         raise EffortError("max_scopes exceeds the planner's 100-scope limit")
-    excluded = value["excluded_filer_ids"]
-    if (not isinstance(excluded, list)
-            or any(not isinstance(fid, str) or not re.fullmatch(r"[1-9][0-9]*", fid)
-                   for fid in excluded)
-            or len(set(excluded)) != len(excluded)):
-        raise EffortError("excluded_filer_ids must contain unique positive numeric strings")
-    return {**value, "excluded_filer_ids": list(excluded)}
+    for field in ("excluded_filer_ids", "single_pass_filer_ids"):
+        if not isinstance(value.get(field, []), list):
+            raise EffortError(f"{field} must be a list")
+    excluded = _filer_ids(value["excluded_filer_ids"], "excluded_filer_ids")
+    single_pass = _filer_ids(value.get("single_pass_filer_ids", []), "single_pass_filer_ids")
+    return {**value, "excluded_filer_ids": excluded, "single_pass_filer_ids": single_pass}
+
+
+def _admission_mode(policy: dict, max_passes: int, requested_filer_ids: Any) -> dict:
+    if type(max_passes) is not int or max_passes not in (1, 3):
+        raise EffortError("max_passes must be exactly 1 or 3")
+    requested = _filer_ids(requested_filer_ids, "Requested filer IDs")
+    authorized = policy["single_pass_filer_ids"] if max_passes == 1 else []
+    if max_passes == 1 and (not requested or not set(requested) <= set(authorized)):
+        raise EffortError("Single-pass admission requires explicit policy-authorized filer IDs")
+    # Only this explicit attempt receives the exception. Canonical expansion and
+    # the one-complete-scope guard are independently enforced by the planner.
+    return {
+        "max_passes": max_passes,
+        "single_pass_filer_ids": list(authorized),
+        "excluded_filer_ids": [fid for fid in policy["excluded_filer_ids"]
+                               if fid not in authorized],
+    }
 
 
 def load_policy(path: Path, effort_id: str | None = None, *, allow_disabled: bool = False) -> dict:
@@ -188,7 +215,8 @@ def _budget_result(policy: dict, history: dict[int, dict]) -> dict:
         "max_attempts": policy["max_attempts"], "attempts_used": attempts_used,
         "attempts_remaining": max(0, policy["max_attempts"] - attempts_used),
         "max_scopes": policy["max_scopes"], "max_searches": policy["max_searches"],
-        "excluded_filer_ids": policy["excluded_filer_ids"],
+        "excluded_filer_ids": list(policy["excluded_filer_ids"]),
+        "max_passes": 3, "single_pass_filer_ids": [],
     }
 
 
@@ -205,12 +233,14 @@ def handoff(
 
 def admit(
     policy: Any, *, effort_id: str, repository: str,
-    run_id: int, run_attempt: int, api_reader: Callable[[str], Any] = gh_json,
+    run_id: int, run_attempt: int, max_passes: int = 3,
+    requested_filer_ids: Any = (), api_reader: Callable[[str], Any] = gh_json,
 ) -> dict:
     """Admit the current attempt only after reading the complete workflow history."""
     if not isinstance(effort_id, str) or not effort_id:
         raise EffortError("Admission requires an explicit effort_id")
     policy = validate_policy(policy, effort_id)
+    mode = _admission_mode(policy, max_passes, requested_filer_ids)
     _positive_int(run_id, "Current run ID")
     _positive_int(run_attempt, "Current run attempt")
     prefix = _repository_prefix(repository)
@@ -238,7 +268,7 @@ def admit(
         raise EffortError(
             f"Atomic evidence effort exhausted: {result['attempts_used']} attempts exceed "
             f"the {policy['max_attempts']}-attempt policy")
-    return {"admitted": True, **result}
+    return {"admitted": True, **result, **mode}
 
 
 def _emit(value: dict, output_path: str | None) -> None:
@@ -260,13 +290,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("admit", "handoff", "policy"))
     parser.add_argument("--effort-id")
+    parser.add_argument("--max-passes", choices=("1", "3"), default="3")
+    parser.add_argument("--filer-ids", nargs="*", default=[])
     parser.add_argument("--policy", type=Path, default=DEFAULT_POLICY)
     args = parser.parse_args(argv)
     try:
+        if args.command != "admit" and (args.max_passes != "3" or args.filer_ids):
+            raise EffortError("Only admission may request an explicit capture mode")
         policy = load_policy(args.policy, args.effort_id, allow_disabled=args.command != "admit")
         if args.command == "admit":
             result = admit(
-                policy, effort_id=args.effort_id,
+                policy, effort_id=args.effort_id, max_passes=int(args.max_passes),
+                requested_filer_ids=args.filer_ids,
                 repository=os.environ.get("GITHUB_REPOSITORY", ""),
                 run_id=_environment_int(os.environ.get("GITHUB_RUN_ID"), "GITHUB_RUN_ID"),
                 run_attempt=_environment_int(os.environ.get("GITHUB_RUN_ATTEMPT"), "GITHUB_RUN_ATTEMPT"),
