@@ -44,3 +44,21 @@ balance comparison trustworthy; it does not prove cash agreement. Missing-ID
 remediation requires its own complete-scope verification and fresh aggregation
 and atomic proof after any transaction change. Preserve source exceptions and
 annual gaps until authoritative evidence supports their treatment.
+
+## Project a completed transaction recovery
+
+After targeted identity remediation and its zero-missing verification finish,
+run the manual `Refresh Balance Projections` (`refresh-balances.yml`) workflow
+on main. It waits for the shared writer lane, hydrates the current published
+transactions, summaries and auxiliary evidence, runs normal aggregation and
+donor re-keying, and checks that the published source/report match this fresh
+projection. It does not fetch ORESTAR data or republish unchanged raw profiles.
+A changed manifest, transaction fingerprint, checkpoint, or inconsistent cache
+makes the workflow fail instead of claiming a coherent result.
+
+Ordinary exact verification records its actual per-filer search submission
+count as scheduling telemetry. This lets subsequent atomic admission estimate
+repaired large scopes from the fresh verification. Telemetry does not replace
+full-scope identity evidence or relax the 45-search atomic ceiling. After the
+projection, complete a fresh atomic window for the affected canonical scopes
+and inspect residual cash differences and annual/source exceptions.

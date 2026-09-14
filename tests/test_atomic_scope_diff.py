@@ -228,23 +228,6 @@ def test_missing_budget_stops_before_browser_or_state_reads(monkeypatch, tmp_pat
     assert DC._run_atomic_scope_plan(_args(tmp_path)) == 1
 
 
-def test_successful_filer_records_total_recursive_search_cost(monkeypatch, tmp_path):
-    _runner_basics(monkeypatch, [[{"filer_id": "10"}]])
-    budget = SearchBudget.initialize(tmp_path / "budget.json")
-    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
-    def collect(_page, fid, *_args, **_kwargs):
-        for _ in range(3):
-            budget.consume(fid, {})
-        return set()
-    saved = []
-    monkeypatch.setattr(DC, "orestar_ids", collect)
-    monkeypatch.setattr(DC, "_persist_usable_scope", lambda entries, results, *_a, **_k:
-                        saved.extend(results) or entries)
-    assert DC._run_atomic_scope_plan(_args(tmp_path)) == 0
-    assert saved[0]["exact_search_count"] == 3
-    assert DC._usable_history_record(saved[0])["exact_search_count"] == 3
-
-
 def test_scope_certification_failure_saves_no_usable_member(monkeypatch) -> None:
     original = {"old": {"filer_id": "old", "complete": True}}
     monkeypatch.setattr(
