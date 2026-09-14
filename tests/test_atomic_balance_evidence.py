@@ -781,3 +781,82 @@ def test_explicit_closed_scope_verification_uses_production_source_without_chang
     assert automatic["candidate_scope_count"] == 0
     assert automatic["selected_scope_count"] == 0
     assert (source, yearly, payload) == original
+
+
+
+def _budget_plan(monkeypatch, tmp_path, *, requested=(), excluded=(), costs=None,
+                 budget=9, hints=None):
+    monkeypatch.setattr(ABE, "_current_snapshot", lambda *_a, **_k: SNAPSHOT)
+    monkeypatch.setattr(ABE, "certify_exact_scope_rows",
+                        lambda *_a, **_k: ({}, set(), None))
+    if costs is not None:
+        monkeypatch.setattr(ABE, "estimate_scope_searches",
+                            lambda ids, entries: costs.get(ids[0]))
+    return ABE.build_plan(
+        _payload([_row(["10", "20"], delta=100, count=2),
+                  _row(["30"], delta=50, count=3),
+                  _row(["40"], delta=20, count=4)]),
+        [], _source((["10", "20"], "sha256:" + "b" * 64),
+                    (["30"], "sha256:" + "c" * 64),
+                    (["40"], "sha256:" + "d" * 64)),
+        tmp_path, max_scopes=12, planned_at="2026-09-14T12:00:00Z",
+        requested_ids=requested, excluded_ids=excluded,
+        max_searches=budget, search_cost_hints=hints,
+    )
+
+
+def test_search_budget_reserves_three_passes_for_every_physical_member(monkeypatch, tmp_path):
+    plan = _budget_plan(monkeypatch, tmp_path,
+                        costs={"10": 1, "20": 1, "30": 1, "40": 1})
+    assert [s["filer_ids"] for s in plan["scopes"]] == [["10", "20"], ["30"]]
+    assert plan["estimated_total_searches"] == 9
+    assert plan["budget_deferred_scopes"] == [{"filer_ids": ["40"], "reason": "search_budget"}]
+
+
+def test_deferred_member_excludes_entire_scope_across_day_reset(monkeypatch, tmp_path):
+    plan = _budget_plan(monkeypatch, tmp_path, excluded=["20"],
+                        costs={"10": 1, "20": 1, "30": 1, "40": 1})
+    assert plan["excluded_scope_count"] == 1
+    assert [s["filer_ids"] for s in plan["scopes"]] == [["30"], ["40"]]
+    with pytest.raises(ABE.AtomicEvidenceError, match="contains deferred filers"):
+        _budget_plan(monkeypatch, tmp_path, requested=["10"], excluded=["20"],
+                     costs={"10": 1, "20": 1, "30": 1, "40": 1})
+
+
+def test_unknown_or_oversized_explicit_scope_fails_before_capture(monkeypatch, tmp_path):
+    for cost in (None, 4):
+        with pytest.raises(ABE.AtomicEvidenceError, match="cannot fit three exact passes"):
+            _budget_plan(monkeypatch, tmp_path, requested=["30"], costs={"30": cost})
+    plan = _budget_plan(monkeypatch, tmp_path, costs={"10": None, "20": 1, "30": 1, "40": 1})
+    assert plan["budget_deferred_scopes"][0]["reason"] == "unknown_search_cost"
+    assert [s["filer_ids"] for s in plan["scopes"]] == [["30"], ["40"]]
+
+
+def test_reviewed_cost_hint_must_match_saved_observation(monkeypatch):
+    monkeypatch.setattr(ABE, "estimate_scope_searches", lambda *_a: None)
+    observation = {"filer_transaction_digest": "sha256:" + "a" * 64,
+                   "range_start": "2006-01-01", "range_end": "2026-09-14",
+                   "checked_at": "2026-09-14T03:27:28Z", "orestar": 6279}
+    hint = {**observation, "exact_search_count": 3}
+    assert ABE._scope_search_cost({"filer_ids": ["5667"]}, {"5667": observation}, {"5667": hint}) == 3
+    for key, value in [("checked_at", "2026-09-14T05:00:00Z"), ("orestar", 6280),
+                       ("filer_transaction_digest", "sha256:" + "b" * 64)]:
+        changed = {**observation, key: value}
+        assert ABE._scope_search_cost({"filer_ids": ["5667"]}, {"5667": changed}, {"5667": hint}) is None
+
+
+def test_workflow_uses_one_admission_and_shared_budget_before_collectors():
+    workflow = (ROOT / ".github/workflows/atomic-balance-evidence.yml").read_text()
+    assert workflow.index("Admit this attempt") < workflow.index("Hydrate one immutable")
+    assert workflow.index("Initialize shared exact search budget") < workflow.index("Capture fresh summaries")
+    assert workflow.count("search_budget.py init") == 1
+    assert "ORESTAR_SEARCH_BUDGET_PATH: /tmp/atomic-search-budget.json" in workflow
+    assert workflow.count("--exclude-filer-ids") == 2
+    assert "run-name: 'Atomic balance evidence: ${{ inputs.effort_id }}'" in workflow
+    successor = workflow.split("      - name: Continue bounded evidence chain", 1)[1]
+    assert 'handoff' in successor and '-f effort_id="$EFFORT_ID"' in successor
+    summary = (ROOT / ".github/workflows/earliest-balances.yml").read_text()
+    handoff = summary.split("      - name: Hand off completed current sweep", 1)[1]
+    assert handoff.index("atomic_evidence_effort.py handoff") < handoff.index("gh workflow run")
+    assert '-f effort_id="$EFFORT_ID"' in handoff
+    assert '-f max_scopes=40' not in handoff

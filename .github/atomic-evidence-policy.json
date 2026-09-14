@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "effort_id": "balance-recovery-20260914",
+  "enabled": true,
+  "max_attempts": 12,
+  "max_scopes": 12,
+  "max_searches": 45,
+  "excluded_filer_ids": ["33", "191"]
+}

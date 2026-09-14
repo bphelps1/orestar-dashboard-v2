@@ -16,6 +16,7 @@ SCRAPER_DIR = ROOT / "scraper"
 sys.path.insert(0, str(SCRAPER_DIR))
 
 import diff_coverage as DC  # noqa: E402
+from search_budget import ENVIRONMENT_KEY, SearchBudget
 
 
 SNAPSHOT = "sha256:" + "a" * 64
@@ -180,6 +181,68 @@ def test_complete_scope_is_certified_and_saved_once(monkeypatch) -> None:
     assert saves == [saved]
     assert stored_requirements == [requirements, requirements]
     assert requirements["10"] is requirements["20"]
+
+
+def test_budget_mid_scope_discards_staged_members_and_stops_without_restart(
+    monkeypatch, tmp_path, capsys,
+) -> None:
+    groups = [[{"filer_id": "10"}, {"filer_id": "20"}, {"filer_id": "30"}],
+              [{"filer_id": "40"}]]
+    _runner_basics(monkeypatch, groups)
+    budget = SearchBudget.initialize(tmp_path / "budget.json", 2)
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    old = _result("10")
+    monkeypatch.setattr(DC, "_load_atomic_entries", lambda: {"10": old})
+    calls, setups, saves = [], [], []
+    def setup(_pw):
+        setups.append(True)
+        return _Browser(), object(), object()
+    def collect(_page, fid, *_args, **_kwargs):
+        calls.append(fid)
+        budget.consume(fid, {})
+        if fid == "20":
+            budget.consume(fid, {})  # New deeper child exceeds the estimate.
+        return set()
+    monkeypatch.setattr(DC.F, "setup_browser_retrying", setup)
+    monkeypatch.setattr(DC, "orestar_ids", collect)
+    monkeypatch.setattr(DC, "_save", lambda entries: saves.append(entries))
+    monkeypatch.setattr(DC, "_persist_usable_scope",
+                        lambda *_args, **_kwargs: pytest.fail("partial scope certified"))
+    assert DC._run_atomic_scope_plan(_args(tmp_path)) == 1
+    assert calls == ["10", "20"]
+    assert len(setups) == 1
+    assert len(saves) == 1
+    assert saves[0]["10"]["checked_at"] == old["checked_at"]
+    assert saves[0]["30"]["complete"] is None
+    assert saves[0]["30"]["last_attempt_collection_started_at"] is None
+    assert all(saves[0][fid]["last_failure"] == "search_budget" for fid in ["10", "20", "30"])
+    assert "40" not in saves[0]
+    result = capsys.readouterr().out
+    assert "retryable=0" in result and "search_budget_exhausted=1" in result
+
+
+def test_missing_budget_stops_before_browser_or_state_reads(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(tmp_path / "missing.json"))
+    monkeypatch.setattr(DC, "sync_playwright", lambda: pytest.fail("browser started"))
+    monkeypatch.setattr(DC, "transaction_snapshot_id", lambda *_: pytest.fail("state read"))
+    assert DC._run_atomic_scope_plan(_args(tmp_path)) == 1
+
+
+def test_successful_filer_records_total_recursive_search_cost(monkeypatch, tmp_path):
+    _runner_basics(monkeypatch, [[{"filer_id": "10"}]])
+    budget = SearchBudget.initialize(tmp_path / "budget.json")
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    def collect(_page, fid, *_args, **_kwargs):
+        for _ in range(3):
+            budget.consume(fid, {})
+        return set()
+    saved = []
+    monkeypatch.setattr(DC, "orestar_ids", collect)
+    monkeypatch.setattr(DC, "_persist_usable_scope", lambda entries, results, *_a, **_k:
+                        saved.extend(results) or entries)
+    assert DC._run_atomic_scope_plan(_args(tmp_path)) == 0
+    assert saved[0]["exact_search_count"] == 3
+    assert DC._usable_history_record(saved[0])["exact_search_count"] == 3
 
 
 def test_scope_certification_failure_saves_no_usable_member(monkeypatch) -> None:

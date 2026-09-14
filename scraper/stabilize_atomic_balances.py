@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).parent))
 import atomic_balance_evidence as ABE
+from search_budget import SearchBudget, SearchBudgetError, estimate_scope_searches
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_TOTAL_PASSES = 3
@@ -90,6 +91,10 @@ def run_stabilization(
     combined = copy.deepcopy(ready)
     original_scopes = _scope_map(combined)
     snapshot = ABE._strict_snapshot_id(combined.get("transaction_snapshot_id"))
+    try:
+        search_budget = SearchBudget.from_environment()
+    except SearchBudgetError as exc:
+        raise ABE.AtomicEvidenceError(str(exc)) from exc
 
     def command(*args: str) -> int:
         argv = [sys.executable, *args]
@@ -135,6 +140,24 @@ def run_stabilization(
                        original_scopes[key].get("app_scope_transaction_digest")
                        for key, scope in planned_scopes.items())):
             raise ABE.AtomicEvidenceError("Replanning changed the original scope")
+        if search_budget is not None:
+            # Reserve room for every still-supported real pass before changing
+            # any summary capture. Historical costs guide admission only; the
+            # submission hook remains the hard backstop if the source grows.
+            entries = ABE._diff_entries(ABE._read_json(diff_path, []))
+            estimate = 0
+            for scope in planned_scopes.values():
+                scope_cost = estimate_scope_searches(scope["filer_ids"], entries)
+                if scope_cost is None:
+                    scope_cost = scope.get("estimated_exact_searches")
+                if type(scope_cost) is not int or scope_cost < 1:
+                    raise ABE.AtomicEvidenceError(
+                        "Stabilization deferred: full-scope search cost is unknown")
+                estimate += scope_cost
+            try:
+                search_budget.require_capacity(estimate * (max_passes - passes))
+            except SearchBudgetError as exc:
+                raise ABE.AtomicEvidenceError(f"Stabilization deferred before capture: {exc}") from exc
         next_pass = passes + 1
         plan_path = work_dir / f"pass-{next_pass}-plan.json"
         ready_path = work_dir / f"pass-{next_pass}-ready.json"
