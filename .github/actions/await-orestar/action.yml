@@ -1,11 +1,13 @@
 name: Await ORESTAR
 description: >
-  Wait until no other ORESTAR-scraping workflow is active or freshly queued,
-  pending, requested, or waiting, so two of them never hit the site at once.
+  Wait until no earlier ORESTAR scraper or balance projection writer is active
+  or freshly queued, pending, requested, or waiting, protecting both site access
+  and the shared evidence projection.
 
 # Why this exists, and why it is not a concurrency group.
 #
-# Every workflow that scrapes ORESTAR is listed below. They cannot share one concurrency group,
+# Every ORESTAR scraper and balance projection writer is listed below.
+# They cannot share one concurrency group,
 # because GitHub keeps only ONE pending run per group and cancels any earlier
 # one — so a self-retriggering chain silently evicted a scheduled job twice,
 # with zero jobs recorded and a status indistinguishable from a manual cancel.
@@ -68,8 +70,10 @@ runs:
         FAIL_ON_TIMEOUT: ${{ inputs.fail-on-timeout }}
       run: |
         set -o pipefail
-        # Every workflow that talks to ORESTAR. A job never counts itself.
+        # ORESTAR scrapers and the aggregate-only balance writer share one lane.
+        # Projection must not overwrite caches while a scraper captures its source.
         PEERS='.github/workflows/daily-refresh.yml
+        .github/workflows/refresh-balances.yml
         .github/workflows/earliest-balances.yml
         .github/workflows/filer-metadata.yml
         .github/workflows/candidate-filings.yml

@@ -2125,20 +2125,19 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                     collection_starts[fid] = collection_started_at
                     failure_reason: str | None = None
                     try:
-                        searches_before = search_budget.used if search_budget is not None else None
                         # No per-member soft deadline: cutting a multi-ID scope
                         # in half would create unusable, churn-prone evidence.
-                        theirs = orestar_ids(
-                            page,
-                            fid,
-                            start,
-                            end,
-                            deadline=None,
-                            context=context,
-                            raise_partition_error=True,
-                        )
-                        searches_used = (search_budget.used - searches_before
-                                         if search_budget is not None else None)
+                        with SC.measure_search_submissions() as search_counter:
+                            theirs = orestar_ids(
+                                page,
+                                fid,
+                                start,
+                                end,
+                                deadline=None,
+                                context=context,
+                                raise_partition_error=True,
+                            )
+                        searches_used = search_counter.count
                     except SearchBudgetError as exc:
                         log.warning("Atomic scope stopped by search budget: %s", exc)
                         member_failures = {
@@ -2195,7 +2194,7 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                             collection_started_at=collection_started_at,
                         ),
                     }
-                    if searches_used is not None and searches_used > 0:
+                    if searches_used > 0:
                         result["exact_search_count"] = searches_used
                     staged_results.append(result)
 
@@ -2447,10 +2446,11 @@ def main() -> int:
                 failure_reason = "unusable_window"
                 deterministic_refusal = False
                 try:
-                    theirs = orestar_ids(
-                        page, fid, start, end, deadline=deadline, context=_ctx,
-                        raise_partition_error=True,
-                    )
+                    with SC.measure_search_submissions() as search_counter:
+                        theirs = orestar_ids(
+                            page, fid, start, end, deadline=deadline, context=_ctx,
+                            raise_partition_error=True,
+                        )
                 except CollectionDeadlineExceeded:
                     log.warning("Filer %s: time budget reached before a complete, "
                                 "reconciled result", fid)
@@ -2553,6 +2553,10 @@ def main() -> int:
                         collection_started_at=collection_started_at,
                     ),
                 }
+                if search_counter.count > 0:
+                    # Scheduling telemetry only: every ID above still came
+                    # from the fresh, complete, reconciled collection.
+                    result["exact_search_count"] = search_counter.count
                 _store_usable_result(
                     entries,
                     result,

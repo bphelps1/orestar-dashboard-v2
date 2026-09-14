@@ -101,9 +101,44 @@ def test_ambiguous_click_failure_consumes_budget(monkeypatch, tmp_path, clock):
     def failed_click(*_args, **_kwargs):
         raise SC.PlaywrightTimeout("submission timed out")
     page.click = failed_click
-    with pytest.raises(SC.PlaywrightTimeout):
-        SC.orestar_count(page, "10", START, END)
+    with SC.measure_search_submissions() as measured:
+        with pytest.raises(SC.PlaywrightTimeout):
+            SC.orestar_count(page, "10", START, END)
+    assert measured.count == 1
     assert budget.used == 1
+
+
+def test_submission_measurement_without_budget_does_not_limit_queries(monkeypatch, clock):
+    monkeypatch.delenv(ENVIRONMENT_KEY, raising=False)
+    page = CountPage(clock, ["1 records found"])
+    with SC.measure_search_submissions() as measured:
+        for _ in range(51):
+            assert SC.orestar_count(page, "10", START, END) == 1
+    assert page.searches == measured.count == 51
+    with SC.measure_search_submissions() as next_collection:
+        assert SC.orestar_count(page, "20", START, END) == 1
+    assert next_collection.count == 1
+    assert measured.count == 51
+
+
+def test_budget_refusal_never_counts_a_submission(monkeypatch, tmp_path, clock):
+    budget = SearchBudget.initialize(tmp_path / "budget.json", 1)
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    page = CountPage(clock, ["1 records found"])
+    with SC.measure_search_submissions() as measured:
+        assert SC.orestar_count(page, "10", START, END) == 1
+        with pytest.raises(SearchBudgetExceeded):
+            SC.orestar_count(page, "10", START, END)
+    assert page.searches == measured.count == budget.used == 1
+
+
+def test_deadline_before_click_is_not_counted(monkeypatch, clock):
+    monkeypatch.delenv(ENVIRONMENT_KEY, raising=False)
+    page = CountPage(clock, ["1 records found"])
+    with SC.measure_search_submissions() as measured:
+        with pytest.raises(SC.SearchDeadlineExceeded):
+            SC.orestar_count(page, "10", START, END, deadline=0.1)
+    assert page.searches == measured.count == 0
 
 
 def test_unknown_count_logs_metadata_without_another_read_or_search(clock, caplog):
@@ -111,7 +146,8 @@ def test_unknown_count_logs_metadata_without_another_read_or_search(clock, caplo
     body = "Unexpected results template private-body-secret"
     page = CountPage(clock, [body])
 
-    assert SC.orestar_count(page, "33", START, END, "C", "5", "9.99", "J") is None
+    with SC.measure_search_submissions() as measured:
+        assert SC.orestar_count(page, "33", START, END, "C", "5", "9.99", "J") is None
 
     [event] = diagnostics(caplog)
     assert event == {
@@ -127,6 +163,7 @@ def test_unknown_count_logs_metadata_without_another_read_or_search(clock, caplo
         "server_error_signal": False,
     }
     assert page.searches == 1
+    assert measured.count == 1
     assert len(page.read_times) == 40
     assert page.waits == [250, 400] + [500] * 40
     assert clock["now"] == pytest.approx(20.65)

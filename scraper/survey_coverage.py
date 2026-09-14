@@ -41,6 +41,9 @@ import logging
 import re
 import sys
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -64,6 +67,29 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 FIRST_YEAR = 2006
+
+
+@dataclass
+class SearchSubmissionCounter:
+    """Observed submissions for one collection, independent of any budget."""
+
+    count: int = 0
+
+
+_submission_counter: ContextVar[SearchSubmissionCounter | None] = ContextVar(
+    "orestar_search_submission_counter", default=None,
+)
+
+
+@contextmanager
+def measure_search_submissions():
+    """Measure real search clicks without changing collection or retry rules."""
+    counter = SearchSubmissionCounter()
+    token = _submission_counter.set(counter)
+    try:
+        yield counter
+    finally:
+        _submission_counter.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +439,13 @@ def _orestar_count(
             "tran_type": tran_type, "start": start.isoformat(), "end": end.isoformat(),
             "amt_from": amt_from, "amt_to": amt_to, "payee_prefix": payee_prefix,
         })
-    page.click('input[name="search"]', timeout=_timeout_ms(deadline, 30_000))
+    timeout = _timeout_ms(deadline, 30_000)
+    counter = _submission_counter.get()
+    if counter is not None:
+        # Count at the submission boundary, including a click that times out
+        # after possibly reaching ORESTAR. Polls and budget refusals add none.
+        counter.count += 1
+    page.click('input[name="search"]', timeout=timeout)
     try:
         page.wait_for_url(
             F.RESULTS_URL_PATTERN,
