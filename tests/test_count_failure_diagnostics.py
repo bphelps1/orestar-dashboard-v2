@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scraper"))
 import diff_coverage as DC
 import survey_coverage as SC
+from search_budget import ENVIRONMENT_KEY, SearchBudget, SearchBudgetExceeded
 
 START = date(2022, 12, 7)
 END = date(2023, 5, 1)
@@ -77,6 +78,32 @@ def diagnostics(caplog):
     prefix = "COUNT_READ_EXHAUSTED "
     return [json.loads(record.getMessage()[len(prefix):]) for record in caplog.records
             if record.name == SC.__name__ and record.getMessage().startswith(prefix)]
+
+
+def test_budget_stops_before_46th_search_click(monkeypatch, tmp_path, clock):
+    budget = SearchBudget.initialize(tmp_path / "budget.json")
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    monkeypatch.setattr(SC, "_return_to_form", lambda *_args: None)
+    page = CountPage(clock, ["1 records found"])
+    for _ in range(45):
+        assert SC.orestar_count(page, "10", START, END) == 1
+    with pytest.raises(SearchBudgetExceeded):
+        SC.orestar_count(page, "10", START, END)
+    assert page.searches == 45
+    assert budget.used == 45
+
+
+def test_ambiguous_click_failure_consumes_budget(monkeypatch, tmp_path, clock):
+    budget = SearchBudget.initialize(tmp_path / "budget.json")
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    monkeypatch.setattr(SC, "_return_to_form", lambda *_args: None)
+    page = CountPage(clock, ["1 records found"])
+    def failed_click(*_args, **_kwargs):
+        raise SC.PlaywrightTimeout("submission timed out")
+    page.click = failed_click
+    with pytest.raises(SC.PlaywrightTimeout):
+        SC.orestar_count(page, "10", START, END)
+    assert budget.used == 1
 
 
 def test_unknown_count_logs_metadata_without_another_read_or_search(clock, caplog):

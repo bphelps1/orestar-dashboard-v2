@@ -1,4 +1,5 @@
 name: Build Atomic Balance Evidence
+run-name: 'Atomic balance evidence: ${{ inputs.effort_id }}'
 
 # Establish the first exact-ID observation that is safe to use with a paired
 # ORESTAR balance.  Summary capture and coverage diff intentionally share one
@@ -9,6 +10,10 @@ name: Build Atomic Balance Evidence
 on:
   workflow_dispatch:
     inputs:
+      effort_id:
+        description: "Approved effort ID from .github/atomic-evidence-policy.json"
+        required: true
+        type: string
       filer_ids:
         description: "Space-separated physical filer IDs, or blank for actionable unanchored scopes"
         required: false
@@ -17,7 +22,7 @@ on:
       max_scopes:
         description: "Maximum complete canonical scopes in this batch"
         required: false
-        default: "40"
+        default: "12"
         type: string
       chain_index:
         description: "Internal: which bounded batch of this evidence chain is running"
@@ -49,6 +54,7 @@ jobs:
       PLAN_PATH: /tmp/atomic-balance-plan.json
       READY_PATH: /tmp/atomic-balance-ready.json
       REPORT_PATH: /tmp/atomic-balance-report.json
+      ORESTAR_SEARCH_BUDGET_PATH: /tmp/atomic-search-budget.json
 
     steps:
       - name: Check out repository
@@ -76,6 +82,20 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r scraper/requirements.txt
 
+      - name: Admit this attempt against the persistent effort limit
+        id: effort
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EFFORT_ID: ${{ inputs.effort_id }}
+        run: |
+          python scripts/atomic_evidence_effort.py admit --effort-id "$EFFORT_ID"
+
+      - name: Initialize shared exact search budget
+        run: |
+          python scraper/search_budget.py init \
+            --path "$ORESTAR_SEARCH_BUDGET_PATH" \
+            --limit "${{ steps.effort.outputs.max_searches }}"
+
       - name: Hydrate one immutable evidence window
         id: state
         run: python scripts/pipeline_state.py pull transactions summaries auxiliary
@@ -85,8 +105,20 @@ jobs:
         env:
           REQUESTED_FILER_IDS: ${{ inputs.filer_ids }}
           MAX_SCOPES: ${{ inputs.max_scopes }}
+          POLICY_MAX_SCOPES: ${{ steps.effort.outputs.max_scopes }}
+          MAX_SEARCHES: ${{ steps.effort.outputs.max_searches }}
+          EXCLUDED_FILER_IDS: ${{ steps.effort.outputs.excluded_filer_ids }}
         run: |
-          ARGS=(plan --max-scopes "$MAX_SCOPES" --output "$PLAN_PATH")
+          case "$MAX_SCOPES" in
+            ''|*[!0-9]*) echo "::error::Invalid scope limit."; exit 1 ;;
+          esac
+          if [ "$MAX_SCOPES" -gt "$POLICY_MAX_SCOPES" ]; then
+            MAX_SCOPES="$POLICY_MAX_SCOPES"
+          fi
+          read -r -a EXCLUDED <<< "$EXCLUDED_FILER_IDS"
+          ARGS=(plan --max-scopes "$MAX_SCOPES" --max-searches "$MAX_SEARCHES"
+            --search-cost-hints .github/atomic-search-costs.json
+            --exclude-filer-ids "${EXCLUDED[@]}" --output "$PLAN_PATH")
           if [ -n "$REQUESTED_FILER_IDS" ]; then
             read -r -a REQUESTED <<< "$REQUESTED_FILER_IDS"
             ARGS+=(--filer-ids "${REQUESTED[@]}")
@@ -196,10 +228,15 @@ jobs:
         id: recovery_plan
         if: steps.recover_aggregate.outcome == 'success'
         env:
-          MAX_SCOPES: ${{ inputs.max_scopes }}
+          MAX_SCOPES: ${{ steps.effort.outputs.max_scopes }}
+          MAX_SEARCHES: ${{ steps.effort.outputs.max_searches }}
+          EXCLUDED_FILER_IDS: ${{ steps.effort.outputs.excluded_filer_ids }}
         run: |
+          read -r -a EXCLUDED <<< "$EXCLUDED_FILER_IDS"
           python scraper/atomic_balance_evidence.py plan \
-            --max-scopes "$MAX_SCOPES" --output /tmp/atomic-recovery-plan.json
+            --max-scopes "$MAX_SCOPES" --max-searches "$MAX_SEARCHES" \
+            --search-cost-hints .github/atomic-search-costs.json \
+            --exclude-filer-ids "${EXCLUDED[@]}" --output /tmp/atomic-recovery-plan.json
           SELECTED=$(jq -r '.selected_scope_count' /tmp/atomic-recovery-plan.json)
           echo "selected_scopes=$SELECTED" >> "$GITHUB_OUTPUT"
           echo "Recovered aggregation exposed $SELECTED scopes needing another real capture window."
@@ -246,10 +283,17 @@ jobs:
           steps.recovery_plan.outputs.selected_scopes != '0'))
         env:
           GH_TOKEN: ${{ github.token }}
-          MAX_CHAIN: "12"
-          MAX_SCOPES: ${{ inputs.max_scopes }}
+          MAX_CHAIN: ${{ steps.effort.outputs.max_attempts }}
+          MAX_SCOPES: ${{ steps.effort.outputs.max_scopes }}
           CHAIN_INDEX: ${{ inputs.chain_index }}
+          EFFORT_ID: ${{ steps.effort.outputs.effort_id }}
         run: |
+          python scripts/atomic_evidence_effort.py handoff \
+            --effort-id "$EFFORT_ID" > /tmp/atomic-handoff.json
+          if [ "$(jq -r '.can_dispatch' /tmp/atomic-handoff.json)" != "true" ]; then
+            echo "The persistent effort limit is exhausted or disabled; stopping."
+            exit 0
+          fi
           CHAIN="${CHAIN_INDEX:-1}"
           case "$CHAIN" in
             ''|*[!0-9]*) echo "::error::Invalid atomic chain index."; exit 1 ;;
@@ -267,6 +311,7 @@ jobs:
           # request can create two children for the same logical batch.
           gh workflow run atomic-balance-evidence.yml \
             --ref "$GITHUB_REF_NAME" \
+            -f effort_id="$EFFORT_ID" \
             -f filer_ids= \
             -f max_scopes="$MAX_SCOPES" \
             -f chain_index="$((CHAIN + 1))"

@@ -92,6 +92,7 @@ from atomic_balance_evidence import (
     requirements_from_ready_plan,
 )
 from exact_coverage_evidence import certify_exact_scope_rows
+from search_budget import SearchBudget, SearchBudgetError, estimate_scope_searches
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 DIFF_PATH = DATA_DIR / "coverage_diff.json"
@@ -112,6 +113,7 @@ USABLE_RESULT_FIELDS = (
     "superseded", "evidence_version", "checked", "collection_started_at",
     "checked_at", "transaction_snapshot_id", "filer_transaction_digest",
     "range_start", "range_end",
+    "exact_search_count",
 )
 
 # Two re-checks of committees whose withdrawn rows are moving a balance for
@@ -1906,7 +1908,8 @@ def _persist_failed_scope(
 ) -> dict:
     """Persist one failed scope without any newly usable partial member."""
     ids = {str(target.get("filer_id") or "") for target in targets}
-    if "" in ids or set(collection_starts) != ids:
+    if ("" in ids or not set(collection_starts).issubset(ids)
+            or any(reasons.get(fid) != "search_budget" for fid in ids - set(collection_starts))):
         raise ValueError("failed scope lacks per-member collection start times")
     if transaction_snapshot_id(TRANSACTION_DIR) != transaction_id:
         raise AtomicSnapshotDrift(
@@ -1923,7 +1926,7 @@ def _persist_failed_scope(
             filer_digest=local_digests.get(fid),
             start=start,
             end=end,
-            collection_started_at=collection_starts[fid],
+            collection_started_at=collection_starts.get(fid),
         )
     _save(staged)
     return staged
@@ -1980,8 +1983,16 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
     The ordinary CLI remains per-filer.  This mode is deliberately stricter:
     it honors the soft budget and the runner breaker only between scopes, uses
     the ready plan's fresh paired-capture requirements, and saves usable rows
-    only after every physical member of a scope completed.
+    only after every physical member of a scope completed. The workflow search
+    limit is a hard backstop: exhausting it rejects the entire admitted scope.
     """
+    try:
+        search_budget = SearchBudget.from_environment()
+        if search_budget is not None:
+            search_budget.require_capacity(1)
+    except SearchBudgetError as exc:
+        log.error("Atomic exact collection not started: %s", exc)
+        return 1
     start = date(args.start_year, 1, 1)
     end = args.end_date
     if end is None:
@@ -2044,11 +2055,21 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
     blocked = False
     fatal = False
     browser_needs_restart = False
+    budget_stopped = False
 
     with sync_playwright() as p:
         browser, context, page = F.setup_browser_retrying(p)
         try:
             for targets_in_scope in groups:
+                if search_budget is not None:
+                    try:
+                        estimate = estimate_scope_searches(
+                            [str(target["filer_id"]) for target in targets_in_scope], entries)
+                        search_budget.require_capacity(estimate if estimate is not None else 1)
+                    except SearchBudgetError as exc:
+                        log.warning("Search budget stopped admission between scopes: %s", exc)
+                        budget_stopped = True
+                        break
                 # A soft deadline is a scope admission check. Once admitted,
                 # every member gets the same chance to complete; the job-level
                 # timeout remains the hard backstop.
@@ -2077,6 +2098,18 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                 retryable_failure = False
 
                 for target in targets_in_scope:
+                    if search_budget is not None:
+                        try:
+                            search_budget.require_capacity(1)
+                        except SearchBudgetError as exc:
+                            log.warning("Atomic scope stopped by search budget: %s", exc)
+                            member_failures = {
+                                str(member["filer_id"]): "search_budget"
+                                for member in targets_in_scope
+                            }
+                            budget_stopped = True
+                            browser_needs_restart = False
+                            break
                     if browser_needs_restart:
                         log.warning("Restarting the browser inside the admitted scope.")
                         try:
@@ -2092,6 +2125,7 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                     collection_starts[fid] = collection_started_at
                     failure_reason: str | None = None
                     try:
+                        searches_before = search_budget.used if search_budget is not None else None
                         # No per-member soft deadline: cutting a multi-ID scope
                         # in half would create unusable, churn-prone evidence.
                         theirs = orestar_ids(
@@ -2103,6 +2137,17 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                             context=context,
                             raise_partition_error=True,
                         )
+                        searches_used = (search_budget.used - searches_before
+                                         if search_budget is not None else None)
+                    except SearchBudgetError as exc:
+                        log.warning("Atomic scope stopped by search budget: %s", exc)
+                        member_failures = {
+                            str(member["filer_id"]): "search_budget"
+                            for member in targets_in_scope
+                        }
+                        budget_stopped = True
+                        browser_needs_restart = False
+                        break
                     except PartitionMismatchError as exc:
                         log.warning(
                             "Filer %s: deterministic partition refusal (%s)",
@@ -2150,6 +2195,8 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                             collection_started_at=collection_started_at,
                         ),
                     }
+                    if searches_used is not None and searches_used > 0:
+                        result["exact_search_count"] = searches_used
                     staged_results.append(result)
 
                 if not member_failures:
@@ -2193,6 +2240,8 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                         log.error("Atomic failed-scope state was not saved: %s", exc)
                         fatal = True
                         break
+                    if budget_stopped:
+                        break
                     if retryable_failure:
                         retry_scope_ids.update(
                             str(target["filer_id"])
@@ -2225,7 +2274,7 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
         finally:
             browser.close()
 
-    retry_ids = sorted(retry_scope_ids)
+    retry_ids = [] if budget_stopped else sorted(retry_scope_ids)
     # A scope admitted but aborted during certification is still outstanding.
     # Count terminal scope outcomes, not merely site admission attempts.
     remaining_scopes = len(groups) - usable_scopes - unusable_scopes
@@ -2244,7 +2293,8 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
         f"retryable={1 if retry_ids else 0} "
         f"retry_ids={','.join(retry_ids)} "
         f"attempted_scopes={attempted_scopes} usable_scopes={usable_scopes} "
-        f"unusable_scopes={unusable_scopes} remaining_scopes={remaining_scopes}"
+        f"unusable_scopes={unusable_scopes} remaining_scopes={remaining_scopes} "
+        f"search_budget_exhausted={1 if budget_stopped else 0}"
     )
     return 1 if unusable_scopes or incomplete or fatal else 0
 

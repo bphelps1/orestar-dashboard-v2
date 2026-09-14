@@ -45,6 +45,7 @@ from balance_snapshot import (
     utc_timestamp,
 )
 from exact_coverage_evidence import certify_exact_scope_rows
+from search_budget import estimate_scope_searches
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +54,7 @@ YEARLY_PATH = ROOT / "data" / "orestar_yearly_summaries.json"
 DIFF_PATH = ROOT / "data" / "coverage_diff.json"
 SNAPSHOT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 PLAN_VERSION = 1
+RESERVED_EXACT_PASSES = 3
 
 
 class AtomicEvidenceError(RuntimeError):
@@ -309,6 +311,31 @@ def _attempt_day(value: str) -> date | None:
             return None
 
 
+def _scope_search_cost(scope: dict, entries: dict, hints: dict) -> int | None:
+    """Estimate scheduling cost; hints never supply transaction evidence.
+
+    Reviewed legacy logs can describe a partition before count telemetry was
+    stored. Match the entire saved observation identity before using that hint.
+    The collector still queries every fresh root/child and enforces a hard cap.
+    """
+    total = 0
+    for fid in scope["filer_ids"]:
+        cost = estimate_scope_searches([fid], entries)
+        if cost is None:
+            row, hint = entries.get(fid) or {}, hints.get(fid) or {}
+            keys = ("filer_transaction_digest", "range_start", "range_end",
+                    "checked_at", "orestar")
+            if (not isinstance(hint, dict)
+                    or any(key not in hint or hint[key] != row.get(key) for key in keys)
+                    or not SNAPSHOT_RE.fullmatch(str(hint.get("filer_transaction_digest", "")))):
+                return None
+            cost = hint.get("exact_search_count")
+            if isinstance(cost, bool) or not isinstance(cost, int) or cost < 1:
+                return None
+        total += cost
+    return total
+
+
 def build_plan(
     balance_payload: Any,
     diff_rows: Any,
@@ -319,6 +346,9 @@ def build_plan(
     requested_ids: Iterable[str] = (),
     planned_at: str | None = None,
     yearly_cache: Any = None,
+    excluded_ids: Iterable[str] = (),
+    max_searches: int | None = None,
+    search_cost_hints: dict | None = None,
 ) -> dict:
     """Plan actionable or paired-refresh scopes against the frozen local ledger.
 
@@ -328,6 +358,16 @@ def build_plan(
     """
     if not 1 <= max_scopes <= 100:
         raise AtomicEvidenceError("max_scopes must be between 1 and 100")
+    if max_searches is not None and (
+        isinstance(max_searches, bool) or not isinstance(max_searches, int)
+        or not 1 <= max_searches <= 45
+    ):
+        raise AtomicEvidenceError("max_searches must be between 1 and 45")
+    excluded = {str(value).strip() for value in excluded_ids}
+    if any(not fid.isdigit() for fid in excluded):
+        raise AtomicEvidenceError("Excluded filer IDs must be numeric")
+    if search_cost_hints is not None and not isinstance(search_cost_hints, dict):
+        raise AtomicEvidenceError("Search cost hints must be an object")
     snapshot_id = _current_snapshot(transaction_dir)
     if (
         not isinstance(source, dict)
@@ -452,6 +492,13 @@ def build_plan(
                 + " ".join(missing)
             )
 
+    excluded_scopes = [s for s in scopes if excluded.intersection(s["filer_ids"])]
+    if requested and excluded_scopes:
+        raise AtomicEvidenceError(
+            "Requested canonical scope contains deferred filers: "
+            + " ".join(sorted({fid for s in excluded_scopes for fid in s["filer_ids"]})))
+    scopes = [s for s in scopes if not excluded.intersection(s["filer_ids"])]
+
     requirements = {
         filer_id: scope["requirement"]
         for scope in scopes
@@ -509,7 +556,24 @@ def build_plan(
         raise AtomicEvidenceError(
             "Requested filer IDs expand to more scopes than max_scopes allows"
         )
-    selected = unresolved[:max_scopes]
+    selected, budget_deferred, reserved_searches = [], [], 0
+    for scope in unresolved:
+        if max_searches is not None:
+            cost = _scope_search_cost(scope, entries, search_cost_hints or {})
+            if cost is None or reserved_searches + RESERVED_EXACT_PASSES * cost > max_searches:
+                reason = "unknown_search_cost" if cost is None else "search_budget"
+                budget_deferred.append({"filer_ids": scope["filer_ids"], "reason": reason})
+                if requested:
+                    raise AtomicEvidenceError(
+                        "Requested complete scopes cannot fit three exact passes: "
+                        + " ".join(scope["filer_ids"]) + f" ({reason})")
+                continue
+        if len(selected) >= max_scopes:
+            continue
+        if max_searches is not None:
+            scope["estimated_exact_searches"] = cost
+            reserved_searches += RESERVED_EXACT_PASSES * cost
+        selected.append(scope)
     return {
         "version": PLAN_VERSION,
         "planned_at": instant,
@@ -518,6 +582,12 @@ def build_plan(
         "already_anchored_scope_count": len(scopes) - len(all_unresolved),
         "remaining_scope_count": len(all_unresolved),
         "deferred_scope_count": deferred_count,
+        "excluded_scope_count": len(excluded_scopes),
+        "excluded_filer_ids": sorted(excluded),
+        "search_budget_limit": max_searches,
+        "reserved_exact_passes": RESERVED_EXACT_PASSES,
+        "estimated_total_searches": reserved_searches,
+        "budget_deferred_scopes": budget_deferred,
         "selected_scope_count": len(selected),
         "scopes": selected,
     }
@@ -875,6 +945,9 @@ def main(argv: list[str] | None = None) -> int:
     plan_parser = subparsers.add_parser("plan")
     plan_parser.add_argument("--max-scopes", type=int, default=40)
     plan_parser.add_argument("--filer-ids", nargs="*", default=[])
+    plan_parser.add_argument("--exclude-filer-ids", nargs="*", default=[])
+    plan_parser.add_argument("--max-searches", type=int)
+    plan_parser.add_argument("--search-cost-hints", type=Path)
     plan_parser.add_argument("--output", type=Path, required=True)
 
     ready_parser = subparsers.add_parser("ready")
@@ -888,6 +961,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
+            hints = None
+            if args.search_cost_hints:
+                raw_hints = _read_json(args.search_cost_hints)
+                if (not isinstance(raw_hints, dict) or raw_hints.get("version") != 1
+                        or not isinstance(raw_hints.get("filers"), dict)):
+                    raise AtomicEvidenceError("Invalid reviewed search cost hints")
+                hints = raw_hints["filers"]
             value = build_plan(
                 supabase_sync.require_dashboard_cache("balance_discrepancies"),
                 _read_json(DIFF_PATH, []),
@@ -896,6 +976,9 @@ def main(argv: list[str] | None = None) -> int:
                 max_scopes=args.max_scopes,
                 requested_ids=args.filer_ids,
                 yearly_cache=_read_json(YEARLY_PATH, {}),
+                excluded_ids=args.exclude_filer_ids,
+                max_searches=args.max_searches,
+                search_cost_hints=hints,
             )
             _write_json(args.output, value)
             print(

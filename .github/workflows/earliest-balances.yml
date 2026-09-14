@@ -560,11 +560,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Current account-summary sweep is complete; starting a new atomic evidence window."
+          python scripts/atomic_evidence_effort.py handoff > /tmp/atomic-handoff.json
+          if [ "$(jq -r '.can_dispatch' /tmp/atomic-handoff.json)" != "true" ]; then
+            echo "Current sweep is complete; atomic effort is disabled or exhausted."
+            exit 0
+          fi
+          EFFORT_ID=$(jq -r '.effort_id' /tmp/atomic-handoff.json)
+          MAX_SCOPES=$(jq -r '.max_scopes' /tmp/atomic-handoff.json)
+          echo "Current sweep is complete; continuing approved atomic effort $EFFORT_ID."
           # Do not retry an ambiguous accepted dispatch: two children for the
           # same logical kickoff are worse than one loudly failed handoff.
           gh workflow run atomic-balance-evidence.yml \
             --ref "${{ github.ref_name }}" \
+            -f effort_id="$EFFORT_ID" \
             -f filer_ids= \
-            -f max_scopes=40 \
+            -f max_scopes="$MAX_SCOPES" \
             -f chain_index=1

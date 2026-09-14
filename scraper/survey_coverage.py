@@ -52,6 +52,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 import fetch as F
 import supabase_sync
+from search_budget import SearchBudget
 from balance_snapshot import evidence_is_current
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -354,6 +355,9 @@ def _orestar_count(
     cap.  Keeping the form submission here gives both callers one definition of
     a search window instead of two copies that can drift.
     """
+    budget = SearchBudget.from_environment()
+    if budget is not None:
+        budget.require_capacity(1)
     _return_to_form(page, deadline)
     page.fill(
         'input[name="cneSearchFilerCommitteeId"]',
@@ -401,6 +405,14 @@ def _orestar_count(
             "S",
             timeout=_timeout_ms(deadline, 30_000),
         )
+    # An atomic workflow shares this ledger across collector subprocesses.
+    # Reserve durably before the submission: a timeout may still reach the
+    # server, and neither a fresh browser nor a later pass resets the count.
+    if budget is not None:
+        budget.consume(str(filer_id), {
+            "tran_type": tran_type, "start": start.isoformat(), "end": end.isoformat(),
+            "amt_from": amt_from, "amt_to": amt_to, "payee_prefix": payee_prefix,
+        })
     page.click('input[name="search"]', timeout=_timeout_ms(deadline, 30_000))
     try:
         page.wait_for_url(

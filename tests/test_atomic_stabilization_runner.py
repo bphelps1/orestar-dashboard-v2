@@ -11,6 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scraper"))
 import stabilize_atomic_balances as RUN
+from search_budget import ENVIRONMENT_KEY, SearchBudget
 
 SNAPSHOT = "sha256:" + "a" * 64
 
@@ -168,6 +169,78 @@ def test_one_total_pass_means_assessment_only(monkeypatch, tmp_path):
     assert h.events == ["assess"]
 
 
+def _budget_rows(root, counts):
+    rows = [{"filer_id": fid, "complete": True, "missing": [], "surplus": [],
+             "superseded": [], "orestar": 1, "held": 1, "evidence_version": 2,
+             "filer_transaction_digest": "sha256:budget", "exact_search_count": cost,
+             "range_start": "2006-01-01", "range_end": "2026-09-13"}
+            for fid, cost in counts.items()]
+    path = root / "data" / "coverage_diff.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows))
+
+
+def test_search_budget_reserves_both_remaining_passes_before_any_recapture(monkeypatch, tmp_path):
+    h = Harness(monkeypatch, tmp_path, [["10"]])
+    budget = SearchBudget.initialize(tmp_path / "budget.json")
+    for _ in range(40):
+        budget.consume("first-pass", {})
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    _budget_rows(tmp_path, {"10": 3})
+    # One more pass would fit, but both supported real passes would need six.
+    with pytest.raises(RUN.ABE.AtomicEvidenceError, match="deferred before capture"):
+        h.run()
+    assert h.events == ["assess"]
+    assert h.commands == []
+    assert budget.used == 40
+
+
+def test_all_passes_use_original_ledger_and_fresh_costs(monkeypatch, tmp_path):
+    h = Harness(monkeypatch, tmp_path, [["10", "20", "30"], ["10"], []])
+    budget = SearchBudget.initialize(tmp_path / "budget.json", 9)
+    for fid in ["10", "20", "30"]:
+        budget.consume(fid, {})
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    _budget_rows(tmp_path, {"10": 1, "20": 1, "30": 1})
+    original_command = h.command
+    paths = []
+    def command(argv):
+        if argv[1] == "scraper/diff_coverage.py":
+            inherited = SearchBudget.from_environment()
+            paths.append(inherited.path)
+            ready = json.loads(Path(argv[argv.index("--scope-plan") + 1]).read_text())
+            for scope in ready["scopes"]:
+                for fid in scope["filer_ids"]:
+                    inherited.consume(fid, {})
+        return original_command(argv)
+    h.command = command
+    assert h.run()["passes_completed"] == 3
+    assert paths == [budget.path, budget.path]
+    assert budget.used == 7
+
+
+def test_reviewed_plan_estimate_is_admission_hint_when_cost_is_unknown(monkeypatch, tmp_path):
+    h = Harness(monkeypatch, tmp_path, [["10"], []])
+    budget = SearchBudget.initialize(tmp_path / "budget.json", 6)
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    ready = _ready()
+    ready["scopes"][0]["estimated_exact_searches"] = 3
+    result = RUN.run_stabilization(ready, root=tmp_path, command_runner=h.command,
+                                   cache_reader=h.cache)
+    assert result["passes_completed"] == 2
+    assert h.events.count("summary") == h.events.count("diff") == 1
+    assert h.plans[0]["scopes"][0]["estimated_exact_searches"] == 3
+
+
+def test_unknown_scope_cost_defers_without_changing_summary(monkeypatch, tmp_path):
+    h = Harness(monkeypatch, tmp_path, [["10"]])
+    budget = SearchBudget.initialize(tmp_path / "budget.json")
+    monkeypatch.setenv(ENVIRONMENT_KEY, str(budget.path))
+    with pytest.raises(RUN.ABE.AtomicEvidenceError, match="cost is unknown"):
+        h.run()
+    assert h.events == ["assess"]
+
+
 def test_reassesses_previously_stable_scopes_and_preserves_their_real_capture(monkeypatch, tmp_path):
     h = Harness(monkeypatch, tmp_path, [["10"], ["20", "30"], []])
     assert h.run()["passes_completed"] == 3
@@ -265,6 +338,7 @@ def test_empty_plan_recovery_replans_before_bounded_automatic_continuation():
     chain = text.split("      - name: Continue bounded evidence chain", 1)[1]
     assert "success() && !cancelled() && inputs.filer_ids == ''" in chain
     assert "steps.recovery_plan.outputs.selected_scopes != '0'" in chain
-    assert 'MAX_CHAIN: "12"' in chain
+    assert 'MAX_CHAIN: ${{ steps.effort.outputs.max_attempts }}' in chain
+    assert 'atomic_evidence_effort.py handoff' in chain
     assert 'if [ "$CHAIN" -ge "$MAX_CHAIN" ]' in chain
     assert "Recovered aggregation left" in chain
