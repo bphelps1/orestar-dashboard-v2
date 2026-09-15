@@ -69,7 +69,7 @@ def test_usable_evidence_fields_are_precise_and_range_bound() -> None:
     )
 
     assert fields == {
-        "evidence_version": 2,
+        "evidence_version": 2, "filer_digest_version": 2,
         "checked": "2026-09-05",
         "collection_started_at": "2026-09-05T12:34:55.123456Z",
         "checked_at": "2026-09-05T12:34:56.123456Z",
@@ -103,7 +103,7 @@ def _usable_result(
         "missing": missing,
         "surplus": surplus,
         "superseded": [],
-        "evidence_version": 2,
+        "evidence_version": 2, "filer_digest_version": 2,
         "collection_started_at": started,
         "checked": completed[:10],
         "checked_at": completed,
@@ -1660,7 +1660,7 @@ def test_aggregate_exact_evidence_requires_current_snapshot_and_full_range() -> 
     summary_ts = datetime.fromisoformat("2026-08-28T12:00:00+00:00").timestamp()
     exact = {
         "complete": True,
-        "evidence_version": 2,
+        "evidence_version": 2, "filer_digest_version": 2,
         "collection_started_at": "2026-08-28T12:59:59.000001Z",
         "checked_at": "2026-08-28T13:00:00.000001Z",
         "transaction_snapshot_id": "sha256:one",

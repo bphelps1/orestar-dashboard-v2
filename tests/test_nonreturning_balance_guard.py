@@ -95,7 +95,7 @@ def _observation(
         "missing": missing,
         "surplus": surplus,
         "superseded": [],
-        "evidence_version": 2,
+        "evidence_version": 2, "filer_digest_version": 2,
         "collection_started_at": started.isoformat().replace("+00:00", "Z"),
         "checked": checked.date().isoformat(),
         "checked_at": checked.isoformat().replace("+00:00", "Z"),

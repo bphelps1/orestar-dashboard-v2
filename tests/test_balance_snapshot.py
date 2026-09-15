@@ -1172,7 +1172,7 @@ def test_supporting_count_must_postdate_summary_capture():
 def test_automation_rejects_legacy_or_ambiguous_coverage_evidence():
     captured = 1_788_220_800  # 2026-09-01T00:00:00Z
     base = {
-        "evidence_version": COVERAGE_EVIDENCE_VERSION,
+        "evidence_version": COVERAGE_EVIDENCE_VERSION, "filer_digest_version": 2,
         "collection_started_at": "2026-09-01T01:59:59.123456Z",
         "checked_at": "2026-09-01T02:00:00.123456Z",
         "transaction_snapshot_id": "sha256:one",
@@ -1208,7 +1208,7 @@ def test_automation_rejects_legacy_or_ambiguous_coverage_evidence():
 def test_automation_requires_exact_snapshot_and_intended_range():
     captured = 1_788_220_800
     evidence = {
-        "evidence_version": COVERAGE_EVIDENCE_VERSION,
+        "evidence_version": COVERAGE_EVIDENCE_VERSION, "filer_digest_version": 2,
         "collection_started_at": "2026-09-01T23:59:59.999999Z",
         "checked_at": "2026-09-02T00:00:00.000001Z",
         "transaction_snapshot_id": "sha256:one",
@@ -1245,7 +1245,7 @@ def test_automation_requires_exact_snapshot_and_intended_range():
 def test_automation_requires_query_to_start_after_capture_and_before_completion():
     captured = 1_788_220_800  # 2026-09-01T00:00:00Z
     evidence = {
-        "evidence_version": COVERAGE_EVIDENCE_VERSION,
+        "evidence_version": COVERAGE_EVIDENCE_VERSION, "filer_digest_version": 2,
         "collection_started_at": "2026-09-01T00:00:00.000001Z",
         "checked_at": "2026-09-01T00:00:01Z",
     }

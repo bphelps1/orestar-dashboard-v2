@@ -79,10 +79,12 @@ import survey_coverage as SC
 import supabase_sync
 from balance_snapshot import (
     COVERAGE_EVIDENCE_VERSION,
+    FILER_DIGEST_SCHEMA_VERSION,
     SOURCE_FILENAME,
     evidence_is_current,
     exact_coverage_result_shape_is_valid,
     exact_evidence_identifier_is_valid,
+    exact_filer_digest_version,
     transaction_filer_snapshots,
     transaction_snapshot_id,
     utc_timestamp,
@@ -112,7 +114,7 @@ USABLE_RESULT_FIELDS = (
     "filer_id", "name", "orestar", "held", "complete", "surplus", "missing",
     "superseded", "evidence_version", "checked", "collection_started_at",
     "checked_at", "transaction_snapshot_id", "filer_transaction_digest",
-    "range_start", "range_end",
+    "range_start", "range_end", "filer_digest_version",
     "exact_search_count",
 )
 
@@ -219,6 +221,7 @@ def _evidence_fields(
         "checked_at": instant,
         "transaction_snapshot_id": transaction_id,
         "filer_transaction_digest": filer_digest,
+        "filer_digest_version": FILER_DIGEST_SCHEMA_VERSION,
         "range_start": start.isoformat(),
         "range_end": end.isoformat(),
     }
@@ -1418,13 +1421,14 @@ def _bounded_usable_history(
         # when no old record has the new collection-start field. It cannot
         # authorize anything until a valid anchor exists.
         if valid_anchors:
-            # A global fingerprint and exact range deterministically imply one
+            # A global fingerprint, exact range and algorithm imply one
             # per-filer digest. If corrupt history claims more than one, retain
             # every conflicting lane so the selector continues to see and
             # reject the ambiguity instead of aging it out.
             anchor_lanes = {
                 (
                     row.get("filer_transaction_digest"),
+                    exact_filer_digest_version(row),
                     row.get("range_start"),
                     row.get("range_end"),
                 )
@@ -1435,6 +1439,7 @@ def _bounded_usable_history(
                     row for row in valid_anchors
                     if (
                         row.get("filer_transaction_digest"),
+                        exact_filer_digest_version(row),
                         row.get("range_start"),
                         row.get("range_end"),
                     ) == lane
@@ -1449,6 +1454,7 @@ def _bounded_usable_history(
                     )
                     and (
                         row.get("filer_transaction_digest"),
+                        exact_filer_digest_version(row),
                         row.get("range_start"),
                         row.get("range_end"),
                     ) == lane
@@ -1710,6 +1716,7 @@ def _record_failure(
         "last_attempt_at": instant,
         "last_attempt_transaction_snapshot_id": transaction_id,
         "last_attempt_filer_transaction_digest": filer_digest,
+        "last_attempt_filer_digest_version": FILER_DIGEST_SCHEMA_VERSION,
         "last_attempt_range_start": start.isoformat() if start else None,
         "last_attempt_range_end": end.isoformat() if end else None,
     }
@@ -1827,6 +1834,7 @@ def _remediation_verification_failures(
                 strictly_after=True,
                 transaction_snapshot_id=transaction_id,
                 filer_transaction_digest=(filer_digests or {}).get(fid),
+                filer_digest_version=FILER_DIGEST_SCHEMA_VERSION,
                 range_start=start,
                 range_end=end,
             )
@@ -2585,6 +2593,7 @@ def main() -> int:
             strictly_after=True,
             transaction_snapshot_id=transaction_id,
             filer_transaction_digest=local_digests.get(fid),
+            filer_digest_version=FILER_DIGEST_SCHEMA_VERSION,
             range_start=start,
             range_end=end,
         )
