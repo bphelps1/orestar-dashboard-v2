@@ -403,7 +403,9 @@ def test_workflow_runs_both_collectors_without_a_second_pull() -> None:
     assert "--filer-ids" not in diff_block
     assert "--flagged" not in workflow
     assert "push summaries auxiliary" in workflow
-    assert "require-no-missing" not in workflow
+    # Paired evidence can truthfully retain missing IDs; only the separate
+    # identity-backfill branch requires a zero-missing terminal result.
+    assert "require-no-missing" not in diff_block
 
 
 def test_workflow_stops_partial_batches_before_any_successor_dispatch() -> None:

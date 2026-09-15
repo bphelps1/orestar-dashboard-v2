@@ -364,11 +364,13 @@ def test_empty_plan_recovery_replans_before_bounded_automatic_continuation():
     recovery = text.split("      - name: Recover aggregation when the atomic plan is empty", 1)[1]
     assert "id: recover_aggregate" in recovery
     replan = recovery.split("      - name: Replan after recovering empty-plan aggregation", 1)[1]
-    assert "if: steps.recover_aggregate.outcome == 'success'" in replan
+    assert "if: inputs.recovery_mode != 'identity_backfill' && steps.recover_aggregate.outcome == 'success'" in replan
     assert "python scraper/atomic_balance_evidence.py plan" in replan
     assert '--max-scopes "$MAX_SCOPES"' in replan
     chain = text.split("      - name: Continue bounded evidence chain", 1)[1]
-    assert "success() && !cancelled() && inputs.filer_ids == ''" in chain
+    assert "success() && !cancelled()" in chain
+    assert "inputs.recovery_mode != 'identity_backfill'" in chain
+    assert "inputs.filer_ids == ''" in chain
     assert "steps.recovery_plan.outputs.selected_scopes != '0'" in chain
     assert 'MAX_CHAIN: ${{ steps.effort.outputs.max_attempts }}' in chain
     assert 'atomic_evidence_effort.py handoff' in chain

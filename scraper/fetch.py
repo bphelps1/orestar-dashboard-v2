@@ -27,6 +27,8 @@ import requests
 from openpyxl import load_workbook
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
+from search_budget import SearchBudget, SearchBudgetError
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -248,6 +250,7 @@ def download_week(
 
     Returns the path to the saved .xlsx file, or None on failure.
     """
+    budget = SearchBudget.from_environment()
     # The narrowing dimensions belong in the filename, or two different
     # sub-windows of the same day would collide on disk and the second would be
     # skipped as "already downloaded".
@@ -261,6 +264,8 @@ def download_week(
         log.debug("Already downloaded: %s", filename.name)
         return filename
 
+    if budget is not None:
+        budget.require_capacity(1)
     try:
         # Ensure we're on the search form
         _return_to_search(page)
@@ -290,6 +295,13 @@ def download_week(
             page.select_option('select[name="cneSearchContributorTxtSearchType"]', "S")
 
         # ── Submit search ─────────────────────────────────────────────────────
+        if budget is not None:
+            budget.consume("ALL", {
+                "collector": "fetch", "date_field": date_field,
+                "start": start.isoformat(), "end": end.isoformat(),
+                "tran_type": tran_type, "amt_from": amt_from,
+                "amt_to": amt_to, "payee_prefix": payee_prefix,
+            })
         page.click('input[name="search"]')
         try:
             page.wait_for_url(RESULTS_URL_PATTERN, timeout=30_000)
@@ -392,6 +404,8 @@ def download_week(
         time.sleep(REQUEST_DELAY)
         return filename
 
+    except SearchBudgetError:
+        raise  # A refusal cannot become a session retry or partial success.
     except SessionExpiredError:
         raise  # propagate up to _fetch_range for browser restart
     except Exception as exc:
@@ -693,6 +707,7 @@ def _save_fetched(fetched: set, log_file: Path = FETCHED_LOG) -> None:
 
 
 def _fetch_range(start: date, end: date, date_field: str = "filed") -> None:
+    SearchBudget.from_environment()  # Refuse malformed configuration before setup.
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     windows = list(week_windows(start, end))
     # One request PER TRANSACTION TYPE, not one request for all of them.
@@ -1086,6 +1101,7 @@ def download_filer_window(
     on success in one branch and a path in another; the queue driver in
     backfill_filers() handles all four narrowing tiers with one code path.
     """
+    budget = SearchBudget.from_environment()
     filename = _filer_window_path(raw_dir, filer_id, tran_type, start, end,
                                   amt_from, amt_to, payee_prefix)
     stale_path = None
@@ -1113,6 +1129,8 @@ def download_filer_window(
             log.debug("Already downloaded: %s (%d rows)", filename.name, rows)
             return filename
 
+    if budget is not None:
+        budget.require_capacity(1)
     try:
         _return_to_search(page)
 
@@ -1138,6 +1156,13 @@ def download_filer_window(
             page.select_option('select[name="cneSearchContributorTxtSearchType"]', "S")
 
         # Submit
+        if budget is not None:
+            budget.consume(str(filer_id), {
+                "collector": "fetch", "date_field": "tran",
+                "start": start.isoformat(), "end": end.isoformat(),
+                "tran_type": tran_type, "amt_from": amt_from,
+                "amt_to": amt_to, "payee_prefix": payee_prefix,
+            })
         page.click('input[name="search"]')
         try:
             page.wait_for_url(RESULTS_URL_PATTERN, timeout=30_000)
@@ -1302,6 +1327,8 @@ def download_filer_window(
         time.sleep(REQUEST_DELAY)
         return filename
 
+    except SearchBudgetError:
+        raise
     except SessionExpiredError:
         raise
     except Exception as exc:
@@ -1387,6 +1414,7 @@ def backfill_filers(
     Forced runs therefore query fresh data and resume only from their own
     validated progress ledger.
     """
+    SearchBudget.from_environment()  # Refuse before cache/progress mutations or setup.
     target_end = end_date or date.today()
     current_year = target_end.year
     RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -1526,6 +1554,8 @@ def backfill_filers(
                         page, context, fid, yr_start, yr_end, RAW_DIR,
                         tran_type, af, at, pp, force=identity_remediation,
                     )
+                except SearchBudgetError:
+                    raise
                 except SessionExpiredError:
                     log.warning("Session expired during filer %s year %d — restarting browser", fid, year)
                     try:
@@ -1540,6 +1570,8 @@ def backfill_filers(
                         )
                         if result is None:
                             consecutive_failures += 1
+                    except SearchBudgetError:
+                        raise
                     except Exception as exc:
                         log.error("Failed filer %s year %d after restart: %s", fid, year, exc)
                         filer_had_error = True
