@@ -22,6 +22,7 @@ from balance_snapshot import (
     evidence_is_current,
     exact_coverage_result_shape_is_valid,
     exact_evidence_identifier_is_valid,
+    exact_filer_digest_version,
     transaction_filer_snapshots,
     transaction_snapshot_id,
 )
@@ -117,6 +118,7 @@ def _looks_structured(row: dict) -> bool:
         "checked_at",
         "transaction_snapshot_id",
         "filer_transaction_digest",
+        "filer_digest_version",
         "range_start",
         "range_end",
     ))
@@ -163,57 +165,57 @@ def _anchored_observation_lanes(
         item for item in [row, *history]
         if _usable_observation(item, requirement, filer_id)
     ]
-    anchor_digests: dict[tuple[str, str], set[str]] = {}
+    anchor_digests: dict[tuple[str, str, int], set[str]] = {}
     for item in usable:
         if item.get("transaction_snapshot_id") != requirement["transaction_snapshot_id"]:
             continue
-        bounds = (
+        versioned_bounds = (
             str(item.get("range_start") or ""),
             str(item.get("range_end") or ""),
+            exact_filer_digest_version(item),
         )
-        anchor_digests.setdefault(bounds, set()).add(
+        anchor_digests.setdefault(versioned_bounds, set()).add(
             item.get("filer_transaction_digest")
         )
-    # One paired snapshot cannot truthfully anchor two states for the same
-    # physical filer and range.
+    # One paired snapshot has one state per physical filer, range and digest
+    # algorithm. Different algorithms are expected to have different hashes;
+    # they cannot supply capture anchors for one another.
     if any(len(digests) != 1 for digests in anchor_digests.values()):
         return None
 
     anchored_lanes = {
-        (bounds, next(iter(digests)))
-        for bounds, digests in anchor_digests.items()
-        if len(digests) == 1
+        (*versioned_bounds, next(iter(digests)))
+        for versioned_bounds, digests in anchor_digests.items()
     }
+
+    def observation_lane(item: dict) -> tuple:
+        return (
+            str(item.get("range_start") or ""),
+            str(item.get("range_end") or ""),
+            exact_filer_digest_version(item),
+            item.get("filer_transaction_digest"),
+        )
+
     newest_any_start = max(_collection_started(item) for item in usable)
     newest_any = [
         item for item in usable
         if _collection_started(item) == newest_any_start
     ]
-    # A later full-history observation on different bounds/local state is a
-    # revocation signal, not ignorable history.  It is not tied to the paired
-    # capture, so it cannot authorize a replacement verdict, but neither may an
-    # older anchored lane continue authorizing action underneath it.  A fresh
-    # paired capture must anchor the new lane first.
-    if any((
-        (
-            str(item.get("range_start") or ""),
-            str(item.get("range_end") or ""),
-        ),
-        item.get("filer_transaction_digest"),
-    ) not in anchored_lanes for item in newest_any):
+    # Apply revocation across all supported versions before selecting a lane.
+    # A later unanchored state/range/algorithm cannot hide behind an older
+    # capture, even when that older observation uses the current algorithm.
+    if any(observation_lane(item) not in anchored_lanes for item in newest_any):
         return None
 
     lanes: dict[tuple[str, str], dict] = {}
-    for bounds, digests in anchor_digests.items():
-        digest = next(iter(digests))
+    for bounds in {key[:2] for key in anchor_digests}:
         observations = [
             item for item in usable
-            if (
-                str(item.get("range_start") or ""),
-                str(item.get("range_end") or ""),
-            ) == bounds
-            and item.get("filer_transaction_digest") == digest
+            if observation_lane(item)[:2] == bounds
+            and observation_lane(item) in anchored_lanes
         ]
+        # A newer verdict in either version supersedes the other version's
+        # verdict for this range. Never let iteration order choose the result.
         newest_start = max(_collection_started(item) for item in observations)
         newest = [
             item for item in observations
@@ -222,7 +224,7 @@ def _anchored_observation_lanes(
         if len({_result_signature(item) for item in newest}) != 1:
             return None
         # Completion time breaks a same-query-start tie only after identical
-        # verdicts are proved.  It cannot rescue a pre-summary query.
+        # verdicts are proved. It cannot rescue a pre-summary query.
         lanes[bounds] = max(newest, key=_checked_at)
     return lanes
 
@@ -387,11 +389,14 @@ def certify_exact_scope_rows(
             continue
         pending.append((members, rows, start, end))
 
-    # Group ranges so a normal rolling slice scans the shards only once.
+    # Group by range and declared algorithm, not by filer. Legacy observations
+    # are verified with the unchanged v1 algorithm; no stored row is relabeled.
     grouped: dict[tuple[date, date], dict] = {}
     for members, rows, start, end in pending:
-        group = grouped.setdefault((start, end), {"ids": set(), "scopes": []})
-        group["ids"].update(members)
+        group = grouped.setdefault((start, end), {"versions": {}, "scopes": []})
+        for member, row in rows:
+            version = exact_filer_digest_version(row)
+            group["versions"].setdefault(version, set()).add(member)
         group["scopes"].append((members, rows))
 
     valid: dict[str, dict] = {}
@@ -399,9 +404,12 @@ def certify_exact_scope_rows(
     for (start, end), group in grouped.items():
         snapshot_before = transaction_snapshot_id(transaction_dir)
         try:
-            current = transaction_filer_snapshots(
-                transaction_dir, group["ids"], start, end,
-            )
+            current_by_version = {
+                version: transaction_filer_snapshots(
+                    transaction_dir, ids, start, end, digest_version=version,
+                )
+                for version, ids in group["versions"].items()
+            }
         except (OSError, EOFError, csv.Error, UnicodeError, ValueError) as exc:
             schema_error = str(exc)
             for members, _rows in group["scopes"]:
@@ -414,14 +422,15 @@ def certify_exact_scope_rows(
                 blocked.update(members)
             continue
         for members, rows in group["scopes"]:
-            digest_matches = all(
-                current.get(member, {}).get("filer_transaction_digest")
-                == row.get("filer_transaction_digest")
-                for member, row in rows
-            )
+            digest_matches = True
             identity_sets_match = True
             for member, row in rows:
-                snapshot = current.get(member, {})
+                version = exact_filer_digest_version(row)
+                snapshot = current_by_version[version].get(member, {})
+                if (exact_filer_digest_version(snapshot) != version
+                        or snapshot.get("filer_transaction_digest")
+                        != row.get("filer_transaction_digest")):
+                    digest_matches = False
                 held_ids = snapshot.get("held_ids") or set()
                 superseded_ids = snapshot.get("superseded_ids") or set()
                 missing = set(row.get("missing") or [])

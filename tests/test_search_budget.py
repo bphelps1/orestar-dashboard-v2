@@ -76,7 +76,7 @@ def test_initialize_and_read_refuse_a_limit_above_the_hard_ceiling(tmp_path):
 def _row(fid, count, searches=None):
     row = {"filer_id": fid, "complete": True, "missing": [], "surplus": [],
            "superseded": [], "orestar": count, "held": count,
-           "filer_transaction_digest": "sha256:cost", "evidence_version": 2,
+           "filer_transaction_digest": "sha256:cost", "evidence_version": 2, "filer_digest_version": 2,
            "range_start": "2006-01-01", "range_end": "2026-09-14"}
     if searches is not None:
         row["exact_search_count"] = searches

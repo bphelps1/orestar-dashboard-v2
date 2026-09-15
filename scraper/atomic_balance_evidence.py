@@ -38,6 +38,7 @@ from balance_snapshot import (
     CALCULATION_VERSION,
     FORMAT_VERSION,
     exact_evidence_identifier_is_valid,
+    exact_filer_digest_version,
     source_year_transaction_digest,
     paired_comparison,
     scope_key,
@@ -326,6 +327,8 @@ def _scope_search_cost(scope: dict, entries: dict, hints: dict) -> int | None:
             keys = ("filer_transaction_digest", "range_start", "range_end",
                     "checked_at", "orestar")
             if (not isinstance(hint, dict)
+                    or exact_filer_digest_version(row) is None
+                    or exact_filer_digest_version(hint) != exact_filer_digest_version(row)
                     or any(key not in hint or hint[key] != row.get(key) for key in keys)
                     or not SNAPSHOT_RE.fullmatch(str(hint.get("filer_transaction_digest", "")))):
                 return None

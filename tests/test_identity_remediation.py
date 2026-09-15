@@ -323,6 +323,7 @@ def _run_selector(
                 + len(row["superseded"]),
             )
             row.setdefault("evidence_version", 2)
+            row.setdefault("filer_digest_version", 2)
             row.setdefault("collection_started_at", "2026-09-02T00:00:00Z")
             row.setdefault("checked_at", "2026-09-02T00:00:00.000001Z")
             row.setdefault("transaction_snapshot_id", snapshot_id)
@@ -1405,7 +1406,7 @@ def test_remediation_gate_requires_exact_current_run_provenance() -> None:
         "complete": False,
         "missing": [],
         "surplus": ["withdrawn"],
-        "evidence_version": 2,
+        "evidence_version": 2, "filer_digest_version": 2,
         "collection_started_at": "2026-09-01T00:00:00.000001Z",
         "checked_at": "2026-09-01T00:00:00.000001Z",
         "transaction_snapshot_id": "sha256:current",

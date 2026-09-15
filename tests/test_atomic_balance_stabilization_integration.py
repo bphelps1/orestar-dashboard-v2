@@ -126,7 +126,7 @@ class EvidenceWindow:
             item = {"filer_id": fid, "name": "Committee", "held": held,
                     "orestar": held - len(surplus), "complete": not surplus,
                     "missing": [], "surplus": surplus, "superseded": [],
-                    "evidence_version": BS.COVERAGE_EVIDENCE_VERSION,
+                    "evidence_version": BS.COVERAGE_EVIDENCE_VERSION, "filer_digest_version": 2,
                     "collection_started_at": self.now.isoformat(),
                     "checked_at": (self.now + timedelta(seconds=1)).isoformat(),
                     "transaction_snapshot_id": self.snapshot,

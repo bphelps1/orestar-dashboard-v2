@@ -38,7 +38,9 @@ CALCULATION_VERSION = "cash-balance-v2"
 SOURCE_FILENAME = "balance_snapshot_source.json"
 CAPTURE_KEY = "comparison_capture"
 COVERAGE_EVIDENCE_VERSION = 2
-FILER_DIGEST_VERSION = "orestar-filer-transaction-v1"
+FILER_DIGEST_VERSION = "orestar-filer-transaction-v2"
+FILER_DIGEST_SCHEMA_VERSION = 2
+FILER_DIGEST_DOMAINS = {1: "orestar-filer-transaction-v1", 2: FILER_DIGEST_VERSION}
 CASH_SCOPE_DIGEST_VERSION = "orestar-cash-scope-v1"
 
 
@@ -352,6 +354,8 @@ def transaction_filer_snapshots(
     filer_ids,
     start: date,
     end: date,
+    *,
+    digest_version: int = FILER_DIGEST_SCHEMA_VERSION,
 ) -> dict[str, dict]:
     """Logical per-filer snapshots over one inclusive transaction range.
 
@@ -360,12 +364,16 @@ def transaction_filer_snapshots(
     gzip byte replaces that global hash. These digests hash the canonical CSV
     content for each physical filer instead. Row order, gzip metadata, and the
     scraper's ``_source_file`` bookkeeping do not affect the result; any
-    transaction identity or substantive field does.
+    transaction identity or substantive field does. Version 2 additionally
+    excludes the generated contributor_payee_canonical label. Version 1 stays
+    available only to verify existing observations under their original rules.
 
     Every shard must expose recognized filer/original-ID columns even when it
     has no requested rows. Silently treating a schema-mismatched shard as empty
     would produce a plausible but incomplete digest, so schema omissions raise.
     """
+    if type(digest_version) is not int or digest_version not in FILER_DIGEST_DOMAINS:
+        raise ValueError("unsupported filer digest version")
     if end < start:
         raise ValueError("transaction snapshot range end precedes start")
     targets = {
@@ -424,7 +432,8 @@ def transaction_filer_snapshots(
 
                 canonical = {}
                 for key, value in row.items():
-                    if key is None or key == "_source_file":
+                    if (key is None or key == "_source_file"
+                            or (digest_version == 2 and key == "contributor_payee_canonical")):
                         continue
                     canonical_key = (
                         "filer_id" if key in {"filer id", "filer_id"}
@@ -444,7 +453,8 @@ def transaction_filer_snapshots(
 
     out = {}
     for fid in targets:
-        digest = hashlib.sha256(f"{FILER_DIGEST_VERSION}\0".encode("ascii"))
+        domain = FILER_DIGEST_DOMAINS[digest_version]
+        digest = hashlib.sha256(f"{domain}\0".encode("ascii"))
         for component in (fid, start.isoformat(), end.isoformat()):
             digest.update(component.encode("utf-8"))
             digest.update(b"\0")
@@ -457,8 +467,17 @@ def transaction_filer_snapshots(
             "held_ids": held[fid],
             "superseded_ids": superseded[fid],
             "filer_transaction_digest": f"sha256:{digest.hexdigest()}",
+            "filer_digest_version": digest_version,
         }
     return out
+
+
+def exact_filer_digest_version(row: Any) -> int | None:
+    """Read the algorithm without upgrading or modifying legacy observations."""
+    if not isinstance(row, dict):
+        return None
+    version = row.get("filer_digest_version", 1)
+    return version if type(version) is int and version in FILER_DIGEST_DOMAINS else None
 
 
 def exact_evidence_identifier_is_valid(value: Any) -> bool:
@@ -468,7 +487,8 @@ def exact_evidence_identifier_is_valid(value: Any) -> bool:
 
 def exact_coverage_result_shape_is_valid(row: Any) -> bool:
     """Whether an exact-diff result has a coherent identity-set verdict."""
-    if not isinstance(row, dict) or type(row.get("complete")) is not bool:
+    if (not isinstance(row, dict) or type(row.get("complete")) is not bool
+            or exact_filer_digest_version(row) is None):
         return False
     missing = row.get("missing")
     surplus = row.get("surplus")
@@ -563,6 +583,7 @@ def evidence_is_current(
     strictly_after: bool = False,
     transaction_snapshot_id: str | None = None,
     filer_transaction_digest: str | None = None,
+    filer_digest_version: int | None = None,
     range_start: Any = None,
     range_end: Any = None,
     minimum_range_end: Any = None,
@@ -578,7 +599,8 @@ def evidence_is_current(
     row = evidence or {}
     if require_precise:
         checked_dt = _as_utc_datetime(row.get("checked_at"), precise=True)
-        if row.get("evidence_version") != COVERAGE_EVIDENCE_VERSION:
+        if (row.get("evidence_version") != COVERAGE_EVIDENCE_VERSION
+                or exact_filer_digest_version(row) is None):
             return False
     else:
         checked_dt = _as_utc_datetime(
@@ -612,6 +634,11 @@ def evidence_is_current(
         if (not exact_evidence_identifier_is_valid(filer_transaction_digest)
                 or row.get("filer_transaction_digest")
                 != filer_transaction_digest):
+            return False
+    if filer_digest_version is not None:
+        if (type(filer_digest_version) is not int
+                or filer_digest_version not in FILER_DIGEST_DOMAINS
+                or exact_filer_digest_version(row) != filer_digest_version):
             return False
 
     expected_start = _as_iso_date(range_start) if range_start is not None else None

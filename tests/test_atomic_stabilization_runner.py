@@ -203,7 +203,7 @@ def test_replan_preserves_original_reserved_pass_count():
 
 def _budget_rows(root, counts):
     rows = [{"filer_id": fid, "complete": True, "missing": [], "surplus": [],
-             "superseded": [], "orestar": 1, "held": 1, "evidence_version": 2,
+             "superseded": [], "orestar": 1, "held": 1, "evidence_version": 2, "filer_digest_version": 2,
              "filer_transaction_digest": "sha256:budget", "exact_search_count": cost,
              "range_start": "2006-01-01", "range_end": "2026-09-13"}
             for fid, cost in counts.items()]

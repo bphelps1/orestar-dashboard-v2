@@ -48,7 +48,7 @@ def _result(filer_id: str) -> dict:
         "surplus": [],
         "missing": [],
         "superseded": [],
-        "evidence_version": 2,
+        "evidence_version": 2, "filer_digest_version": 2,
         "collection_started_at": "2026-09-10T12:00:01Z",
         "checked": "2026-09-10",
         "checked_at": "2026-09-10T12:00:02Z",
