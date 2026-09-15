@@ -168,7 +168,9 @@ def test_stabilizer_and_both_plans_use_the_admitted_reservation():
     assert "steps.verify.outputs.certified_scopes == steps.plan.outputs.selected_scopes" in stabilize
     assert 'steps.stabilize.outcome }}" != "success"' in step("Enforce truthful terminal status")
     chain = step("Continue bounded evidence chain")
-    assert "success() && !cancelled() && inputs.filer_ids == ''" in chain
+    assert "success() && !cancelled()" in chain
+    assert "inputs.recovery_mode != 'identity_backfill'" in chain
+    assert "inputs.filer_ids == ''" in chain
     assert "steps.effort.outputs.max_passes == '3'" in chain
     assert "atomic_evidence_effort.py handoff" in chain
     assert "-f max_passes=3" in chain
