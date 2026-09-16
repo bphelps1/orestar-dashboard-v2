@@ -17,7 +17,7 @@ import json
 import logging
 import re
 import shutil
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fractions import Fraction
@@ -311,8 +311,18 @@ def _certified_orestar_absent(
     name_to_fids: dict[str, list[str]],
     comparisons: dict[str, dict],
     transaction_dir: Path,
+    reasons: dict[str, list[str]] | None = None,
 ) -> tuple[dict[str, set[str]], set[str], str | None]:
-    """Certify balance-only omissions without deleting stored rows."""
+    """Certify balance-only omissions without deleting stored rows.
+
+    Pass a dict as ``reasons`` to collect why each refused filer was refused.
+    It is an output collector, not a result: the return shape is unchanged so
+    existing callers keep working, and certification itself is untouched. The
+    point is only that the outcome stops being reported as a bare count, which
+    cannot be worked — a capture that has aged out, rows that moved under the
+    capture, and an un-backfilled shortfall all produce the same number and
+    need different remedies.
+    """
     requirements, ambiguous = _paired_evidence_requirements(
         name_to_fids, comparisons,
     )
@@ -324,6 +334,7 @@ def _certified_orestar_absent(
         transaction_dir,
         ambiguous_members=ambiguous,
         require_no_missing=True,
+        reasons=reasons,
     )
     absent = {
         fid: set(row.get("surplus") or [])
@@ -2056,9 +2067,11 @@ def aggregate_filers(
             for name, fids in _name_to_fids.items()
         }
         _surplus_candidates = rows_requesting_surplus(_diff_rows)
+        _block_reasons: dict[str, list[str]] = {}
         _ORESTAR_ABSENT, _blocked_absent, _evidence_error = (
             _certified_orestar_absent(
                 _diff_rows, _name_to_fids, _comparison_by_name, TRANS_DIR,
+                reasons=_block_reasons,
             )
         )
         if _surplus_candidates:
@@ -2069,6 +2082,48 @@ def aggregate_filers(
                 sum(len(ids) for ids in _ORESTAR_ABSENT.values()),
                 len(_blocked_absent),
             )
+            # The refusal count above is not actionable on its own. Break it
+            # down by cause, and write the per-filer detail out so a refusal
+            # can be traced to one committee rather than inferred from
+            # aggregates. Each filer can carry several reasons, so the
+            # percentages here deliberately do not sum to the total.
+            _reason_tally = Counter(
+                code
+                for codes in _block_reasons.values()
+                for code in codes
+            )
+            for _code, _n in _reason_tally.most_common():
+                log.info(
+                    "  refused: %-36s %4d filers", _code, _n,
+                )
+            _unattributed = sorted(
+                fid for fid in _blocked_absent if not _block_reasons.get(fid)
+            )
+            if _unattributed:
+                # Should be unreachable: every blocking site records a reason.
+                # If this ever fires, a new refusal path was added without
+                # attribution and the breakdown above is silently incomplete.
+                log.warning(
+                    "  refused with NO recorded reason: %d filers (%s)",
+                    len(_unattributed), ", ".join(_unattributed[:10]),
+                )
+            _refusal_path = AGG_DIR / "certification_refusals.json"
+            _refusal_path.write_text(json.dumps({
+                "generated": datetime.now(timezone.utc).isoformat(
+                    timespec="seconds",
+                ),
+                "certified_filers": len(_ORESTAR_ABSENT),
+                "certified_rows": sum(
+                    len(ids) for ids in _ORESTAR_ABSENT.values()
+                ),
+                "refused_filers": len(_blocked_absent),
+                "by_reason": dict(_reason_tally.most_common()),
+                "filers": {
+                    fid: codes
+                    for fid, codes in sorted(_block_reasons.items())
+                },
+            }, indent=2))
+            log.info("Wrote %s", _refusal_path.name)
         if _evidence_error:
             log.warning(
                 "ORESTAR-absence evidence could not be certified: %s",

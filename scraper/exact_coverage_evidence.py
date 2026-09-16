@@ -31,6 +31,60 @@ from balance_snapshot import (
 FULL_HISTORY_START = "2006-01-01"
 USABLE_HISTORY_KEY = "usable_history"
 
+# Why a filer was refused certification.
+#
+# The certifier fails closed in eleven distinct places and, until now, reported
+# a single number: "137 physical filers refused". That count cannot be acted
+# on. A refusal caused by a paired capture that has aged out needs a new
+# capture; one caused by rows that moved under the capture needs a re-diff; one
+# caused by missing rows needs a backfill; and one caused by ambiguous
+# canonical ownership needs a name fix. All four look identical in a count, so
+# the backlog could only be worked by guessing.
+#
+# These are diagnostics, never inputs. Nothing reads a reason back to decide
+# anything — the certification verdict is computed exactly as before, and a
+# reason is only recorded alongside it.
+BLOCK_NO_PAIRED_REQUIREMENT = "no_paired_requirement"
+BLOCK_SCOPE_EXCLUDES_FILER = "scope_excludes_filer"
+BLOCK_SCOPE_MEMBERS_DISAGREE = "scope_members_disagree"
+BLOCK_AMBIGUOUS_SCOPE = "ambiguous_scope"
+BLOCK_NO_DIFF_ROW = "no_diff_row"
+BLOCK_DUPLICATE_DIFF_ROW = "duplicate_diff_row"
+BLOCK_NO_ANCHORED_OBSERVATION = "no_anchored_observation"
+BLOCK_NO_COMMON_RANGE = "no_common_range"
+BLOCK_CONFLICTING_ACTIVE_RANGES = "conflicting_active_ranges"
+BLOCK_INVALID_RANGE_DATES = "invalid_range_dates"
+BLOCK_SHARD_READ_ERROR = "shard_read_error"
+BLOCK_SHARDS_CHANGED = "shards_changed_during_certification"
+BLOCK_DIGEST_MOVED = "digest_moved"
+BLOCK_IDENTITY_SETS_MOVED = "identity_sets_moved"
+BLOCK_MISSING_ROWS = "blocked_by_missing_rows"
+
+
+def _record_block(
+    blocked: set[str],
+    reasons: dict[str, list[str]] | None,
+    members: Iterable[str],
+    code: str,
+) -> None:
+    """Mark ``members`` blocked and note why.
+
+    A filer can be refused by more than one scope and for more than one reason
+    within a scope — a digest that moved AND missing rows, say — so reasons
+    accumulate in order rather than the first or last one winning. Collapsing
+    them to a single code would reintroduce exactly the ambiguity this exists
+    to remove: a filer recorded only as `blocked_by_missing_rows` would look
+    like a backfill away from certifying when its digest has moved too.
+    """
+    for member in members:
+        fid = str(member)
+        blocked.add(fid)
+        if reasons is None:
+            continue
+        codes = reasons.setdefault(fid, [])
+        if code not in codes:
+            codes.append(code)
+
 
 def _collection_started(row: dict) -> datetime | None:
     """Return a precise UTC collection start, or ``None``."""
@@ -284,12 +338,18 @@ def certify_exact_scope_rows(
     active_ranges: dict[str, str] | None = None,
     ambiguous_members: Iterable[str] = (),
     require_no_missing: bool = False,
+    reasons: dict[str, list[str]] | None = None,
 ) -> tuple[dict[str, dict], set[str], str | None]:
     """Return exact rows safe to act on, blocked IDs, and a scan error.
 
     Certification is atomic at canonical-scope level.  Every physical member
     must share a valid anchored range, and every selected row must match a
     deterministic digest recomputed from the current transaction shards.
+
+    Pass a dict as ``reasons`` to collect why each blocked filer was refused,
+    as ``{filer_id: [code, ...]}`` drawn from the ``BLOCK_*`` constants above.
+    It is an output collector and nothing more: the verdict does not depend on
+    it, and omitting it leaves behaviour identical.
     """
     active_ranges = active_ranges or {}
     ambiguous = {str(fid) for fid in ambiguous_members if str(fid)}
@@ -314,51 +374,67 @@ def certify_exact_scope_rows(
         requirement = requirements.get(fid)
         signature = _requirement_signature(requirement)
         if signature is None:
-            blocked.add(fid)
+            _record_block(blocked, reasons, [fid], BLOCK_NO_PAIRED_REQUIREMENT)
             continue
         members = signature[0]
         if fid not in members:
-            blocked.update(members)
-            blocked.add(fid)
+            _record_block(
+                blocked, reasons, [*members, fid], BLOCK_SCOPE_EXCLUDES_FILER,
+            )
             continue
         # Every member must independently point to precisely the same paired
         # scope.  This rejects partial or overlapping canonical ownership.
         if any(_requirement_signature(requirements.get(member)) != signature
                for member in members):
-            blocked.update(members)
+            _record_block(
+                blocked, reasons, members, BLOCK_SCOPE_MEMBERS_DISAGREE,
+            )
             continue
         relevant_scopes[members] = requirement
 
     pending = []
     for members, requirement in relevant_scopes.items():
         if any(member in ambiguous for member in members):
-            blocked.update(members)
+            _record_block(blocked, reasons, members, BLOCK_AMBIGUOUS_SCOPE)
             continue
         member_lanes: dict[str, dict[tuple[str, str], dict]] = {}
-        invalid = False
+        # Same three conditions as before, in the same order and with the same
+        # early break — separated only so the refusal can name which one fired.
+        # "no anchored observation" is the interesting one: it means the diff
+        # measured this filer against a transaction snapshot the paired capture
+        # never adopted, which is a re-capture, not a re-scrape.
+        invalid = None
         for member in members:
             row = rows_by_id.get(member)
-            lanes = (
-                None if row is None or member in duplicate_ids
-                else _anchored_observation_lanes(row, requirement, member)
-            )
+            if row is None:
+                invalid = BLOCK_NO_DIFF_ROW
+                break
+            if member in duplicate_ids:
+                invalid = BLOCK_DUPLICATE_DIFF_ROW
+                break
+            lanes = _anchored_observation_lanes(row, requirement, member)
             if not lanes:
-                invalid = True
+                invalid = BLOCK_NO_ANCHORED_OBSERVATION
                 break
             member_lanes[member] = lanes
         common_bounds = (
             set.intersection(*(set(lanes) for lanes in member_lanes.values()))
             if member_lanes else set()
         )
-        if invalid or not common_bounds:
-            blocked.update(members)
+        if invalid:
+            _record_block(blocked, reasons, members, invalid)
+            continue
+        if not common_bounds:
+            _record_block(blocked, reasons, members, BLOCK_NO_COMMON_RANGE)
             continue
 
         active_ends = {
             active_ranges[member] for member in members if member in active_ranges
         }
         if len(active_ends) > 1:
-            blocked.update(members)
+            _record_block(
+                blocked, reasons, members, BLOCK_CONFLICTING_ACTIVE_RANGES,
+            )
             continue
         active_bounds = (
             (FULL_HISTORY_START, next(iter(active_ends))) if active_ends else None
@@ -385,7 +461,7 @@ def certify_exact_scope_rows(
             start = date.fromisoformat(chosen_bounds[0])
             end = date.fromisoformat(chosen_bounds[1])
         except ValueError:
-            blocked.update(members)
+            _record_block(blocked, reasons, members, BLOCK_INVALID_RANGE_DATES)
             continue
         pending.append((members, rows, start, end))
 
@@ -413,13 +489,13 @@ def certify_exact_scope_rows(
         except (OSError, EOFError, csv.Error, UnicodeError, ValueError) as exc:
             schema_error = str(exc)
             for members, _rows in group["scopes"]:
-                blocked.update(members)
+                _record_block(blocked, reasons, members, BLOCK_SHARD_READ_ERROR)
             continue
         if (not snapshot_before
                 or transaction_snapshot_id(transaction_dir) != snapshot_before):
             schema_error = "transaction shards changed during certification"
             for members, _rows in group["scopes"]:
-                blocked.update(members)
+                _record_block(blocked, reasons, members, BLOCK_SHARDS_CHANGED)
             continue
         for members, rows in group["scopes"]:
             digest_matches = True
@@ -450,5 +526,23 @@ def certify_exact_scope_rows(
             if digest_matches and identity_sets_match and scope_has_no_missing:
                 valid.update(rows)
             else:
-                blocked.update(members)
+                # Three unrelated failures shared one refusal here, and they
+                # call for three different remedies: a moved digest means the
+                # filer's rows changed under the capture (re-diff), moved
+                # identity sets mean the stored surplus/missing/superseded no
+                # longer describe the shards (re-diff, and a data question),
+                # and missing rows mean a backfill must land first. Record
+                # every one that fired, not just the first.
+                if not digest_matches:
+                    _record_block(
+                        blocked, reasons, members, BLOCK_DIGEST_MOVED,
+                    )
+                if not identity_sets_match:
+                    _record_block(
+                        blocked, reasons, members, BLOCK_IDENTITY_SETS_MOVED,
+                    )
+                if not scope_has_no_missing:
+                    _record_block(
+                        blocked, reasons, members, BLOCK_MISSING_ROWS,
+                    )
     return valid, blocked, schema_error
