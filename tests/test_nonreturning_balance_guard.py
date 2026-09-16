@@ -1357,3 +1357,112 @@ def test_consistency_audit_uses_one_cash_contract_for_the_whole_timeline() -> No
         ],
     }
     assert audit_filer("legacy-adjustment", legacy_adjustment) == []
+
+
+# ── Refusal attribution ─────────────────────────────────────────────────────
+#
+# The certifier fails closed in eleven places and used to report one number.
+# These tests pin the reason codes to the conditions that produce them, so a
+# later refactor cannot quietly collapse two causes back into one — which is
+# the failure mode that made the refusal backlog unworkable in the first
+# place. They assert only on the diagnostic; the verdict assertions live in
+# the tests above and are deliberately not duplicated here.
+
+def test_refusal_reason_names_a_digest_that_moved(tmp_path) -> None:
+    """Rows that changed under the capture are attributed, not just counted."""
+    transaction_dir, fingerprint, snapshots = _shards(
+        tmp_path, [_transaction("1", "kept")],
+    )
+    row = _observation("1", fingerprint, snapshots["1"]["filer_transaction_digest"],
+                       surplus=["kept"])
+    # Rewrite the shard so the filer's current digest no longer matches the
+    # digest recorded at capture time.
+    moved_root = tmp_path / "moved"
+    moved_root.mkdir()
+    _shards_again = _shards(moved_root, [_transaction("1", "different")])
+    reasons: dict[str, list[str]] = {}
+    _absent, blocked, _error = P._certified_orestar_absent(
+        [row],
+        {"Canonical": ["1"]},
+        {"Canonical": _comparison(["1"], fingerprint)},
+        _shards_again[0],
+        reasons=reasons,
+    )
+    assert "1" in blocked
+    # Both fire, and both are true: replacing the row changes the filer digest
+    # AND drops `kept` out of the held set the surplus claim refers to. This is
+    # the case that justifies accumulating reasons rather than taking the
+    # first — a single code here would have to pick one and hide the other.
+    assert reasons["1"] == ["digest_moved", "identity_sets_moved"]
+
+
+def test_refusal_reason_separates_missing_rows_from_a_moved_digest(tmp_path) -> None:
+    """A shortfall is a backfill; a moved digest is a re-diff. Never conflated."""
+    transaction_dir, fingerprint, snapshots = _shards(
+        tmp_path, [_transaction("1", "kept")],
+    )
+    row = _observation(
+        "1", fingerprint, snapshots["1"]["filer_transaction_digest"],
+        surplus=["kept"], missing=["absent-row"],
+    )
+    reasons: dict[str, list[str]] = {}
+    _absent, blocked, _error = P._certified_orestar_absent(
+        [row],
+        {"Canonical": ["1"]},
+        {"Canonical": _comparison(["1"], fingerprint)},
+        transaction_dir,
+        reasons=reasons,
+    )
+    assert "1" in blocked
+    # The shortfall must be named. Reporting only `digest_moved` here would
+    # send this committee for a re-diff that cannot possibly certify it.
+    assert "blocked_by_missing_rows" in reasons["1"]
+
+
+def test_refusal_reason_names_an_observation_off_the_capture_anchor(tmp_path) -> None:
+    """A diff taken against another snapshot needs a capture, not a re-scrape."""
+    transaction_dir, fingerprint, snapshots = _shards(
+        tmp_path, [_transaction("1", "kept")],
+    )
+    row = _observation(
+        "1", "sha256:a-snapshot-the-capture-never-adopted",
+        snapshots["1"]["filer_transaction_digest"], surplus=["kept"],
+    )
+    reasons: dict[str, list[str]] = {}
+    _absent, blocked, _error = P._certified_orestar_absent(
+        [row],
+        {"Canonical": ["1"]},
+        {"Canonical": _comparison(["1"], fingerprint)},
+        transaction_dir,
+        reasons=reasons,
+    )
+    assert "1" in blocked
+    assert reasons["1"] == ["no_anchored_observation"]
+
+
+def test_every_refused_filer_carries_at_least_one_reason(tmp_path) -> None:
+    """No silent refusals: a blocked filer with no reason is a missed site."""
+    transaction_dir, fingerprint, snapshots = _shards(
+        tmp_path, [_transaction("1", "kept")],
+    )
+    rows = [
+        _observation("1", fingerprint,
+                     snapshots["1"]["filer_transaction_digest"],
+                     surplus=["kept"], missing=["gone"]),
+        _observation("2", "sha256:other", "sha256:other-digest",
+                     surplus=["kept"]),
+    ]
+    reasons: dict[str, list[str]] = {}
+    _absent, blocked, _error = P._certified_orestar_absent(
+        rows,
+        {"Canonical": ["1"], "Other": ["2"]},
+        {
+            "Canonical": _comparison(["1"], fingerprint),
+            "Other": _comparison(["2"], fingerprint),
+        },
+        transaction_dir,
+        reasons=reasons,
+    )
+    assert blocked
+    unattributed = [fid for fid in blocked if not reasons.get(fid)]
+    assert unattributed == []
