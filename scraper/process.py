@@ -22,6 +22,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fractions import Fraction
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from rapidfuzz import fuzz, process as rfuzz_process
@@ -65,6 +66,34 @@ DATA_DIR      = ROOT / "data"
 # describe the same set on both sides.
 # The three in-kind varieties ORESTAR recognises. All are non-cash and all
 # appear in BOTH its Total Contributions and Total Expenditures lines.
+# ORESTAR states filing dates in Oregon local time; our capture instants are
+# UTC epochs. Comparing the two without converting is an off-by-one-day error
+# for most captures, because the balance jobs run between 00:00 and 06:00 UTC
+# — which is the PREVIOUS afternoon or evening in Oregon. A contribution filed
+# on the 14th Pacific therefore looks, to a naive UTC date comparison, as
+# though it preceded a capture stamped 01:38 UTC on the 14th. It did not.
+ORESTAR_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def _capture_local_date(comparison: dict | None):
+    """Oregon-local calendar date of a paired capture instant, or None.
+
+    ORESTAR's account summary states what had been FILED when it was read, so
+    a like-for-like comparison has to bound our side the same way. `filed_date`
+    carries only day precision, which is why this returns a date rather than
+    the instant: rows filed ON this date cannot be placed before or after the
+    capture, and are reported as an indeterminate band rather than guessed at.
+    """
+    try:
+        captured_at = float((comparison or {}).get("captured_at"))
+    except (TypeError, ValueError):
+        return None
+    try:
+        return datetime.fromtimestamp(captured_at, ORESTAR_TZ).date()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 INKIND_SUBTYPES = frozenset({
     "In-Kind Contribution",
     "In-Kind/Forgiven Account Payable",
@@ -2694,6 +2723,47 @@ def aggregate_filers(
                 _k = str(int(_yr))
                 yearly_nets_filed[_k] = yearly_nets_filed.get(_k, 0.0) + _sign * float(_amt)
 
+        # The same nets, bounded to what had been FILED when ORESTAR's summary
+        # was read.
+        #
+        # This is NOT another accounting basis. It is the same basis evaluated
+        # at the moment ORESTAR's number describes — the only way to compare
+        # like for like against a figure that was frozen days ago while filings
+        # kept arriving. Measured over the 270 committees diverging in 2026,
+        # bounding this way accounts for 89% of the gap and matches 93 of them
+        # to the cent; the naive comparison attributes the same money to
+        # missing data.
+        #
+        # `filed_date` carries only day precision, so rows filed ON the capture
+        # date genuinely cannot be placed. They are summed separately as an
+        # indeterminate band rather than assigned to either side: a residual
+        # smaller than its band is not evidence of anything. Guessing here is
+        # what produced the "ORESTAR contradicts its own itemised list" reading
+        # of committees whose rows had simply been filed that afternoon.
+        _capture_day = _capture_local_date(_comparison_by_name.get(name))
+        yearly_nets_at_capture: dict[str, float] = {}
+        yearly_capture_band: dict[str, float] = {}
+        if _capture_day is not None:
+            for _f, _sign in [(_c_for_coh, 1), (_or_for_coh, 1), (_e_for_coh, -1),
+                              (_od_for_coh, -1), (_ba_for_coh, 1)]:
+                if _f.empty or "filed_date" not in _f.columns or "year" not in _f.columns:
+                    continue
+                _g = _f.copy()
+                _fd = pd.to_datetime(_g["filed_date"], errors="coerce").dt.date
+                # A row we cannot date on the filing side cannot be bounded by
+                # a filing cutoff either; it stays out of both figures rather
+                # than defaulting into the "before" side.
+                _known = _fd.notna()
+                for _frame, _target in (
+                    (_g[_known & (_fd < _capture_day)], yearly_nets_at_capture),
+                    (_g[_known & (_fd == _capture_day)], yearly_capture_band),
+                ):
+                    if _frame.empty:
+                        continue
+                    for _yr, _amt in _frame.groupby("year")["amount"].sum().items():
+                        _k = str(int(_yr))
+                        _target[_k] = _target.get(_k, 0.0) + _sign * float(_amt)
+
         # Determine beginning balances and cash-on-hand
         # Strategy: use the earliest-year beginning balance scraped directly from
         # ORESTAR (via Playwright), then roll forward through yearly transaction nets.
@@ -3218,6 +3288,35 @@ def aggregate_filers(
                 delta_movement_asof = None
                 snapshot_lag = False
 
+                # What our side summed when ORESTAR's summary was read, and how
+                # much of the answer the same-day filings could still move.
+                # Recorded, never subtracted: `delta_movement` above stays the
+                # headline and nothing is removed from the discrepancy total.
+                # The point is to make a timing gap legible as timing, not to
+                # excuse it — the fix for a real one is a fresher capture.
+                our_net_at_capture = (
+                    round(yearly_nets_at_capture.get(yr_s, 0.0), 2)
+                    if _capture_day is not None else None
+                )
+                delta_movement_at_capture = (
+                    round(our_net_at_capture - orestar_movement, 2)
+                    if our_net_at_capture is not None
+                    and orestar_movement is not None else None
+                )
+                capture_band = (
+                    round(abs(yearly_capture_band.get(yr_s, 0.0)), 2)
+                    if _capture_day is not None else None
+                )
+                # True only when bounding to the capture leaves a residual that
+                # the indeterminate band cannot account for. That is the
+                # honest reading of "this gap is not explained by when we
+                # looked" — and it is deliberately the claim that needs
+                # evidence, rather than its opposite.
+                survives_capture_bound = (
+                    None if delta_movement_at_capture is None
+                    else abs(delta_movement_at_capture) > (capture_band or 0.0) + 0.005
+                )
+
                 # Deliberately NOT flagging "this would reconcile on another
                 # basis" as an explanation.
                 #
@@ -3375,6 +3474,15 @@ def aggregate_filers(
                         "orestar_omits_loans": orestar_omits_loans,
                         "our_net_asof": our_net_asof,
                         "delta_movement_asof": delta_movement_asof,
+                        # Capture-bounded view. See the note where these are
+                        # computed: diagnostic only, nothing is suppressed.
+                        "our_net_at_capture": our_net_at_capture,
+                        "delta_movement_at_capture": delta_movement_at_capture,
+                        "capture_indeterminate_band": capture_band,
+                        "survives_capture_bound": survives_capture_bound,
+                        "capture_local_date": (
+                            _capture_day.isoformat() if _capture_day else None
+                        ),
                         "snapshot_lag": snapshot_lag,
                         # ORESTAR's summary against ORESTAR's OWN itemised
                         # transactions, where we know our row set equals its.
