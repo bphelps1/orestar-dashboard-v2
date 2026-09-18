@@ -198,59 +198,93 @@ def _number(value: Any) -> float | None:
 def certificate_restatements(
     orestar_years: dict,
     certificate_years: Iterable[int],
+    our_nets: dict[int, float] | None = None,
 ) -> list[dict]:
     """Ghost rows for the balance ORESTAR restated around certificate years.
 
-    For every consecutive pair of ORESTAR annual summaries where at least one
-    of the two years was a certificate year, ORESTAR's opening for the later
-    year minus its closing for the earlier one is money that moved without
-    being itemized. Each such step becomes one ghost row:
+    A row is generated only where ORESTAR itself restated — its opening for a
+    year differs from its close for the year before — and at least one of the
+    two years was a certificate year. Where ORESTAR's chain holds, its totals
+    are consistent with its openings, so any difference from our rows is a
+    genuine data gap and must stay visible, not be relabelled.
 
-      * leaving a certificate year  -> dated 31 December of that year, the
-        year the unitemized activity belongs to;
-      * entering a certificate year from an itemized one -> dated 1 January
-        of the certificate year, where ORESTAR restated the opening.
+    ``our_nets`` is our own net cash movement per year for this filer, BEFORE
+    any ghost rows. Leaving a certificate year the amount is measured from
+    our side, as "ORESTAR's next opening, less its opening for the certificate
+    year, less what our own rows moved in it":
 
-    Either way every ghost row sits inside a certificate year.
+        amount = opening(q) - opening(p) - our_net(p)
 
-    The amounts are ORESTAR's own figures, independent of anything we hold.
-    That is deliberate. It cannot double-count itemized rows we already have
-    inside a certificate year (e.g. after a certificate expired mid-year),
-    because ORESTAR's closing figure already includes those. And it cannot
-    absorb an unrelated gap in our data, which a "set our balance to ORESTAR's
-    opening" rule would: across all 308 points where a certificate period ends,
-    the two agree to the cent in 306, and the other two differ by $93.73 in
-    total — a real, separate gap that stays visible rather than being
-    relabelled as certificate activity.
+    That trusts ORESTAR's opening AFTER the certificate year over ORESTAR's
+    total FOR it, and the second is not reliable. Friends for Safer Libraries
+    is the case that forced this: one $25.95 expenditure dated 2006-12-30 and
+    filed 2007-02-28 appears in ORESTAR's 2006 total AND its 2007
+    (certificate-year) total, and ORESTAR's 2008 opening undoes the double
+    count with a +$25.87 step. Taking that step as unitemized money — the
+    earlier version of this rule — added $25.87 we never needed and pushed a
+    committee that matched to within $0.08 to $25.95 off. Measured from our
+    side the row is -$0.08, and the balance matches.
 
-    Boundaries where ORESTAR's chain holds produce nothing, and a break with no
-    certificate on either side is left alone: those nine cases in 26,886 are
-    unexplained, and a ghost row would hide them.
+    Anchoring on ORESTAR's opening for the certificate year, rather than on our
+    own balance entering it, means no gap from BEFORE the certificate period
+    is ever absorbed: a pre-existing difference passes through unchanged. What
+    CAN be absorbed is a difference inside the certificate year itself — e.g.
+    an itemized row we lack from after a certificate expired mid-year. That
+    part is returned separately as ``certificate_year_difference`` so it is
+    disclosed rather than hidden inside the restatement.
+
+    Entering a certificate year from an itemized one, the amount is ORESTAR's
+    pure step (opening minus prior close): the itemized year's own total is
+    trustworthy, and a gap there must stay visible.
+
+    Dating keeps every row inside a certificate year:
+
+      * leaving a certificate year -> 31 December of that year;
+      * entering one               -> 1 January of the certificate year.
+
+    A break with no certificate on either side is left alone: those nine cases
+    in 26,886 year boundaries are unexplained, and a ghost row would hide them.
     """
     certs = {int(y) for y in certificate_years}
     if not certs or not isinstance(orestar_years, dict):
         return []
+    ours = {int(k): float(v) for k, v in (our_nets or {}).items()}
     years = sorted(int(y) for y in orestar_years if str(y).isdigit())
     rows: list[dict] = []
     for prior, year in zip(years, years[1:]):
         if year - prior != 1 or (prior not in certs and year not in certs):
             continue
-        prior_end = _number((orestar_years.get(str(prior)) or {}).get("ending_cash_balance"))
+        prior_summary = orestar_years.get(str(prior)) or {}
+        prior_end = _number(prior_summary.get("ending_cash_balance"))
         opening = _number((orestar_years.get(str(year)) or {}).get("beginning_balance"))
         if prior_end is None or opening is None:
             continue
         step = round(opening - prior_end, 2)
         if abs(step) <= 0.005:
-            continue
+            continue                     # ORESTAR did not restate anything
         leaving = prior in certs
+        if leaving:
+            prior_open = _number(prior_summary.get("beginning_balance"))
+            if prior_open is None:
+                continue
+            amount = round(opening - prior_open - ours.get(prior, 0.0), 2)
+        else:
+            amount = step
+        if abs(amount) <= 0.005:
+            continue                     # our rows already carry it
         when = date(prior, 12, 31) if leaving else date(year, 1, 1)
         rows.append({
             "date": when.isoformat(),
             "year": when.year,
-            "amount": step,
+            "amount": amount,
             "boundary": [prior, year],
             "orestar_prior_ending": round(prior_end, 2),
             "orestar_opening": round(opening, 2),
+            # ORESTAR's own restatement, and the part of `amount` that instead
+            # reconciles ORESTAR's certificate-year total with our rows. They
+            # sum to `amount`; the second is zero unless the two disagree.
+            "orestar_restatement": step,
+            "certificate_year_difference": round(amount - step, 2),
             "placement": "certificate_year_end" if leaving else "certificate_year_start",
         })
     return rows

@@ -157,11 +157,13 @@ def test_every_ghost_row_sits_inside_a_certificate_year() -> None:
 
 
 def test_entering_a_certificate_year_is_dated_its_first_day() -> None:
+    """Entering from an itemized year: ORESTAR's pure step, whatever we hold."""
     years = {"2019": _summary(0.0, 500.0), "2020": _summary(800.0, 800.0)}
-    rows = OC.certificate_restatements(years, {2020})
+    rows = OC.certificate_restatements(years, {2020}, {2019: 480.0})
     assert rows == [{
         "date": "2020-01-01", "year": 2020, "amount": 300.0, "boundary": [2019, 2020],
         "orestar_prior_ending": 500.0, "orestar_opening": 800.0,
+        "orestar_restatement": 300.0, "certificate_year_difference": 0.0,
         "placement": "certificate_year_start",
     }]
 
@@ -192,11 +194,59 @@ def test_negative_restatements_are_kept_with_their_sign() -> None:
     assert rows[0]["date"] == "2015-01-01"
 
 
-def test_amounts_are_orestar_figures_only() -> None:
-    """Nothing we hold enters the amount, so itemized rows cannot double-count."""
-    rows = OC.certificate_restatements(BUNN_YEARS, {2013, 2014, 2015})
-    for row in rows:
-        assert row["amount"] == round(row["orestar_opening"] - row["orestar_prior_ending"], 2)
+def test_a_double_count_in_orestars_certificate_year_is_not_imported() -> None:
+    """Friends for Safer Libraries, exactly as ORESTAR states it.
+
+    One $25.95 expenditure dated 2006-12-30, filed 2007-02-28, is counted in
+    ORESTAR's 2006 total AND its 2007 certificate-year total; the 2008 opening
+    undoes it with a +$25.87 step. We never double counted, so taking that step
+    as unitemized money would add $25.87 we do not need. Measured from our
+    side the row is -$0.08 and the balance matches ORESTAR's 2008 opening.
+    """
+    years = {
+        "2006": {**_summary(66.48, 40.53), "expenditures": 25.95},
+        "2007": {**_summary(40.53, 14.58), "expenditures": 25.95},
+        "2008": _summary(40.45, 40.45),
+    }
+    rows = OC.certificate_restatements(years, {2007}, {2006: -25.95, 2007: 0.0})
+    assert [(r["date"], r["amount"]) for r in rows] == [("2007-12-31", -0.08)]
+    assert rows[0]["orestar_restatement"] == 25.87
+    assert rows[0]["certificate_year_difference"] == -25.95
+    # Our 2008 opening: 2006 close 40.53, nothing in 2007, plus the ghost row.
+    assert round(40.53 + 0.0 + rows[0]["amount"], 2) == 40.45
+
+
+def test_itemized_rows_in_a_certificate_year_are_not_double_counted() -> None:
+    """A certificate that expired mid-year: both sides itemize the remainder."""
+    years = {"2014": _summary(100.0, 100.0),
+             "2015": {**_summary(100.0, 160.0), "contributions": 60.0},
+             "2016": _summary(260.0, 260.0)}
+    rows = OC.certificate_restatements(years, {2015}, {2015: 60.0})
+    # ORESTAR restated +100 on top of the 60 both sides hold; only 100 is new.
+    assert rows[0]["amount"] == 100.0
+    assert rows[0]["certificate_year_difference"] == 0.0
+
+
+def test_a_shortfall_inside_a_certificate_year_is_disclosed_not_hidden() -> None:
+    """Missing itemized rows in the year are absorbed — and reported as such."""
+    years = {"2015": {**_summary(100.0, 160.0), "contributions": 60.0},
+             "2016": _summary(260.0, 260.0)}
+    rows = OC.certificate_restatements(years, {2015}, {2015: 45.0})
+    assert rows[0]["amount"] == 115.0
+    assert rows[0]["orestar_restatement"] == 100.0
+    assert rows[0]["certificate_year_difference"] == 15.0
+
+
+def test_no_restatement_means_no_row_even_if_our_rows_differ() -> None:
+    """Where ORESTAR's chain holds, a difference is a real gap and stays visible."""
+    years = {"2015": {**_summary(100.0, 160.0), "contributions": 60.0},
+             "2016": _summary(160.0, 160.0)}
+    assert OC.certificate_restatements(years, {2015}, {2015: 45.0}) == []
+
+
+def test_when_our_rows_already_carry_the_restatement_there_is_no_row() -> None:
+    years = {"2015": _summary(100.0, 100.0), "2016": _summary(160.0, 160.0)}
+    assert OC.certificate_restatements(years, {2015}, {2015: 60.0}) == []
 
 
 def test_missing_or_non_numeric_summary_fields_are_skipped() -> None:

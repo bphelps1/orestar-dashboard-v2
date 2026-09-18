@@ -130,3 +130,19 @@ def test_ghost_rows_never_count_as_filed_transactions(tmp_path) -> None:
         not row.get("balance_adjustments")
         for row in detail["timeline"]
     )
+
+
+def test_a_gap_from_before_the_certificates_passes_through_untouched(tmp_path) -> None:
+    """Restatements are anchored on ORESTAR's own opening for each certificate
+    year, so a difference that already existed going in is never absorbed.
+
+    Drop a $100 2012 contribution from our rows: before the certificate years
+    we are $100 short of ORESTAR, and after them we must still be exactly
+    $100 short — not silently reconciled by the ghost rows.
+    """
+    _write_certificates(tmp_path, [2013, 2014, 2015])
+    rows = [dict(r) for r in ROWS]
+    rows[0]["amount"] = 6650.00          # was 6,750.00
+    detail = _aggregate_cash_rows(tmp_path, rows, set(), _yearly())
+    assert detail["cash_on_hand"] == -100.00
+    assert detail["certificate_restatement_total"] == 8250.00

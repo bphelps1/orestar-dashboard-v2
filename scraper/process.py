@@ -2704,6 +2704,27 @@ def aggregate_filers(
         # synthetic id as a surplus row. Display frames, donor aggregates and
         # transaction counts never see them either.
         _ghost_specs: list[dict] = []
+        # Our own net cash movement per physical filer and year, BEFORE any
+        # ghost row, so a restatement leaving a certificate year is measured
+        # from what our rows already carry (see certificate_restatements for
+        # the double count that makes this necessary). Built only for scopes
+        # that hold a certificate — about 300 of 7,300.
+        _filer_year_nets: dict[str, dict[int, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        if any(_certificates.get(str(_f)) for _f in _name_to_fids.get(name, [])):
+            for _frame, _sign in ((_c_for_coh, 1), (_or_for_coh, 1), (_e_for_coh, -1),
+                                  (_od_for_coh, -1), (_ba_for_coh, 1)):
+                if (_frame is None or _frame.empty or "filer id" not in _frame.columns
+                        or "year" not in _frame.columns):
+                    continue
+                for (_ffid, _fyr), _famt in (
+                    _frame.groupby(["filer id", "year"])["amount"].sum().items()
+                ):
+                    _key = str(_ffid).strip()
+                    if _key.endswith(".0") and _key[:-2].isdigit():
+                        _key = _key[:-2]
+                    _filer_year_nets[_key][int(_fyr)] += _sign * float(_famt)
         for _fid in _name_to_fids.get(name, []):
             _fid_certs = _certificates.get(str(_fid))
             if not _fid_certs:
@@ -2712,7 +2733,9 @@ def aggregate_filers(
                 _ghost_skipped_ambiguous.add(str(_fid))
                 continue
             _fid_years = (_yearly_summaries.get(str(_fid)) or {}).get("years") or {}
-            for _spec in certificate_restatements(_fid_years, _fid_certs):
+            for _spec in certificate_restatements(
+                _fid_years, _fid_certs, dict(_filer_year_nets.get(str(_fid)) or {}),
+            ):
                 _ghost_specs.append({**_spec, "filer_id": str(_fid)})
         if _ghost_specs:
             _ghost_rows = []
