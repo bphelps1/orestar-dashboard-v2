@@ -1197,11 +1197,11 @@ function renderAcctSummaryTiles(profile, year) {
         const certClean = restate != null && Math.abs(endDisc) <= 0.01;
         const certTip = d.certificate_year
           ? "Certificate of Limited Contributions and Expenditures year: the committee " +
-            "did not itemize transactions, so ORESTAR's year total shows none." +
+            "was exempt from itemizing, so ORESTAR's year total does not capture " +
+            "everything that moved." +
             (restate != null
-              ? ` ${restate < 0 ? "−" : "+"}${fmt$(Math.abs(restate))} moved unitemized; ` +
-                `ORESTAR records it in its opening balance, and this balance carries it ` +
-                `as a derived restatement row.`
+              ? ` ORESTAR restates the balance around this year; this balance carries ` +
+                `${fmtSignedCents(restate)} of it as a derived restatement row.`
               : "")
           : "";
         // A reconciled year is confirmation, not a small problem. Every year
@@ -2644,21 +2644,45 @@ function formatYearRanges(years) {
 // balance. The pipeline carries each of those restatements as a derived ghost
 // row, so this balance follows ORESTAR's figures — and a reader looking at the
 // transaction list is owed the reason the balance moved without a filed row.
+// Signed dollars WITH cents. fmt$ rounds to whole dollars, which is right for
+// totals but turns a -$0.08 restatement into "-$0" — here the cents are the
+// explanation.
+function fmtSignedCents(v) {
+  const n = Number(v) || 0;
+  return `${n < 0 ? "\u2212" : "+"}$` +
+    Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function certificateNoteText(profile) {
   const rows = (profile && profile.certificate_restatements) || [];
   if (!rows.length) return "";
   const years = Object.keys((profile && profile.orestar_certificates) || {});
-  const total = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-  const signed = v => `${v < 0 ? "−" : "+"}${fmt$(Math.abs(v))}`;
-  const parts = rows.slice(0, 4).map(r => `${r.year} ${signed(Number(r.amount) || 0)}`);
+  const sum = key => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+  const applied = sum("amount");
+  const yearDiff = sum("certificate_year_difference");
+  const restated = rows.reduce(
+    (s, r) => s + (Number(r.orestar_restatement != null ? r.orestar_restatement : r.amount) || 0), 0);
+  const parts = rows.slice(0, 4).map(r => `${r.year} ${fmtSignedCents(r.amount)}`);
   const more = rows.length > 4 ? `; plus ${rows.length - 4} more` : "";
-  return `This committee held Certificates of Limited Contributions and ` +
-         `Expenditures for ${formatYearRanges(years)}, which exempt it from ` +
-         `itemizing transactions. ORESTAR's year totals show no activity for ` +
-         `those years, but its later opening balances record what moved: ` +
-         `${signed(total)} (${parts.join("; ")}${more}). This balance includes ` +
-         `those amounts as derived restatement rows taken from ORESTAR's own ` +
-         `figures; they are not filed transactions.`;
+  const lead = `This committee held Certificates of Limited Contributions and ` +
+    `Expenditures for ${formatYearRanges(years)}, which exempt it from itemizing ` +
+    `transactions, so ORESTAR's year totals for those years do not capture ` +
+    `everything that moved. ORESTAR records it by restating a later opening ` +
+    `balance`;
+  const tail = ` as derived restatement rows taken from ORESTAR's own figures; ` +
+    `they are not filed transactions.`;
+  // Part of a restatement can instead reconcile ORESTAR's certificate-year
+  // total with the rows shown here — e.g. a transaction ORESTAR counted in two
+  // years. Disclosed whenever present, so nothing is folded in silently.
+  if (Math.abs(yearDiff) <= 0.01) {
+    return `${lead}: ${fmtSignedCents(applied)} (${parts.join("; ")}${more}). ` +
+      `This balance includes those amounts${tail}`;
+  }
+  return `${lead} by ${fmtSignedCents(restated)}. After reconciling ORESTAR's ` +
+    `certificate-year totals with the filed transactions shown here ` +
+    `(${fmtSignedCents(yearDiff)} — for example, a transaction ORESTAR counted ` +
+    `in two years), this balance applies ${fmtSignedCents(applied)} ` +
+    `(${parts.join("; ")}${more})${tail}`;
 }
 
 function cashTreatmentNoteText(profile) {
