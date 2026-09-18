@@ -2352,3 +2352,11 @@ footer a:hover { color: var(--color-accent); }
    agreement is the reassuring case, not a small failure. */
 .disc-row.disc-ok { background: #f0fff4; }
 .disc-row.disc-ok .disc-col-diff { color: #276749; font-weight: 600; }
+
+/* A certificate year whose only difference is ORESTAR's own restatement: the
+   committee did not itemize, ORESTAR's year total omits the money, and its
+   next opening balance records it. Explained, so neither green (it does not
+   agree line for line) nor amber (it is not a problem). */
+.disc-row.disc-cert { background: #ebf4ff; }
+.disc-row.disc-cert .disc-col-diff,
+.disc-detail-row.disc-cert .disc-col-diff { color: #2b6cb0; font-weight: 600; }

@@ -44,6 +44,13 @@ from exact_coverage_evidence import (
     certify_exact_scope_rows,
     rows_requesting_surplus,
 )
+from orestar_certificates import (
+    CERTIFICATES_FILENAME,
+    GHOST_ID_PREFIX,
+    GHOST_SUB_TYPE,
+    certificate_restatements,
+    certificates_by_filer,
+)
 import orestar_parse
 import supabase_sync
 
@@ -2286,6 +2293,32 @@ def aggregate_filers(
                 continue
             _name_to_yearly[canon_name] = _combine_scope_yearly_summaries(yearlies)
 
+    # Certificates of Limited Contributions and Expenditures — see
+    # orestar_certificates.py. A certificate year is one ORESTAR's itemized
+    # totals cannot see, and its restated opening balance is the only record of
+    # what moved. Absent file: no ghost rows, balances exactly as before.
+    _certificates: dict[str, dict[int, dict]] = {}
+    _certificates_path = DATA_DIR / CERTIFICATES_FILENAME
+    if _certificates_path.exists():
+        try:
+            _certificates = certificates_by_filer(json.loads(_certificates_path.read_text()))
+        except (OSError, ValueError) as exc:
+            # A certificate file that cannot be read yields no ghost rows —
+            # the balances then match the pre-certificate calculation, which
+            # is a visible, recoverable state, unlike half-applied rows.
+            log.warning("Ignoring unreadable %s: %s", _certificates_path.name, exc)
+        log.info("Loaded certificates for %d filers", len(_certificates))
+    # A physical filer claimed by more than one canonical name would receive
+    # its restatement once per name, counting ORESTAR's money twice. Those are
+    # skipped and reported rather than guessed at.
+    _fid_owners: Counter = Counter(
+        fid for fids in _name_to_fids.values() for fid in set(fids)
+    )
+    _ghost_skipped_ambiguous: set[str] = set()
+    _ghost_committees = 0
+    _ghost_row_count = 0
+    _ghost_amount = 0.0
+
     # Load filer metadata (party, office, committee type) from scraper cache
     _filer_metadata_path = DATA_DIR / "filer_metadata.json"
     _filer_metadata: dict[str, dict] = {}  # filer_id → {committee_type, office, party, ...}
@@ -2648,6 +2681,101 @@ def aggregate_filers(
                         yr_s = str(int(yr))
                         nets[yr_s] = nets.get(yr_s, 0.0) + sign * float(amt)
             return nets
+
+        # Ghost rows for certificate years.
+        #
+        # During a Certificate of Limited Contributions and Expenditures a
+        # committee does not itemize, so money it really handled never appears
+        # as a transaction — ORESTAR records it only by opening the next year
+        # at a different balance than it closed the last. Friends of Daniel
+        # Bunn's certificates for 2013-2015 hid $8,250 that way, later spent
+        # through ordinary itemized expenditures, which left our balance at
+        # -$8,250 against ORESTAR's $0.00.
+        #
+        # Each restatement becomes a derived row in the balance-adjustment
+        # frame, the one frame every cash consumer reads: yearly nets, the
+        # filed-year and capture-bounded views, and the monthly timeline the
+        # browser rebuilds cash from. Adjusting yearly_nets alone would fail
+        # the timeline reconciliation below and halt aggregation — the rows
+        # are what keep every figure consistent by construction.
+        #
+        # They are never written to the transaction mirror: that store must
+        # stay an exact copy of ORESTAR, and the coverage diff would read a
+        # synthetic id as a surplus row. Display frames, donor aggregates and
+        # transaction counts never see them either.
+        _ghost_specs: list[dict] = []
+        # Our own net cash movement per physical filer and year, BEFORE any
+        # ghost row, so a restatement leaving a certificate year is measured
+        # from what our rows already carry (see certificate_restatements for
+        # the double count that makes this necessary). Built only for scopes
+        # that hold a certificate — about 300 of 7,300.
+        _filer_year_nets: dict[str, dict[int, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        if any(_certificates.get(str(_f)) for _f in _name_to_fids.get(name, [])):
+            for _frame, _sign in ((_c_for_coh, 1), (_or_for_coh, 1), (_e_for_coh, -1),
+                                  (_od_for_coh, -1), (_ba_for_coh, 1)):
+                if (_frame is None or _frame.empty or "filer id" not in _frame.columns
+                        or "year" not in _frame.columns):
+                    continue
+                for (_ffid, _fyr), _famt in (
+                    _frame.groupby(["filer id", "year"])["amount"].sum().items()
+                ):
+                    _key = str(_ffid).strip()
+                    if _key.endswith(".0") and _key[:-2].isdigit():
+                        _key = _key[:-2]
+                    _filer_year_nets[_key][int(_fyr)] += _sign * float(_famt)
+        for _fid in _name_to_fids.get(name, []):
+            _fid_certs = _certificates.get(str(_fid))
+            if not _fid_certs:
+                continue
+            if _fid_owners.get(_fid, 0) > 1:
+                _ghost_skipped_ambiguous.add(str(_fid))
+                continue
+            _fid_years = (_yearly_summaries.get(str(_fid)) or {}).get("years") or {}
+            for _spec in certificate_restatements(
+                _fid_years, _fid_certs, dict(_filer_year_nets.get(str(_fid)) or {}),
+            ):
+                _ghost_specs.append({**_spec, "filer_id": str(_fid)})
+        if _ghost_specs:
+            _ghost_rows = []
+            for _spec in _ghost_specs:
+                _when = pd.Timestamp(_spec["date"])
+                _ghost_rows.append({
+                    "tran_id": (f"{GHOST_ID_PREFIX}{_spec['filer_id']}-"
+                                f"{_spec['boundary'][0]}-{_spec['boundary'][1]}"),
+                    "original_id": None,
+                    "tran_date": _when,
+                    # Stamped with its own date so the filed-year and
+                    # capture-bounded views include it: the row stands for
+                    # ORESTAR's own restatement, which its summary already
+                    # reflects, not for a late filing.
+                    "filed_date": _when,
+                    "tran_type": "O",
+                    "sub_type": GHOST_SUB_TYPE,
+                    "contributor_payee": "ORESTAR certificate-period restatement",
+                    "amount": float(_spec["amount"]),
+                    "year": int(_when.year),
+                    "month": _when.to_period("M").strftime("%Y-%m"),
+                    "filer id": _spec["filer_id"],
+                    filer_col: name,
+                    "_undated": False,
+                })
+            _ba_for_coh = pd.concat(
+                [_ba_for_coh, pd.DataFrame(_ghost_rows)], ignore_index=True,
+            )
+            _ghost_committees += 1
+            _ghost_row_count += len(_ghost_specs)
+            _ghost_amount += sum(abs(float(s["amount"])) for s in _ghost_specs)
+        _ghost_by_year: dict[str, float] = defaultdict(float)
+        for _spec in _ghost_specs:
+            _ghost_by_year[str(_spec["year"])] += float(_spec["amount"])
+        _certificate_years_here: dict[str, list[dict]] = {}
+        for _fid in _name_to_fids.get(name, []):
+            for _cy, _cert in sorted((_certificates.get(str(_fid)) or {}).items()):
+                _certificate_years_here.setdefault(str(_cy), []).append(
+                    {"filer_id": str(_fid), **_cert}
+                )
 
         yearly_nets = _yearly_net(_c_for_coh, _e_for_coh, _or_for_coh, _od_for_coh, _ba_for_coh)
 
@@ -3437,6 +3565,16 @@ def aggregate_filers(
                         # a reconciled year as confirmation rather than styling
                         # it as a small problem.
                         "reconciles": reconciles,
+                        # Certificate years: ORESTAR's own year totals omit the
+                        # money that moved unitemized, so a ghost row dated in
+                        # this year shows up here as a difference ORESTAR itself
+                        # only records in a later opening balance. Carried so
+                        # the UI can label it as a restatement, not an error.
+                        "certificate_year": yr_s in _certificate_years_here,
+                        "certificate_restatement": (
+                            round(_ghost_by_year[yr_s], 2)
+                            if yr_s in _ghost_by_year else None
+                        ),
                         "our_begin": our_begin,
                         "our_contributions": our_c,
                         "our_expenditures": our_e,
@@ -4001,6 +4139,18 @@ def aggregate_filers(
             # committee plainly filed, rather than silently differing from a
             # number the reader can look up.
             "exempt_loans_excluded": _exempt_dropped,
+            # Certificates of Limited Contributions and Expenditures held by
+            # this scope's filers, and the derived ghost rows that carry
+            # ORESTAR's restatements into the balance. Listed in full so every
+            # dollar they move can be traced to the two ORESTAR figures it
+            # came from.
+            "orestar_certificates": _certificate_years_here,
+            "certificate_restatements": [
+                {k: v for k, v in _spec.items()} for _spec in _ghost_specs
+            ],
+            "certificate_restatement_total": round(
+                sum(float(_spec["amount"]) for _spec in _ghost_specs), 2
+            ),
             # Annual non-exempt loan totals used for the cash lane when a
             # trustworthy ORESTAR statement differs from the eligible held
             # transaction total. Raw loan rows remain visible in the timeline;
@@ -4136,6 +4286,12 @@ def aggregate_filers(
     # formula from the loan-adjusted live balance.  It created discrepancies
     # for committees that actually matched.  Only immutable paired captures
     # can drive this list or downstream remediation now.
+    log.info(
+        "Certificate restatements: %d ghost rows across %d committees "
+        "(|$%s| moved); %d filers skipped as claimed by more than one committee",
+        _ghost_row_count, _ghost_committees, f"{_ghost_amount:,.2f}",
+        len(_ghost_skipped_ambiguous),
+    )
     _disc_rows = []
     _unpaired_rows = []
     _refresh_rows = []

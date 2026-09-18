@@ -1188,18 +1188,37 @@ function renderAcctSummaryTiles(profile, year) {
       for (const yr of showYears) {
         const d = disc[yr];
         const endDisc = d.discrepancy || 0;
+        // A certificate year's ORESTAR total omits money that moved without
+        // being itemized; ORESTAR records it only in a later opening balance.
+        // Its ghost row therefore shows here as a year-end difference that is
+        // fully explained — labelled as such rather than styled as an error.
+        const restate = d.certificate_restatement;
+        const certExplained = restate != null && Math.abs(endDisc - restate) <= 0.01;
+        const certClean = restate != null && Math.abs(endDisc) <= 0.01;
+        const certTip = d.certificate_year
+          ? "Certificate of Limited Contributions and Expenditures year: the committee " +
+            "was exempt from itemizing, so ORESTAR's year total does not capture " +
+            "everything that moved." +
+            (restate != null
+              ? ` ORESTAR restates the balance around this year; this balance carries ` +
+                `${fmtSignedCents(restate)} of it as a derived restatement row.`
+              : "")
+          : "";
         // A reconciled year is confirmation, not a small problem. Every year
         // ORESTAR gives a figure for is listed now, so without this the table
         // would style twenty agreeing years as "minor discrepancies".
-        const severity = d.reconciles ? "disc-ok"
+        const severity = (d.reconciles || certClean) ? "disc-ok"
+          : certExplained ? "disc-cert"
           : Math.abs(endDisc) >= 10000 ? "disc-severe"
           : Math.abs(endDisc) >= 1000 ? "disc-warn" : "disc-minor";
+        const diffText = (d.reconciles || certClean) ? "✓"
+          : (certExplained ? "ⓒ " : "") + (endDisc > 0 ? "+" : "") + fmt$(endDisc);
         const rowId = `disc-detail-${yr}`;
-        discHTML += `<div class="disc-row ${severity}" style="cursor:pointer" data-detail="${rowId}">
+        discHTML += `<div class="disc-row ${severity}" style="cursor:pointer" data-detail="${rowId}"${certTip ? ` title="${esc(certTip)}"` : ""}>
           <span class="disc-col-year">${yr} ▸</span>
           <span class="disc-col-num">${fmt$(d.our_end)}</span>
           <span class="disc-col-num">${fmt$(d.orestar_end)}</span>
-          <span class="disc-col-num disc-col-diff">${d.reconciles ? "✓" : (endDisc > 0 ? "+" : "") + fmt$(endDisc)}</span>
+          <span class="disc-col-num disc-col-diff">${diffText}</span>
         </div>`;
         // Expandable line-item detail
         discHTML += `<div id="${rowId}" class="disc-detail" hidden>`;
@@ -1219,6 +1238,14 @@ function renderAcctSummaryTiles(profile, year) {
             <span class="disc-col-num">${fmt$(line.ours)}</span>
             <span class="disc-col-num">${line.theirs != null ? fmt$(line.theirs) : '—'}</span>
             <span class="disc-col-num disc-col-diff">${line.delta > 0 ? "+" : ""}${fmt$(line.delta)}</span>
+          </div>`;
+        }
+        if (restate != null) {
+          discHTML += `<div class="disc-detail-row disc-cert" title="${esc(certTip)}">
+            <span class="disc-detail-label">Certificate restatement</span>
+            <span class="disc-col-num">${restate > 0 ? "+" : ""}${fmt$(restate)}</span>
+            <span class="disc-col-num">in opening</span>
+            <span class="disc-col-num disc-col-diff">derived</span>
           </div>`;
         }
         discHTML += `</div>`;
@@ -2407,22 +2434,51 @@ function updateCohIndicator(profile) {
     // "Accounts for" is only claimed when the jumps actually sum to the
     // difference on screen; otherwise the breaks are reported as present
     // without asserting they are the whole story.
+    // Breaks that fall at certificate years are no longer unexplained: the
+    // balance carries them as restatement rows (see certificateNoteText). Only
+    // the remainder is described as a gap, and "rolled forward from ORESTAR's
+    // transaction record" is claimed only when nothing was restated \u2014 it
+    // would be false for a committee whose balance includes ghost rows.
     const chainNote = (() => {
       const cb = profile.orestar_chain_breaks;
       if (!cb || !cb.boundaries || Math.abs(cb.total || 0) <= 0.01) return "";
-      const explains = Math.abs(Math.abs(cb.total) - Math.abs(disc)) <= 1.0;
-      const where = (cb.detail || []).slice(0, 3)
+      const restated = new Set(((profile.certificate_restatements) || [])
+        .map(r => `${(r.boundary || [])[0]}-${(r.boundary || [])[1]}`));
+      const detail = cb.detail || [];
+      const isRestated = b => restated.has(`${b.from}-${b.to}`);
+      const coveredTotal = detail.filter(isRestated).reduce((s, b) => s + b.amount, 0);
+      // detail is capped server-side; only claim full coverage when every
+      // boundary is actually listed and restated.
+      const allCovered = detail.length === cb.boundaries && detail.every(isRestated);
+      const remaining = (cb.total || 0) - coveredTotal;
+      const explains = Math.abs(Math.abs(remaining) - Math.abs(disc)) <= 1.0;
+      const where = detail.filter(b => !isRestated(b)).slice(0, 3)
         .map(b => `${b.from}\u2192${b.to} ${b.amount > 0 ? "+" : "\u2212"}${fmt$(Math.abs(b.amount))}`)
         .join(", ");
+      if (allCovered) {
+        return `<div class="disc-note">ORESTAR's own account summaries do not carry this ` +
+               `committee's balance forward across ${cb.boundaries} year ` +
+               `${cb.boundaries === 1 ? "boundary" : "boundaries"}, totalling ` +
+               `${fmt$(Math.abs(cb.total))}. Every one falls at a Certificate of Limited ` +
+               `Contributions and Expenditures year, when the committee did not itemize, ` +
+               `and this balance includes them as restatement rows.</div>`;
+      }
+      const certPart = Math.abs(coveredTotal) > 0.01
+        ? `${fmt$(Math.abs(coveredTotal))} of it falls at Certificate of Limited ` +
+          `Contributions and Expenditures years and is included in this balance as ` +
+          `restatement rows. The rest \u2014 `
+        : "";
       return `<div class="disc-note">ORESTAR's own account summaries do not carry this ` +
              `committee's balance forward across ${cb.boundaries} year ` +
-             `${cb.boundaries === 1 ? "boundary" : "boundaries"}` +
-             `${where ? ` (${where})` : ""}, totalling ${fmt$(Math.abs(cb.total))} with no ` +
-             `transactions in those years to explain it. ` +
-             (explains
-               ? `That accounts for the difference above. `
-               : `` ) +
-             `The balance here is rolled forward from ORESTAR's own transaction record.</div>`;
+             `${cb.boundaries === 1 ? "boundary" : "boundaries"}, totalling ` +
+             `${fmt$(Math.abs(cb.total))}. ${certPart}` +
+             `${where ? `${where}, ` : ""}${fmt$(Math.abs(remaining))} with no ` +
+             `certificate or transactions in those years to explain it` +
+             `${certPart ? " \u2014" : ""} is not restated. ` +
+             (explains ? `That accounts for the difference above. ` : ``) +
+             (Math.abs(coveredTotal) > 0.01
+               ? `</div>`
+               : `The balance here is rolled forward from ORESTAR's own transaction record.</div>`);
     })();
 
     const treatmentNote = treatmentText
@@ -2567,8 +2623,71 @@ function nonexemptLoanNoteText(profile) {
          `The filed loan rows remain visible in historical totals.`;
 }
 
+// "2013–2015 and 2017" from [2013, 2014, 2015, 2017].
+function formatYearRanges(years) {
+  const ys = [...new Set(years.map(Number).filter(Number.isFinite))].sort((a, b) => a - b);
+  const runs = [];
+  for (const y of ys) {
+    const last = runs[runs.length - 1];
+    if (last && y === last[1] + 1) last[1] = y;
+    else runs.push([y, y]);
+  }
+  const parts = runs.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`));
+  return parts.length <= 1 ? (parts[0] || "")
+    : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+// Certificates of Limited Contributions and Expenditures (see
+// scraper/orestar_certificates.py). A committee under a certificate does not
+// itemize, so ORESTAR's year totals show nothing while money still moves;
+// ORESTAR records the result only by opening a later year at a different
+// balance. The pipeline carries each of those restatements as a derived ghost
+// row, so this balance follows ORESTAR's figures — and a reader looking at the
+// transaction list is owed the reason the balance moved without a filed row.
+// Signed dollars WITH cents. fmt$ rounds to whole dollars, which is right for
+// totals but turns a -$0.08 restatement into "-$0" — here the cents are the
+// explanation.
+function fmtSignedCents(v) {
+  const n = Number(v) || 0;
+  return `${n < 0 ? "\u2212" : "+"}$` +
+    Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function certificateNoteText(profile) {
+  const rows = (profile && profile.certificate_restatements) || [];
+  if (!rows.length) return "";
+  const years = Object.keys((profile && profile.orestar_certificates) || {});
+  const sum = key => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+  const applied = sum("amount");
+  const yearDiff = sum("certificate_year_difference");
+  const restated = rows.reduce(
+    (s, r) => s + (Number(r.orestar_restatement != null ? r.orestar_restatement : r.amount) || 0), 0);
+  const parts = rows.slice(0, 4).map(r => `${r.year} ${fmtSignedCents(r.amount)}`);
+  const more = rows.length > 4 ? `; plus ${rows.length - 4} more` : "";
+  const lead = `This committee held Certificates of Limited Contributions and ` +
+    `Expenditures for ${formatYearRanges(years)}, which exempt it from itemizing ` +
+    `transactions, so ORESTAR's year totals for those years do not capture ` +
+    `everything that moved. ORESTAR records it by restating a later opening ` +
+    `balance`;
+  const tail = ` as derived restatement rows taken from ORESTAR's own figures; ` +
+    `they are not filed transactions.`;
+  // Part of a restatement can instead reconcile ORESTAR's certificate-year
+  // total with the rows shown here — e.g. a transaction ORESTAR counted in two
+  // years. Disclosed whenever present, so nothing is folded in silently.
+  if (Math.abs(yearDiff) <= 0.01) {
+    return `${lead}: ${fmtSignedCents(applied)} (${parts.join("; ")}${more}). ` +
+      `This balance includes those amounts${tail}`;
+  }
+  return `${lead} by ${fmtSignedCents(restated)}. After reconciling ORESTAR's ` +
+    `certificate-year totals with the filed transactions shown here ` +
+    `(${fmtSignedCents(yearDiff)} — for example, a transaction ORESTAR counted ` +
+    `in two years), this balance applies ${fmtSignedCents(applied)} ` +
+    `(${parts.join("; ")}${more})${tail}`;
+}
+
 function cashTreatmentNoteText(profile) {
   return [
+    certificateNoteText(profile),
     orestarAbsentNoteText(profile),
     nonexemptLoanNoteText(profile),
     exemptLoanNoteText(profile),

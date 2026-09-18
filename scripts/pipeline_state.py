@@ -62,6 +62,10 @@ PROFILE_FILES = {
         "data/account_summary_sweep_state.json",
         "data/earliest_balances.json",
         "data/orestar_cash_balances.json",
+        # Certificates of Limited Contributions and Expenditures: which years
+        # ORESTAR's itemized totals cannot see. Travels with the annual
+        # summaries because the ghost rows are derived from the two together.
+        "data/orestar_certificates.json",
         "data/orestar_yearly_summaries.json",
     ),
     "auxiliary": (

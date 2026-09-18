@@ -456,6 +456,32 @@ jobs:
           echo "Filers remaining: $REMAINING"
           echo "remaining=$REMAINING" >> "$GITHUB_OUTPUT"
 
+      # Certificates of Limited Contributions and Expenditures: which years a
+      # committee did not itemize. process.py turns ORESTAR's restated opening
+      # balances around those years into ghost rows, so the file must be fresh
+      # before the final aggregation below and travel in the summaries profile
+      # published after it.
+      #
+      # Deliberately placed AFTER the account-summary scrape so its ~20 page
+      # loads can never spend that job's F5 allowance, skipped once the runner
+      # has been refused, time-capped, and continue-on-error: a failed read
+      # keeps the stored certificates year by year, so the worst case is ghost
+      # rows computed from last week's list, never balances silently reverting.
+      - name: Scrape campaign finance certificates
+        id: certificates
+        # Final batch only: a chained sweep runs dozens of batches, and a
+        # refresh per batch would spend hundreds of page loads for one list
+        # that changes a few times a week. The final batch is also the one
+        # that aggregates, so that is when a fresh list is actually used.
+        if: >-
+          always() && steps.orestar_wait.outcome == 'success' &&
+          steps.summary_state.outcome == 'success' &&
+          steps.scrape.outputs.blocked != '1' &&
+          steps.remaining.outputs.remaining == '0'
+        continue-on-error: true
+        timeout-minutes: 20
+        run: xvfb-run --auto-servernum python scraper/fetch_certificates.py --max-minutes 15
+
       - name: Hydrate final aggregation state
         id: aggregation_state
         if: always() && steps.orestar_wait.outcome == 'success' && steps.scrape.outcome == 'success' && steps.remaining.outputs.remaining == '0'
