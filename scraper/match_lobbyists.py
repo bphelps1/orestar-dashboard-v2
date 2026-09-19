@@ -56,8 +56,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import supabase_sync  # noqa: E402
 from lobby_match import (  # noqa: E402
     client_alternatives, core_org, dba_names, email_domain, first_last, first_names_compatible,
-    is_private_domain, is_public_client, nicknames, norm_org, norm_person, person_label,
-    person_tokens, place_tokens,
+    is_private_domain, is_public_client, names_same_org, nicknames, norm_org, norm_person,
+    person_label, person_tokens, place_tokens,
 )
 
 log = logging.getLogger(__name__)
@@ -283,7 +283,11 @@ def match_committee_contacts(pool, persons, lobbyists, lobbyist_clients) -> tupl
         for lid, (method, score) in hits.items():
             links.append({"donor_id": d["donor_id"], "lobbyist_id": lid, "method": method,
                           "score": score, "evidence": [{"type": method, **who}]})
-        if p["role"] == "director" and p["employer"]:
+        # A director's employer is the committee's client only when the
+        # committee is that organization's own PAC; a chamber's or trade
+        # group's board is made of people from other companies.
+        if p["role"] == "director" and p["employer"] and not is_public_client(p["employer"]) \
+                and names_same_org(d["display_name"], p["employer"]):
             core = core_org(p["employer"])
             if core in client_names:
                 key, cname = client_names[core]

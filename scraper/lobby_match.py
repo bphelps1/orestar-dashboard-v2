@@ -128,9 +128,9 @@ REGION_WORDS = {"southern", "eastern", "central", "northern", "north", "south", 
 
 
 def is_public_client(name: str) -> bool:
-    plain = re.sub(r"[^a-z ]+", " ", _ascii(name).lower()).strip()
-    plain = re.sub(r"\s+", " ", plain)
-    return bool(_PUBLIC_CLIENT.search(_ascii(name))) or plain in OREGON_PLACES
+    text = _ascii(name).replace("&", " and ")
+    plain = re.sub(r"\s+", " ", re.sub(r"[^a-z ]+", " ", text.lower())).strip()
+    return bool(_PUBLIC_CLIENT.search(re.sub(r"\s+", " ", text))) or plain in OREGON_PLACES
 
 
 def place_tokens(core: str) -> set[str]:
@@ -253,3 +253,47 @@ def nicknames(name: str) -> set[str]:
     """What a name says to call them: "James L. (J.L.) Wilson" → {"jl"},
     "Michael C. (Mike) Freese" → {"mike"}."""
     return {re.sub(r"[^a-z]", "", n.lower()) for n in re.findall(r"\(([^)]*)\)", _ascii(name))} - {""}
+
+
+# Words too common in committee and organization names to tie one to another.
+_GENERIC = {"oregon", "oregonians", "association", "committee", "political", "action", "pac", "fund",
+            "people", "citizens", "community", "communities", "coalition", "council", "united", "yes",
+            "no", "vote", "friends", "network", "group", "state", "national", "american", "america",
+            "americas", "northwest", "portland", "our", "better", "future", "local", "professional",
+            "oregons", "issues", "candidate", "legislative", "policy", "employees", "inc", "llc",
+            "care", "health", "services", "business", "workers", "public", "safety", "support"}
+
+
+def names_same_org(committee: str, org: str) -> bool:
+    """Does a committee's name point at this organization?
+
+    "Dairy PAC" → Oregon Dairy Farmers Association (shared word), "Oregon
+    Pharmacists Fund" → Oregon State Pharmacy Assn. (stem), "ORLAPAC" /
+    "OCBH Policy Action Committee" / "OR ASCA PAC" → their association
+    (acronym), "2024 Our Oregon Voter Guide" → Our Oregon (containment).
+    "Washington County Chamber PAC" does not point at Nike, whose employee
+    merely sits on its board.
+    """
+    c_toks = [t for t in core_org(committee).split() if t not in _GENERIC]
+    o_all = core_org(org).split()
+    o_toks = [t for t in o_all if t not in _GENERIC]
+    for a in c_toks:
+        for b in o_toks:
+            if a == b:
+                return True
+            # A shared stem: "pharmacists"/"pharmacy", "dentists"/"dental".
+            n = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+            if n >= 4 and n >= 0.6 * min(len(a), len(b)):
+                return True
+    for one, other in ((committee, org), (org, committee)):
+        initials = "".join(t[0] for t in core_org(other).split())
+        for a in core_org(one).split():
+            a = a[:-3] if a.endswith("pac") and len(a) > 5 else a
+            if len(a) >= 3 and len(initials) >= 3 and a in (initials, initials.removeprefix("o")):
+                return True
+    flat_c = core_org(committee).replace(" ", "")
+    flat_o = core_org(org).replace(" ", "")
+    if len(flat_o) >= 8 and flat_o in flat_c:
+        return True
+    stem = flat_c[:-3] if flat_c.endswith("pac") else flat_c
+    return len(stem) >= 6 and flat_o.startswith(stem)
