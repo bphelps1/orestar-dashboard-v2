@@ -624,7 +624,10 @@ def test_parse_export_rows_extracts_exact_transaction_ids() -> None:
     payload = io.BytesIO()
     workbook.save(payload)
 
-    assert DC._parse_export_rows(payload.getvalue()) == {"123": {}, "456": {}}
+    assert DC._parse_export_rows(payload.getvalue()) == {
+        "123": {"amount": 10.0},
+        "456": {"amount": 20.0},
+    }
 
 
 class _CountPage:

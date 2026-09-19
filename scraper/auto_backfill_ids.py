@@ -227,14 +227,16 @@ def _active_identity_roots():
 
 
 def _row_requests_exact_resolution(row):
-    """Seed candidates from current or historical missing-ID observations."""
+    """Seed candidates from current or historical missing or changed rows."""
     if not isinstance(row, dict):
         return False
-    if row.get("complete") is None or bool(row.get("missing")):
+    if (row.get("complete") is None or bool(row.get("missing"))
+            or bool(row.get("amount_changed"))):
         return True
     history = row.get(USABLE_HISTORY_KEY) or []
     return isinstance(history, list) and any(
-        isinstance(item, dict) and bool(item.get("missing"))
+        isinstance(item, dict)
+        and (bool(item.get("missing")) or bool(item.get("amount_changed")))
         for item in history
     )
 
@@ -287,29 +289,35 @@ if survey_short:
         "not authorize mutation without current exact identity evidence"
     )
 
+work_counts = {}
 for r in automation_rows.values():
     fid = str(r.get("filer_id") or "")
     missing = len(r.get("missing") or [])
+    # Rows ORESTAR edited in place (same Tran ID, new amount) are repaired by
+    # the same forced re-download: the merge keeps the newest copy of an ID.
+    changed = len(r.get("amount_changed") or [])
     exact_range_ends[fid] = str(r["range_end"])
-    if missing <= 0:
+    if missing + changed <= 0:
         continue
+    work_counts[fid] = (missing, changed)
+    work = missing + changed
     # A partially completed forced tree is resumable even after the ordinary
     # retry limit. Its validated leaves must not be thrown away merely because
     # one runner made no progress.
     resumable = active_roots.get(fid) == exact_range_ends[fid]
     if incomplete.get(fid, 0) >= MAX_RETRIES and not resumable:
-        deferred_exact.append((missing, fid, r.get("name", "")))
+        deferred_exact.append((work, fid, r.get("name", "")))
         continue
     # Precise exact identity evidence overrides the historical done list. A
     # count can say "done" while an ORESTAR-absent row cancels the missing row.
-    filers.append((missing, fid, r.get("name", "")))
+    filers.append((work, fid, r.get("name", "")))
 
 # "Deferred" means after the other exact-missing committees, not abandoned.
 # Without this pass the workflow eventually emitted no IDs and reported all
 # discrepancies addressed while known missing transaction IDs remained.
 if not filers and deferred_exact:
     filers = deferred_exact
-    print(f"Retrying {len(filers)} deferred exact-missing filer(s); "
+    print(f"Retrying {len(filers)} deferred exact-missing/changed filer(s); "
           "no non-deferred identity work remains")
 
 if filers:
@@ -325,16 +333,17 @@ if filers:
     )
     batch = filers[:IDENTITY_BATCH_SIZE]
     mode = "identity"
-    print(f"{len(filers)} filer(s) have current exact missing transaction IDs")
+    print(f"{len(filers)} filer(s) have current exact missing or changed rows")
 else:
     batch = []
     mode = "identity"
 
 if batch:
-    print(f"Selecting {len(batch)} filer(s) by exact missing transaction IDs:")
+    print(f"Selecting {len(batch)} filer(s) by exact missing or changed rows:")
     for score, fid, name in batch:
         retry = " (RETRY)" if fid in incomplete else ""
-        shown = f"{score:,} exact IDs missing"
+        missing, changed = work_counts.get(fid, (score, 0))
+        shown = f"{missing:,} exact IDs missing, {changed:,} amounts changed"
         print(f"  {fid}: {shown} — {name}{retry}")
     OUTPUT_FILE.write_text(" ".join(fid for _, fid, _ in batch))
     STATUS_FILE.write_text("selected\n")
@@ -367,5 +376,5 @@ else:
         STATUS_FILE.write_text("idle\n")
         print(
             "No automatic repair selected: current exact identity evidence "
-            "contains no authorized missing rows."
+            "contains no authorized missing rows or changed amounts."
         )

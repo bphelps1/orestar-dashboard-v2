@@ -349,6 +349,36 @@ def _transaction_date(value: Any, path: Path, line: int) -> date | None:
     raise ValueError(f"unparseable transaction date {text!r} at {path}:{line}")
 
 
+def parse_transaction_amount(value: Any) -> float | None:
+    """A dollar amount as ORESTAR or our shards write it, rounded to cents.
+
+    Accepts the shards' plain numbers ("340.0"), ORESTAR's export text
+    ("$1,234.00") and the results page's accounting negatives ("($68.50)").
+    Returns None rather than guessing when the text is not a number, so an
+    unreadable amount is never compared as if it were zero.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        number = float(value)
+    else:
+        text = str(value).strip().replace("$", "").replace(",", "")
+        negative = text.startswith("(") and text.endswith(")")
+        if negative:
+            text = text[1:-1].strip()
+        if not text or text.lower() in {"nan", "none"}:
+            return None
+        try:
+            number = float(text)
+        except ValueError:
+            return None
+        if negative:
+            number = -number
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return round(number, 2)
+
+
 def transaction_filer_snapshots(
     transaction_dir: Path,
     filer_ids,
@@ -383,6 +413,7 @@ def transaction_filer_snapshots(
     records: dict[str, list[tuple[str, bytes]]] = {fid: [] for fid in targets}
     held: dict[str, set[str]] = {fid: set() for fid in targets}
     superseded: dict[str, set[str]] = {fid: set() for fid in targets}
+    amounts: dict[str, dict[str, float | None]] = {fid: {} for fid in targets}
     paths = sorted(transaction_dir.glob("txn_*.csv.gz"))
     if not paths:
         raise ValueError("no local transaction shards")
@@ -427,6 +458,7 @@ def transaction_filer_snapshots(
                     raise ValueError(f"target transaction has no ID at {path}:{line}")
                 original_id = _normalized_identifier(row.get(original_column))
                 held[fid].add(tran_id)
+                amounts[fid][tran_id] = parse_transaction_amount(row.get("amount"))
                 if original_id and original_id != tran_id:
                     superseded[fid].add(original_id)
 
@@ -466,6 +498,9 @@ def transaction_filer_snapshots(
         out[fid] = {
             "held_ids": held[fid],
             "superseded_ids": superseded[fid],
+            # Per-ID amounts, so a diff can see a row ORESTAR changed in place.
+            # The digest already covers them through each row's fields.
+            "held_amounts": amounts[fid],
             "filer_transaction_digest": f"sha256:{digest.hexdigest()}",
             "filer_digest_version": digest_version,
         }
@@ -517,7 +552,46 @@ def exact_coverage_result_shape_is_valid(row: Any) -> bool:
     digest = row.get("filer_transaction_digest")
     if not exact_evidence_identifier_is_valid(digest):
         return False
+    if not _amount_drift_shape_is_valid(row, held, set().union(*sets)):
+        return False
     return row["complete"] == (not missing and not surplus)
+
+
+def _amount_drift_shape_is_valid(row: dict, held: int, identity_ids: set) -> bool:
+    """Optional amount evidence: absent on older results, coherent when present.
+
+    ``amount_changed`` lists rows both sides hold under the same ID with
+    different amounts, so every entry must be a held row and none can also be
+    missing, surplus or superseded. ``amount_checked`` counts the shared rows
+    whose amounts were actually compared; it bounds the drift from above.
+    """
+    has_changed = "amount_changed" in row
+    has_checked = "amount_checked" in row
+    if not has_changed and not has_checked:
+        return True
+    if has_changed != has_checked:
+        return False
+    changed = row.get("amount_changed")
+    checked = row.get("amount_checked")
+    if (not isinstance(changed, list) or type(checked) is not int
+            or checked < len(changed) or checked > held):
+        return False
+    seen: set[str] = set()
+    for item in changed:
+        if not isinstance(item, dict):
+            return False
+        tran_id = item.get("tran_id")
+        if (not exact_evidence_identifier_is_valid(tran_id) or tran_id in seen
+                or tran_id in identity_ids):
+            return False
+        seen.add(tran_id)
+        for side in ("held", "orestar"):
+            value = item.get(side)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False
+        if abs(float(item["held"]) - float(item["orestar"])) <= 0.005:
+            return False
+    return True
 
 
 def utc_timestamp() -> str:

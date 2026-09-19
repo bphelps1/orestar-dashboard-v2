@@ -512,7 +512,14 @@ def certify_exact_scope_rows(
                 missing = set(row.get("missing") or [])
                 surplus = set(row.get("surplus") or [])
                 superseded = set(row.get("superseded") or [])
+                # Rows ORESTAR re-priced under the same ID are rows we hold.
+                changed = {
+                    item.get("tran_id")
+                    for item in row.get("amount_changed") or []
+                    if isinstance(item, dict)
+                }
                 if (row.get("held") != len(held_ids)
+                        or not changed.issubset(held_ids)
                         or not surplus.issubset(held_ids)
                         or not missing.isdisjoint(held_ids | superseded_ids)
                         or not superseded.issubset(superseded_ids)

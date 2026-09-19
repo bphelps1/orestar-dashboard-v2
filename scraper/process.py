@@ -245,6 +245,13 @@ def _row_diff() -> tuple[dict, list[dict]]:
                 if (e.get("evidence_version") is not None
                         and not exact_coverage_result_shape_is_valid(e)):
                     verdict = None
+                # `complete` is an identity verdict. Holding every ID is not
+                # holding every dollar when ORESTAR has since edited a row in
+                # place, and "rows complete" is what lets the site say a gap
+                # is ORESTAR's own summary disagreeing with its itemised rows.
+                # A committee with drifted amounts cannot make that claim.
+                if verdict is True and e.get("amount_changed"):
+                    verdict = False
                 complete[fid] = (verdict, e)
         return complete, rows
     except Exception:
