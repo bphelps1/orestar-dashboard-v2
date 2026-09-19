@@ -85,6 +85,7 @@ from balance_snapshot import (
     exact_coverage_result_shape_is_valid,
     exact_evidence_identifier_is_valid,
     exact_filer_digest_version,
+    parse_transaction_amount,
     transaction_filer_snapshots,
     transaction_snapshot_id,
     utc_timestamp,
@@ -115,7 +116,7 @@ USABLE_RESULT_FIELDS = (
     "superseded", "evidence_version", "checked", "collection_started_at",
     "checked_at", "transaction_snapshot_id", "filer_transaction_digest",
     "range_start", "range_end", "filer_digest_version",
-    "exact_search_count",
+    "exact_search_count", "amount_changed", "amount_checked",
 )
 
 # Two re-checks of committees whose withdrawn rows are moving a balance for
@@ -338,7 +339,15 @@ def _window_label(window: Window) -> str:
 
 
 def _parse_export_rows(content: bytes) -> dict[str, dict] | None:
-    """Read transaction IDs from an ORESTAR Excel export in memory."""
+    """Read transaction IDs, and their amounts, from an ORESTAR Excel export.
+
+    The amount is kept because ORESTAR edits some rows in place: a lumped
+    "Miscellaneous Cash Contributions $100 and under" row keeps its Tran ID,
+    status and filed date while its amount grows or shrinks (Eli for Portland
+    5675002 went from $340 to $830). An identity diff sees nothing wrong there,
+    so the amount is the only evidence the row changed. A row whose amount
+    cannot be read carries no "amount" key and is simply not compared.
+    """
     if content[:4] == F._XLS_MAGIC:
         engine = "xlrd"
     elif content[:4] == F._XLSX_MAGIC:
@@ -357,14 +366,50 @@ def _parse_export_rows(content: bytes) -> dict[str, dict] | None:
     if id_column is None:
         log.warning("ORESTAR Excel export has no transaction-ID column")
         return None
+    # Same header spellings process.py's COL_MAP accepts for the stored amount.
+    amount_column = columns.get("amount") or columns.get("tran amount")
+    amounts = (frame[amount_column] if amount_column is not None
+               else [None] * len(frame))
     rows: dict[str, dict] = {}
-    for raw_id in frame[id_column].dropna():
+    for raw_id, raw_amount in zip(frame[id_column], amounts):
+        if raw_id is None or (isinstance(raw_id, float) and raw_id != raw_id):
+            continue
         tran_id = str(raw_id).strip()
         if tran_id.endswith(".0") and tran_id[:-2].isdigit():
             tran_id = tran_id[:-2]
-        if tran_id.isdigit():
-            rows[tran_id] = {}
+        if not tran_id.isdigit():
+            continue
+        amount = parse_transaction_amount(raw_amount)
+        rows[tran_id] = {} if amount is None else {"amount": amount}
     return rows
+
+
+def _amount_drift(
+    theirs: dict[str, dict],
+    held_amounts: dict[str, float | None],
+) -> tuple[list[dict], int]:
+    """Rows both sides hold under one Tran ID but with different amounts.
+
+    Returns (changed, checked). ``checked`` counts only the shared rows whose
+    amount was readable on both sides, so "no drift" is never claimed for rows
+    that were not actually compared.
+    """
+    changed: list[dict] = []
+    checked = 0
+    if not isinstance(theirs, dict):
+        return changed, checked          # bare IDs carry no amounts to compare
+    for tran_id, row in theirs.items():
+        if tran_id not in held_amounts:
+            continue
+        held = held_amounts[tran_id]
+        orestar = parse_transaction_amount((row or {}).get("amount"))
+        if held is None or orestar is None:
+            continue
+        checked += 1
+        if abs(orestar - held) > 0.005:
+            changed.append({"tran_id": tran_id, "held": held, "orestar": orestar})
+    changed.sort(key=lambda item: (len(item["tran_id"]), item["tran_id"]))
+    return changed, checked
 
 
 def _export_rows(
@@ -1760,7 +1805,10 @@ def report() -> int:
     sur = [r for r in ok if r.get("surplus")]
     mis = [r for r in ok if r.get("missing")]
     sup = [r for r in ok if r.get("superseded")]
-    clean = [r for r in ok if not r.get("surplus") and not r.get("missing")]
+    drift = [r for r in ok if r.get("amount_changed")]
+    unpriced = [r for r in ok if "amount_checked" not in r]
+    clean = [r for r in ok if not r.get("surplus") and not r.get("missing")
+             and not r.get("amount_changed")]
     print()
     print(f"  committees diffed          : {len(ok):,}")
     print(f"  exact match                : {len(clean):,}")
@@ -1770,6 +1818,12 @@ def report() -> int:
           f"{sum(len(r['missing']) for r in mis):,} rows")
     print(f"  superseded (correctly gone): {len(sup):,}   "
           f"{sum(len(r['superseded']) for r in sup):,} rows")
+    print(f"  amounts changed on ORESTAR : {len(drift):,}   "
+          f"{sum(len(r['amount_changed']) for r in drift):,} rows   "
+          f"${sum(i['orestar'] - i['held'] for r in drift for i in r['amount_changed']):+,.2f}")
+    if unpriced:
+        print(f"  amounts never compared     : {len(unpriced):,}   "
+              "(diffed before amounts were recorded)")
     # Progress against the set that actually matters.
     #
     # The rolling re-check has no natural finish — by design, since a committee
@@ -1801,6 +1855,13 @@ def report() -> int:
         for r in sorted(sur, key=lambda r: -len(r["surplus"]))[:15]:
             print(f"    {r['filer_id']:<8}{r.get('name','')[:36]:<36}"
                   f"+{len(r['surplus']):<5}(ORESTAR {r['orestar']:,} held {r['held']:,})")
+    if drift:
+        print("\n  largest amount changes:")
+        for r in sorted(drift, key=lambda r: -sum(
+                abs(i["orestar"] - i["held"]) for i in r["amount_changed"]))[:15]:
+            moved = sum(i["orestar"] - i["held"] for i in r["amount_changed"])
+            print(f"    {r['filer_id']:<8}{r.get('name','')[:36]:<36}"
+                  f"{len(r['amount_changed']):<5}rows  ${moved:+,.2f}")
     return 0
 
 
@@ -2185,6 +2246,9 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                     superseded_by_us = local.get("superseded_ids") or set()
                     surplus = sorted(ours - set(theirs))
                     absent = set(theirs) - ours
+                    amount_changed, amount_checked = _amount_drift(
+                        theirs, local.get("held_amounts") or {},
+                    )
                     result = {
                         "filer_id": fid,
                         "name": _target_name(entries, target),
@@ -2194,6 +2258,8 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                         "surplus": surplus,
                         "missing": sorted(absent - superseded_by_us),
                         "superseded": sorted(absent & superseded_by_us),
+                        "amount_changed": amount_changed,
+                        "amount_checked": amount_checked,
                         **_evidence_fields(
                             transaction_id,
                             local_digests[fid],
@@ -2273,10 +2339,12 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                 usable_scopes += 1
                 consecutive_failed_scopes = 0
                 log.info(
-                    "Atomic scope complete: filers=%s missing=%d surplus=%d",
+                    "Atomic scope complete: filers=%s missing=%d surplus=%d "
+                    "amount_changed=%d",
                     ",".join(sorted(ids)),
                     sum(len(result["missing"]) for result in staged_results),
                     sum(len(result["surplus"]) for result in staged_results),
+                    sum(len(result["amount_changed"]) for result in staged_results),
                 )
         finally:
             browser.close()
@@ -2536,6 +2604,10 @@ def main() -> int:
                 # look identical to a count and mean opposite things.
                 superseded = sorted(absent & superseded_by_us)
                 missing = sorted(absent - superseded_by_us)
+                # Same ID, different amount: a row ORESTAR edited in place.
+                amount_changed, amount_checked = _amount_drift(
+                    theirs, local.get("held_amounts") or {},
+                )
                 result = {
                     "filer_id": fid,
                     "name": _target_name(entries, t),
@@ -2553,6 +2625,11 @@ def main() -> int:
                     # Recorded so the count is explainable rather than merely
                     # excused: held + superseded should equal ORESTAR's total.
                     "superseded": superseded,
+                    # Identity says nothing about value. `complete` stays an
+                    # identity verdict; these record whether the rows we hold
+                    # still carry ORESTAR's current amounts.
+                    "amount_changed": amount_changed,
+                    "amount_checked": amount_checked,
                     **_evidence_fields(
                         transaction_id,
                         local_digests[fid],
@@ -2571,8 +2648,9 @@ def main() -> int:
                     active_requirements=active_requirements,
                 )
                 log.info("Filer %s: ORESTAR %d, held %d, surplus %d, missing %d, "
-                         "superseded %d", fid, len(theirs), len(ours),
-                         len(surplus), len(missing), len(superseded))
+                         "superseded %d, amount changed %d of %d compared",
+                         fid, len(theirs), len(ours), len(surplus), len(missing),
+                         len(superseded), len(amount_changed), amount_checked)
                 _save(entries)
                 done += 1
                 successful_ids.add(fid)
