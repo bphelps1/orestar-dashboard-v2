@@ -191,6 +191,9 @@ def _parse_detail_text(text: str, filer_id: str) -> dict | None:
         "nature": "",
         "candidate_name": "",
         "committee_name": "",
+        "filing_type": "",
+        "filing_effective_from": "",
+        "filing_effective_to": "",
     }
 
     # 1. Committee type from heading
@@ -232,7 +235,21 @@ def _parse_detail_text(text: str, filer_id: str) -> dict | None:
     if m:
         result["nature"] = m.group(1).strip()
 
-    # 7. Candidate name — from "Candidate Information" section
+    # 7. The Statement of Organization's own filing: "Filing Type:
+    #    Discontinuation" with "Filing Effective From: 02/07/2026 to
+    #    02/07/2026" is how ORESTAR records that a committee ended. Its later
+    #    account summaries are blank and open at $0.00 (see
+    #    process._closure_reset evidence), so the date is kept as evidence.
+    m = re.search(r"Filing Type:\s*([A-Za-z][A-Za-z ]*?)\s*(?:\t|\n|$)", text)
+    if m:
+        result["filing_type"] = m.group(1).strip()
+    m = re.search(r"Filing Effective From:\s*(\d{2}/\d{2}/\d{4})\s+to\s+(\d{2}/\d{2}/\d{4}|present)",
+                  text)
+    if m:
+        result["filing_effective_from"] = m.group(1)
+        result["filing_effective_to"] = m.group(2)
+
+    # 8. Candidate name — from "Candidate Information" section
     #    "Name:  Benjamin W Bowman" right after "Candidate Information"
     m = re.search(r"Candidate Information\s*\n.*?Name:\s*(.+?)(?:\s*\n|$)", text)
     if m:
@@ -296,7 +313,9 @@ def main():
     # Filter out already-cached (unless --force)
     # Re-scrape entries that are: Not Found, empty type, or candidate
     # committees missing the 'election' field (added after initial scrape)
-    if not args.force:
+    # Filers named explicitly are refreshed even when cached: the request is
+    # the reason to look again (e.g. to record a Discontinuation filing).
+    if not args.force and not args.filer_ids:
         def _needs_scrape(fid):
             if fid not in cache:
                 return True

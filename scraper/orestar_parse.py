@@ -104,3 +104,24 @@ def parse_dollar_between(html: str, start_label: str, end_label: str,
     if b == -1:
         return default
     return parse_dollar(html[a:b], label, default)
+
+
+_FILER_TYPE_RE = re.compile(r'var\s+filerType\s*=\s*"([A-Za-z]*)"')
+
+# ORESTAR's code for an Independent Expenditure Filer. Its account-summary page
+# carries the full committee template, balances included, but its own script
+# hides that section and shows only expenditures: ORESTAR publishes no cash
+# balance for these filers. Tyler Miller (19990): hidden "Ending Cash Balance
+# ($9,640.00)", visible page "Cash Expenditures / Accounts Payable" only.
+INDEPENDENT_FILER_TYPE = "IF"
+
+
+def parse_filer_type(html: str) -> str | None:
+    """ORESTAR's filer-type code from an account-summary page, or None.
+
+    The page script decides what to display from ``var filerType = "..."``:
+    "IF" for an Independent Expenditure Filer, "PAC" or "CC" and so on for
+    committees. It is set server-side, so it reads the same from raw HTML.
+    """
+    match = _FILER_TYPE_RE.search(html or "")
+    return match.group(1).upper() if match and match.group(1) else None
