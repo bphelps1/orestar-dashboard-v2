@@ -1229,7 +1229,15 @@ function renderAcctSummaryTiles(profile, year) {
             `${liveItems.map(liveOriginalPairText).join("; ")}. ORESTAR never ` +
             `marked it expired, so this balance counts it too.`
           : "";
-        const rowTip = [certTip, liveTip].filter(Boolean).join(" ");
+        // Transactions ORESTAR deleted in this year, which neither side counts.
+        const deletedItems = ((profile.orestar_deletions) || [])
+          .filter(item => String(item.year) === String(yr));
+        const deletedTip = deletedItems.length
+          ? `ORESTAR deleted ${deletedItems.map(deletionText).join("; ")}. ` +
+            `Neither ORESTAR nor this balance counts ` +
+            `${deletedItems.length === 1 ? "it" : "them"}.`
+          : "";
+        const rowTip = [certTip, liveTip, deletedTip].filter(Boolean).join(" ");
         discHTML += `<div class="disc-row ${severity}" style="cursor:pointer" data-detail="${rowId}"${rowTip ? ` title="${esc(rowTip)}"` : ""}>
           <span class="disc-col-year">${yr} ▸</span>
           <span class="disc-col-num">${fmt$(d.our_end)}</span>
@@ -2770,6 +2778,31 @@ function liveOriginalNoteText(profile) {
     `counts ${one ? "it" : "them"}. This balance counts ${one ? "it" : "them"} the same way.`;
 }
 
+// Transactions ORESTAR deleted after we had fetched them (_apply_deletions in
+// scraper/process.py). A deletion is filed as its own record naming the row it
+// deletes; ORESTAR then stops counting the row, and so does this balance. Each
+// is named by both IDs, which ORESTAR's transaction history page shows together.
+function deletionText(item) {
+  const verb = (item.tran_type === "C" || item.tran_type === "OR") ? "from" : "to";
+  const what = [item.amount != null ? fmtCents(item.amount) : "", item.sub_type || ""]
+    .filter(Boolean).join(" ");
+  const who = item.contributor_payee ? ` ${verb} ${item.contributor_payee}` : "";
+  const when = item.tran_date ? `, ${item.tran_date}` : "";
+  const ids = (item.removed_ids || []).map(id => `#${id}`).join(" and ");
+  return `${ids} (${what}${who}${when}), deleted by #${item.deletion_id}` +
+    (item.deleted_on ? ` on ${item.deleted_on}` : "");
+}
+
+function deletionNoteText(profile) {
+  const items = (profile && profile.orestar_deletions) || [];
+  if (!items.length) return "";
+  const one = items.length === 1;
+  return `ORESTAR deleted ${one ? "a transaction" : `${items.length} transactions`} ` +
+    `after ${one ? "it was" : "they were"} first filed: ${items.map(deletionText).join("; ")}. ` +
+    `ORESTAR no longer counts deleted transactions, so neither does this balance. ` +
+    `The deleted ${one ? "row is" : "rows are"} kept in the pipeline's deletion record.`;
+}
+
 // Early-era amendment chains (scraper/orestar_amendment_chains.py). In its
 // first years ORESTAR's summaries counted every amendment of a transaction,
 // less one per deletion, including versions its search now hides as expired
@@ -2845,6 +2878,7 @@ function cashTreatmentNoteText(profile) {
     closureResetNoteText(profile),
     amendmentChainNoteText(profile),
     liveOriginalNoteText(profile),
+    deletionNoteText(profile),
     orestarAbsentNoteText(profile),
     nonexemptLoanNoteText(profile),
     exemptLoanNoteText(profile),

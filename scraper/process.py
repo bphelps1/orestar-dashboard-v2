@@ -1180,6 +1180,57 @@ def _live_originals_for(rows: pd.DataFrame, evidence: dict[str, str]) -> list[di
     return out
 
 
+def _deletions_by_filer_id() -> dict[str, list[dict]]:
+    """Deleted transactions we had counted, as display entries per filer ID.
+
+    Read from the kept deletion record (DELETIONS_PATH), because the rows
+    themselves are gone from the shards. Only deletions that removed a row of
+    ours are listed; the others never touched our numbers.
+    """
+    try:
+        entries = json.loads(DELETIONS_PATH.read_text()) if DELETIONS_PATH.exists() else []
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(entries, list):
+        return {}
+
+    def _date(value):
+        parsed = pd.to_datetime(value, errors="coerce", format="mixed")
+        return None if pd.isna(parsed) else parsed.strftime("%Y-%m-%d")
+
+    def _amount(value):
+        try:
+            return round(float(str(value).replace("$", "").replace(",", "")), 2)
+        except (TypeError, ValueError):
+            return None
+
+    out: dict[str, list[dict]] = defaultdict(list)
+    for entry in entries:
+        removed = (entry or {}).get("removed") or []
+        if not removed:
+            continue
+        deletion = entry.get("deletion") or {}
+        counted = removed[-1]            # removed in chain order: the newest counted
+        filer = _clean_id(deletion.get("filer id") or counted.get("filer id"))
+        when = _date(counted.get("tran_date") or deletion.get("tran_date"))
+        out[filer].append({
+            "deletion_id": str(entry.get("deletion_id")),
+            "deleted_on": _date(deletion.get("filed_date")),
+            "removed_ids": [str(r.get("tran_id")) for r in removed],
+            "filer_id": filer,
+            "tran_date": when,
+            "year": int(when[:4]) if when else None,
+            "tran_type": counted.get("tran_type") or deletion.get("tran_type"),
+            "sub_type": counted.get("sub_type") or deletion.get("sub_type"),
+            "contributor_payee": counted.get("contributor_payee")
+                                 or deletion.get("contributor_payee"),
+            "amount": _amount(counted.get("amount")),
+        })
+    for rows in out.values():
+        rows.sort(key=lambda r: (r["tran_date"] or "", r["deletion_id"]))
+    return dict(out)
+
+
 AMOUNT_UPDATES_PATH = DATA_DIR / "amount_updates.json"
 AMOUNT_UPDATES_KEEP = 200
 
@@ -1246,11 +1297,167 @@ def _record_amount_updates(existing: pd.DataFrame, incoming: pd.DataFrame) -> di
     return result
 
 
+# Transactions ORESTAR deleted. Deleting one files a separate record: status
+# "Deleted", a Tran ID of its own, the filing date of the deletion, and an
+# "Original Id" naming the transaction it deletes. The original becomes expired
+# and ORESTAR stops counting it. The standard search hides deletion records, and
+# a filed-date window is read once, so for years a deletion never reached us:
+# we held 0 of them and kept counting every deleted row (ChamberPAC's $10,000
+# contribution 5697866, deleted by 5768551 on 2026-08-18).
+#
+# The fetcher now asks for them. The merge removes each deleted transaction the
+# way it removes an amended original, but nothing is lost: every removed row is
+# kept here in full next to the deletion record that removed it. The file rides
+# in the transactions state profile, with the shards it explains.
+DELETIONS_PATH = DATA_DIR / "orestar_deletions.json"
+DELETED_STATUS = "Deleted"
+
+
+def _clean_id(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    if text.lower() in ("nan", "none", "nat"):
+        return ""
+    return text[:-2] if text.endswith(".0") and text[:-2].isdigit() else text
+
+
+def _clean_ids(series: pd.Series) -> pd.Series:
+    """_clean_id for a whole column at once (the merge holds ~3M rows)."""
+    text = series.astype(str).str.strip().str.replace(r"^(\d+)\.0$", r"\1", regex=True)
+    return text.mask(text.str.lower().isin(("nan", "none", "nat", "<na>")), "")
+
+
+def _row_record(row) -> dict:
+    """A row as plain strings, every column kept, for the deletion record."""
+    out = {}
+    for key, value in row.items():
+        if value is None or (not isinstance(value, (list, dict)) and pd.isna(value)):
+            continue
+        out[str(key)] = value.isoformat() if hasattr(value, "isoformat") else str(value)
+    return out
+
+
+def _apply_deletions(df: pd.DataFrame, keep_live=frozenset()):
+    """Remove deletion records and every version of a transaction they delete.
+
+    Returns (df, removed_ids, entries). A transaction counts only through its
+    newest version, so a chain whose newest version is a deletion counts
+    nothing: the original and any amendments all go. A later amendment would
+    outrank the deletion and stay (only the deletion record is dropped then);
+    ORESTAR has shown none, but guessing would be worse than following the
+    order. An original that coverage evidence shows ORESTAR still returning
+    (``keep_live``) is kept, as for amendments.
+    """
+    orig_col = "original id" if "original id" in df.columns else None
+    status_col = "tran status" if "tran status" in df.columns else None
+    if not (orig_col and status_col and "tran_id" in df.columns) or df.empty:
+        return df, set(), []
+    status = df[status_col].astype(str).str.strip()
+    is_deletion = status == DELETED_STATUS
+    if not is_deletion.any():
+        return df, set(), []
+
+    keep_live = {_clean_id(v) for v in keep_live or ()}
+    ids = _clean_ids(df["tran_id"])
+    origs = _clean_ids(df[orig_col])
+    targets = set(origs[is_deletion]) - {""}
+    in_chain = is_deletion | origs.isin(targets) | ids.isin(targets)
+    chain = df[in_chain].copy()
+    chain["_id"] = ids[in_chain]
+    # Chain key: the original's ID. Every version names it, and so does the
+    # original itself; an original stored without one is keyed by its own ID.
+    chain["_key"] = origs[in_chain].where(origs[in_chain] != "", chain["_id"])
+    chain["_deletion"] = is_deletion[in_chain]
+    chain["_filed"] = (pd.to_datetime(chain["filed_date"], errors="coerce", format="mixed")
+                       if "filed_date" in chain.columns else pd.NaT)
+    chain["_num"] = pd.to_numeric(chain["_id"], errors="coerce")
+    chain = chain.sort_values(["_filed", "_num"], na_position="first")
+
+    remove: set[str] = set()
+    entries: list[dict] = []
+    outranked = 0
+    columns = [c for c in df.columns]
+    for key, versions in chain.groupby("_key", sort=False):
+        deletions = versions[versions["_deletion"]]
+        if deletions.empty:
+            continue
+        remove |= set(deletions["_id"])
+        newest_is_deletion = bool(versions.iloc[-1]["_deletion"])
+        if not newest_is_deletion:
+            outranked += 1
+        removed_rows, kept_live = [], []
+        if newest_is_deletion:
+            for _, version in versions[~versions["_deletion"]].iterrows():
+                if version["_id"] in keep_live:
+                    kept_live.append(version["_id"])
+                    continue
+                remove.add(version["_id"])
+                removed_rows.append(_row_record(version[columns]))
+        for _, deletion in deletions.iterrows():
+            entries.append({
+                "deletion_id": deletion["_id"],
+                "original_id": key,
+                "deletion": _row_record(deletion[columns]),
+                "removed": removed_rows if newest_is_deletion else [],
+                "kept_live": kept_live,
+                "outranked_by_later_version": not newest_is_deletion,
+            })
+
+    before = len(df)
+    df = df[~ids.isin(remove)]
+    removed_versions = sum(len(e["removed"]) for e in entries)
+    log.info("Deleted transactions: %d deletion record(s) from ORESTAR; removed %d "
+             "deleted version(s) we held (%d → %d rows)%s",
+             int(is_deletion.sum()), removed_versions, before, len(df),
+             f"; {outranked} outranked by a later amendment" if outranked else "")
+    kept = sorted({i for e in entries for i in e["kept_live"]})
+    if kept:
+        log.info("Kept %d deleted original(s) ORESTAR still counts as live: %s",
+                 len(kept), ", ".join(kept))
+    return df, remove - set(ids[is_deletion]), entries
+
+
+def _record_deletions(entries: list[dict]) -> None:
+    """Merge this run's deletion records into the kept record, by deletion ID.
+
+    A deletion can arrive again (overlapping windows, a re-download) after its
+    rows are gone; the rows removed the first time are kept.
+    """
+    if not entries:
+        return
+    try:
+        held = json.loads(DELETIONS_PATH.read_text()) if DELETIONS_PATH.exists() else []
+        if not isinstance(held, list):
+            held = []
+    except (OSError, ValueError):
+        held = []
+    by_id = {str(e.get("deletion_id")): e for e in held if isinstance(e, dict)}
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for entry in entries:
+        prior = by_id.get(entry["deletion_id"])
+        if prior is None:
+            by_id[entry["deletion_id"]] = {**entry, "first_seen": now}
+            continue
+        seen = {r.get("tran_id") for r in prior.get("removed") or []}
+        prior["removed"] = (prior.get("removed") or []) + [
+            r for r in entry["removed"] if r.get("tran_id") not in seen]
+        prior["kept_live"] = sorted(set(prior.get("kept_live") or [])
+                                    | set(entry["kept_live"]))
+        prior["deletion"] = entry["deletion"]
+        prior["outranked_by_later_version"] = entry["outranked_by_later_version"]
+    DELETIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DELETIONS_PATH.write_text(json.dumps(
+        sorted(by_id.values(), key=lambda e: (len(e["deletion_id"]), e["deletion_id"])),
+        indent=1))
+
+
 
 def _drop_superseded(df, keep_live=frozenset()):
     """Keep only the version of each transaction that ORESTAR still counts.
 
-    Two rules, and we had only the first:
+    Rule 0 removes deleted transactions (``_apply_deletions``). Then two rules
+    for amendments, and we had only the first:
 
       1. An original replaced by an amendment is dropped. ORESTAR's Account
          Summary counts the amendment, not the original, and the two arrive in
@@ -1291,6 +1498,11 @@ def _drop_superseded(df, keep_live=frozenset()):
     status_col = "tran status" if "tran status" in df.columns else None
     if not (orig_col and status_col and "tran_id" in df.columns):
         return df, removed
+
+    # Rule 0 — deleted transactions (see DELETIONS_PATH). Runs first: a deleted
+    # chain must not leave its newest amendment for rule 2 to keep.
+    df, removed, _deletions = _apply_deletions(df, keep_live)
+    _record_deletions(_deletions)
 
     # Rule 1 — originals replaced by an amendment.
     amended = df[df[status_col] == "Amended"]
@@ -2542,6 +2754,11 @@ def aggregate_filers(
     _live_originals_evidence = _live_original_ids()
     _live_original_committees = 0
     _live_original_rows = 0
+    # Transactions ORESTAR deleted that we had counted. The merge removed them
+    # (see _apply_deletions); here each committee lists them by ID.
+    _deletions_by_filer = _deletions_by_filer_id()
+    _deletion_committees = 0
+    _deletion_rows = 0
 
     # Load filer metadata (party, office, committee type) from scraper cache
     _filer_metadata_path = DATA_DIR / "filer_metadata.json"
@@ -3163,6 +3380,14 @@ def aggregate_filers(
         if _live_originals_here:
             _live_original_committees += 1
             _live_original_rows += len(_live_originals_here)
+        _deletions_here = [
+            _entry
+            for _fid in _name_to_fids.get(name, [])
+            for _entry in _deletions_by_filer.get(str(_fid), [])
+        ]
+        if _deletions_here:
+            _deletion_committees += 1
+            _deletion_rows += len(_deletions_here)
 
         yearly_nets = _yearly_net(_c_for_coh, _e_for_coh, _or_for_coh, _od_for_coh, _ba_for_coh)
 
@@ -4575,6 +4800,10 @@ def aggregate_filers(
             # match ORESTAR; each entry names the original and every amendment
             # pointing at it, so a reader can look both up on ORESTAR.
             "orestar_live_originals": _live_originals_here,
+            # Transactions ORESTAR deleted after we had fetched them. Removed
+            # from the balance to match ORESTAR; each names the deleted ID and
+            # the deletion record, both of which ORESTAR's history page shows.
+            "orestar_deletions": _deletions_here,
             # Early-era amendment chains ORESTAR still counts (see
             # orestar_amendment_chains.py): each applied filer-year with the
             # versions added or taken away and every version of their chains,
@@ -4744,6 +4973,11 @@ def aggregate_filers(
         "Live amended originals: %d kept across %d committees (ORESTAR still "
         "counts them); %d IDs in coverage evidence",
         _live_original_rows, _live_original_committees, len(_live_originals_evidence),
+    )
+    log.info(
+        "Deleted transactions: %d removed across %d committees (ORESTAR deleted "
+        "them after we fetched them)",
+        _deletion_rows, _deletion_committees,
     )
     _disc_rows = []
     _unpaired_rows = []
