@@ -39,6 +39,7 @@ def _concurrency_block(text: str) -> str:
             ("max_filers", "force"),
         ),
         ("candidate-filings.yml", "Scrape candidate filings", ()),
+        ("amendment-chains.yml", "Collect amendment chains", ("targets",)),
         (
             "verify-filers.yml",
             "Verify filer transactions",
@@ -87,7 +88,8 @@ def test_orestar_workflow_requeues_same_request_instead_of_overlapping(
 
 @pytest.mark.parametrize(
     "filename",
-    ["coverage-survey.yml", "filer-metadata.yml", "candidate-filings.yml"],
+    ["coverage-survey.yml", "filer-metadata.yml", "candidate-filings.yml",
+     "amendment-chains.yml"],
 )
 def test_requeued_workflow_has_non_evicting_pending_slot(filename: str) -> None:
     concurrency = _concurrency_block(_workflow(filename))
@@ -120,6 +122,8 @@ def test_short_jobs_budget_for_wait_install_work_and_handoff() -> None:
         "coverage-survey.yml": (30, 25, 70, 30),
         # coordination + browser install + short scrape/post-work/dispatch room
         "candidate-filings.yml": (25, 25, 0, 20),
+        # coordination + browser install + 30m collection budget + room
+        "amendment-chains.yml": (25, 25, 30, 20),
     }
     for filename, components in cases.items():
         match = re.search(
@@ -196,6 +200,7 @@ def test_data_workflows_do_not_publish_generated_state_to_git() -> None:
         "filer-metadata.yml",
         "supabase-load.yml",
         "verify-filers.yml",
+        "amendment-chains.yml",
     }
     for filename in migrated:
         assert "scripts/push_data.sh" not in _workflow(filename)

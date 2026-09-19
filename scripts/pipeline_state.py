@@ -66,6 +66,9 @@ PROFILE_FILES = {
         # ORESTAR's itemized totals cannot see. Travels with the annual
         # summaries because the ghost rows are derived from the two together.
         "data/orestar_certificates.json",
+        # Early-era amendment chains: versions ORESTAR's search hides but its
+        # summaries still count. Checked against the annual summaries above.
+        "data/orestar_amendment_chains.json",
         "data/orestar_yearly_summaries.json",
     ),
     "auxiliary": (

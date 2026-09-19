@@ -2735,9 +2735,48 @@ function liveOriginalNoteText(profile) {
     `counts ${one ? "it" : "them"}. This balance counts ${one ? "it" : "them"} the same way.`;
 }
 
+// Early-era amendment chains (scraper/orestar_amendment_chains.py). In its
+// first years ORESTAR's summaries counted every amendment of a transaction,
+// less one per deletion, including versions its search now hides as expired
+// or deleted. The pipeline applies that only where it reproduces ORESTAR's
+// own summary line to the cent, and each chain is named version by version so
+// the reader can open ORESTAR's history page for any of them.
+function amendmentChainText(chain, bucket) {
+  const versions = (chain && chain.versions) || [];
+  const original = versions.find(v => v.status === "Original") || versions[0];
+  if (!original) return "";
+  const amended = versions.filter(v => v.status === "Amended");
+  const deleted = versions.filter(v => v.status === "Deleted");
+  const verb = bucket === "C" ? "from" : "to";
+  let text = `${fmtCents(original.amount)} ${original.sub_type || ""} ${verb} ` +
+    `${original.payee || "unnamed"}, ${original.tran_date}: #${original.tran_id}`;
+  if (amended.length) {
+    text += `, amended as ` + amended.map(v =>
+      `#${v.tran_id}` + (v.amount !== original.amount ? ` (${fmtCents(v.amount)})` : "")).join(", ");
+  }
+  if (deleted.length) {
+    text += `, deleted as ` + deleted.map(v => `#${v.tran_id}`).join(", ");
+  }
+  return text;
+}
+
+function amendmentChainNoteText(profile) {
+  const items = (profile && profile.orestar_amendment_chains) || [];
+  if (!items.length) return "";
+  const parts = items.map(item =>
+    `${item.year} ${item.bucket === "C" ? "contributions" : "expenditures"}, ` +
+    `${fmtSignedCents(item.cash_effect)} to cash (` +
+    (item.chains || []).map(c => amendmentChainText(c, item.bucket)).join("; ") + `)`);
+  return `In its first years ORESTAR counted every amendment of a transaction, less ` +
+    `one per deletion, including versions its search now marks expired or deleted. ` +
+    `ORESTAR's own figures for this committee still reflect that, so this balance ` +
+    `counts them the same way: ${parts.join("; ")}.`;
+}
+
 function cashTreatmentNoteText(profile) {
   return [
     certificateNoteText(profile),
+    amendmentChainNoteText(profile),
     liveOriginalNoteText(profile),
     orestarAbsentNoteText(profile),
     nonexemptLoanNoteText(profile),

@@ -44,6 +44,13 @@ from exact_coverage_evidence import (
     certify_exact_scope_rows,
     rows_requesting_surplus,
 )
+from orestar_amendment_chains import (
+    CHAIN_ID_PREFIX,
+    CHAIN_SUB_TYPE,
+    CHAINS_FILENAME,
+    evaluate_target,
+    targets_for_filer,
+)
 from orestar_certificates import (
     CERTIFICATES_FILENAME,
     GHOST_ID_PREFIX,
@@ -2433,6 +2440,18 @@ def aggregate_filers(
     _ghost_committees = 0
     _ghost_row_count = 0
     _ghost_amount = 0.0
+    # Early-era amendment chains (see orestar_amendment_chains.py): versions
+    # ORESTAR's summary still counts though its search hides them. Collected
+    # per filer-year by fetch_amendment_chains.py; absent file, no change.
+    _amendment_chains: dict = {}
+    _chains_path = DATA_DIR / CHAINS_FILENAME
+    if _chains_path.exists():
+        try:
+            _amendment_chains = json.loads(_chains_path.read_text())
+        except (OSError, ValueError) as exc:
+            log.warning("Ignoring unreadable %s: %s", _chains_path.name, exc)
+    _chain_decisions: Counter = Counter()
+    _chain_rows_added = 0
     # Amended originals ORESTAR still counts (see _drop_superseded). The merge
     # already kept them in the mirror; here they are listed per committee so
     # the site can name every one by transaction ID.
@@ -2888,6 +2907,84 @@ def aggregate_filers(
             _ghost_committees += 1
             _ghost_row_count += len(_ghost_specs)
             _ghost_amount += sum(abs(float(s["amount"])) for s in _ghost_specs)
+        # Early-era amendment chains. evaluate_target applies ORESTAR's 2007
+        # counting only where it reproduces ORESTAR's own summary line to the
+        # cent from ORESTAR's own rows, and names every version it moves.
+        # The rows join the balance-adjustment frame for the same reason the
+        # ghost rows do: every cash consumer reads it, so the timeline, the
+        # yearly nets and the capture-bounded views stay in agreement.
+        _chains_here: list[dict] = []
+        _chain_by_year: dict[str, float] = defaultdict(float)
+        _chain_rows = []
+        for _fid in _name_to_fids.get(name, []):
+            _entries = targets_for_filer(_amendment_chains, str(_fid))
+            if not _entries:
+                continue
+            if _fid_owners.get(_fid, 0) > 1:
+                _chain_decisions["ambiguous_scope"] += len(_entries)
+                continue
+            for _entry in _entries:
+                _bucket = _entry["tran_type"]
+                _frame = _c_for_coh if _bucket == "C" else _e_for_coh
+                _held: dict[str, float] = {}
+                if (_frame is not None and not _frame.empty
+                        and {"filer id", "year", "tran_id"} <= set(_frame.columns)):
+                    _mine = _frame[
+                        (_frame["filer id"].astype(str).str.replace(r"\.0$", "", regex=True)
+                         == str(_fid))
+                        & (_frame["year"] == int(_entry["year"]))
+                    ]
+                    _held = {
+                        str(_t).strip(): round(float(_a), 2)
+                        for _t, _a in zip(_mine["tran_id"], _mine["amount"])
+                    }
+                _summary = (((_yearly_summaries.get(str(_fid)) or {}).get("years") or {})
+                            .get(str(_entry["year"])) or {})
+                _decision = evaluate_target(_entry, _summary, _held, _bucket)
+                _chain_decisions[_decision.get("reason") or "applied"] += 1
+                if not _decision["applied"]:
+                    continue
+                _versions = {
+                    _v["tran_id"]: _v for _c in _decision["chains"] for _v in _c["versions"]
+                }
+                _cash_sign = 1.0 if _bucket == "C" else -1.0
+                for _adj in _decision["adjustments"]:
+                    _v = _versions[_adj["tran_id"]]
+                    _when = pd.to_datetime(_v.get("tran_date"), format="%m/%d/%Y")
+                    _signed = _cash_sign * float(_adj["amount"]) * (
+                        1.0 if _adj["effect"] == "add" else -1.0)
+                    _chain_rows.append({
+                        "tran_id": f"{CHAIN_ID_PREFIX}{_fid}-{_adj['tran_id']}-{_adj['effect']}",
+                        "original_id": None,
+                        "tran_date": _when,
+                        "filed_date": _when,
+                        "tran_type": "O",
+                        "sub_type": CHAIN_SUB_TYPE,
+                        "contributor_payee": _v.get("payee") or "ORESTAR amendment chain",
+                        "amount": round(_signed, 2),
+                        "year": int(_when.year),
+                        "month": _when.to_period("M").strftime("%Y-%m"),
+                        "filer id": str(_fid),
+                        filer_col: name,
+                        "_undated": False,
+                    })
+                    _chain_by_year[str(int(_when.year))] += round(_signed, 2)
+                _chains_here.append({
+                    "filer_id": str(_fid),
+                    "year": int(_entry["year"]),
+                    "bucket": _bucket,
+                    "orestar_line": _decision["orestar_line"],
+                    "held_total": _decision["held_total"],
+                    "cash_effect": round(_cash_sign * _decision["moved"], 2),
+                    "adjustments": _decision["adjustments"],
+                    "chains": _decision["chains"],
+                })
+        if _chain_rows:
+            _ba_for_coh = pd.concat(
+                [_ba_for_coh, pd.DataFrame(_chain_rows)], ignore_index=True,
+            )
+            _chain_rows_added += len(_chain_rows)
+
         _ghost_by_year: dict[str, float] = defaultdict(float)
         for _spec in _ghost_specs:
             _ghost_by_year[str(_spec["year"])] += float(_spec["amount"])
@@ -3705,6 +3802,12 @@ def aggregate_filers(
                             round(_ghost_by_year[yr_s], 2)
                             if yr_s in _ghost_by_year else None
                         ),
+                        # Cash moved onto ORESTAR's line by early-era
+                        # amendment-chain versions it still counts.
+                        "amendment_chain_adjustment": (
+                            round(_chain_by_year[yr_s], 2)
+                            if yr_s in _chain_by_year else None
+                        ),
                         # Amended originals ORESTAR still counts in this year,
                         # by transaction ID, so the row can name them.
                         "live_originals": (
@@ -4293,6 +4396,11 @@ def aggregate_filers(
             # match ORESTAR; each entry names the original and every amendment
             # pointing at it, so a reader can look both up on ORESTAR.
             "orestar_live_originals": _live_originals_here,
+            # Early-era amendment chains ORESTAR still counts (see
+            # orestar_amendment_chains.py): each applied filer-year with the
+            # versions added or taken away and every version of their chains,
+            # so each dollar can be traced to ORESTAR's history pages.
+            "orestar_amendment_chains": _chains_here,
             # Annual non-exempt loan totals used for the cash lane when a
             # trustworthy ORESTAR statement differs from the eligible held
             # transaction total. Raw loan rows remain visible in the timeline;
@@ -4433,6 +4541,10 @@ def aggregate_filers(
         "(|$%s| moved); %d filers skipped as claimed by more than one committee",
         _ghost_row_count, _ghost_committees, f"{_ghost_amount:,.2f}",
         len(_ghost_skipped_ambiguous),
+    )
+    log.info(
+        "Amendment chains: %d derived rows; decisions %s",
+        _chain_rows_added, dict(sorted(_chain_decisions.items())),
     )
     log.info(
         "Live amended originals: %d kept across %d committees (ORESTAR still "
