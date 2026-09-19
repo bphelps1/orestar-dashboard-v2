@@ -17,8 +17,8 @@ import fetch_capitol_club as cc  # noqa: E402
 import fetch_committee_persons as cp  # noqa: E402
 import match_lobbyists as ml  # noqa: E402
 from lobby_match import (  # noqa: E402
-    client_alternatives, core_org, first_last, is_private_domain, is_public_client, norm_org,
-    norm_person,
+    client_alternatives, core_org, first_last, is_private_domain, is_public_client, names_same_org,
+    norm_org, norm_person,
 )
 
 
@@ -45,7 +45,7 @@ def test_core_org(raw, core):
 
 def test_public_bodies_and_bare_places_never_match():
     for name in ("City of Eugene", "Clackamas County", "Port of Morrow", "Business Oregon",
-                 "Salem-Keizer School District 24J", "Redmond", "Sisters"):
+                 "Salem-Keizer School District 24J", "Redmond", "Sisters", "Tualatin Valley Fire & Rescue"):
         assert is_public_client(name), name
     for name in ("Oregon Business & Industry", "Oregon Association of Nurseries", "Kroger",
                  "Tillamook County Creamery Association"):
@@ -386,3 +386,44 @@ def test_client_lead_follows_the_2024_list():
     ml.seed_client_leads(cur, [{"first": "Dan", "last": "Bates", "clients": "Microsoft; 211info",
                                 "addl_lobbyists": "Madeline Do 503-830-8077"}])
     assert [p for _, p in cur.updates] == [(1, "microsoft")]
+
+
+
+@pytest.mark.parametrize(("committee", "org"), [
+    ("Dairy PAC", "Oregon Dairy Farmers Association"),
+    ("ORLAPAC", "Oregon Restaurant & Lodging Association"),
+    ("OCBH Policy Action Committee", "Oregon Council for Behavioral Health"),
+    ("National Federation of Independent Business", "NFIB"),
+    ("Oregon Pharmacists Fund", "Oregon State Pharmacy Assn."),
+    ("Dentists of Oregon PAC", "Oregon Dental Association"),
+    ("2024 Our Oregon Voter Guide", "Our Oregon"),
+])
+def test_committee_named_for_its_sponsor(committee, org):
+    assert names_same_org(committee, org)
+
+
+@pytest.mark.parametrize(("committee", "org"), [
+    ("Washington County Chamber PAC", "Nike"),                       # a board member's employer
+    ("Oregon Hospital Political Action Committee", "PeaceHealth"),
+    ("Oregon Business & Industry Candidate PAC", "The Standard"),
+    ("Care for our Seniors", "Oregon Health Care Association"),
+])
+def test_board_members_employer_is_not_the_sponsor(committee, org):
+    assert not names_same_org(committee, org)
+
+
+def test_an_organizations_own_row_leads_over_a_contract_lobbyist():
+    lobbyists = [_person(1, "Debbie Koreski", "debbie@mahoniapublicaffairs.com"),
+                 _person(2, "Courtney Graham", "grahamc@seiu503.org"),
+                 _person(3, "Melissa Unger", "ungerm@seiu503.org", on_cc=False)]
+    clients = [{"lobbyist_id": i, "client_key": "seiu local 503 opeu", "client_name": "SEIU Local 503-OPEU",
+                "is_lead": False, "active": True} for i in (1, 2)]
+    cur = _Cur({"lobbyists": lobbyists, "lobbyist_clients": clients})
+    ml.seed_client_leads(cur, [
+        {"first": "Debbie", "last": "Koreski", "firm": "Mahonia Public Affairs",
+         "clients": "Mahonia Public Affairs; SEIU 503; SEIU Local 503", "addl_lobbyists": ""},
+        {"first": "Melissa", "last": "Unger", "firm": "SEIU Local 503", "clients": "SEIU Local 503",
+         "addl_lobbyists": "Len Norwitz 503-708-8594 Courtney Graham 503-330-8422"},
+    ])
+    # Melissa Unger is off Capitol Club, so her row's next person leads.
+    assert [p for _, p in cur.updates] == [(2, "seiu local 503 opeu")]

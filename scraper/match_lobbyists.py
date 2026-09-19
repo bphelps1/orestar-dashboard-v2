@@ -56,8 +56,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import supabase_sync  # noqa: E402
 from lobby_match import (  # noqa: E402
     client_alternatives, core_org, dba_names, email_domain, first_last, first_names_compatible,
-    is_private_domain, is_public_client, nicknames, norm_org, norm_person, person_label,
-    person_tokens, place_tokens,
+    is_private_domain, is_public_client, names_same_org, nicknames, norm_org, norm_person,
+    person_label, person_tokens, place_tokens,
 )
 
 log = logging.getLogger(__name__)
@@ -250,6 +250,9 @@ def match_committee_contacts(pool, persons, lobbyists, lobbyist_clients) -> tupl
         f, la = first_last(l["name"])
         if f and la:
             by_name[(f, la)].append(l)
+    # A client's lead is the organization's point person; among colleagues
+    # sharing a domain, they are the likelier contact for its committee.
+    leads = {c["lobbyist_id"] for c in lobbyist_clients if c.get("is_lead") and c["active"]}
     client_to_lobbyists = defaultdict(set)
     client_names = {}
     for c in lobbyist_clients:
@@ -279,11 +282,15 @@ def match_committee_contacts(pool, persons, lobbyists, lobbyist_clients) -> tupl
             s = 0.7 if len(peers) <= 3 else 0.55
             for l in peers:
                 if l["lobbyist_id"] not in hits:
-                    hits[l["lobbyist_id"]] = ("email_domain", s)
+                    hits[l["lobbyist_id"]] = ("email_domain", s + (0.05 if l["lobbyist_id"] in leads else 0))
         for lid, (method, score) in hits.items():
             links.append({"donor_id": d["donor_id"], "lobbyist_id": lid, "method": method,
                           "score": score, "evidence": [{"type": method, **who}]})
-        if p["role"] == "director" and p["employer"]:
+        # A director's employer is the committee's client only when the
+        # committee is that organization's own PAC; a chamber's or trade
+        # group's board is made of people from other companies.
+        if p["role"] == "director" and p["employer"] and not is_public_client(p["employer"]) \
+                and names_same_org(d["display_name"], p["employer"]):
             core = core_org(p["employer"])
             if core in client_names:
                 key, cname = client_names[core]
@@ -552,20 +559,29 @@ def seed_client_leads(cur, sheet2024: list[dict]) -> None:
         by_core[core_org(name)].add(key)
         if lead:
             has_lead.add(key)
-    set_leads = []
-    for r in sheet2024:
+    # Per client, an organization's own row ("SEIU Local 503" listing SEIU
+    # Local 503) outranks a contract lobbyist who lists it among forty
+    # clients; otherwise the first row to name it wins.
+    best: dict[str, tuple] = {}
+    for order, r in enumerate(sheet2024):
+        firm = core_org(r.get("firm") or "")
         people = []
         for n in [f"{r.get('first', '')} {r.get('last', '')}", *_names_in(r.get("addl_lobbyists") or "")]:
             people += [p["lobbyist_id"] for p in match_person(n, persons) if p["lobbyist_id"] not in people]
         for client in [c.strip() for c in (r.get("clients") or "").split(";") if c.strip()]:
-            keys = {norm_org(client)} | by_core.get(core_org(client), set())
+            core = core_org(client)
+            keys = {norm_org(client)} | by_core.get(core, set())
+            # "SEIU Local 503" in 2024 is Capitol Club's "SEIU Local 503-OPEU".
+            if len(core.split()) >= 2:
+                keys |= {k for c, ks in by_core.items() if c.startswith(core + " ") for k in ks}
+            own = bool(firm) and (core == firm or core.startswith(firm + " ") or firm.startswith(core + " "))
             for key in keys:
                 if key in has_lead or len(listed.get(key, ())) < 2:
                     continue
                 lead = next((pid for pid in people if pid in listed[key]), None)
-                if lead:
-                    set_leads.append((lead, key))
-                    has_lead.add(key)
+                if lead and (key not in best or (not own, order) < best[key][:2]):
+                    best[key] = (not own, order, lead)
+    set_leads = [(lead, key) for key, (_, _, lead) in best.items()]
     for lid, key in set_leads:
         cur.execute("""update lobbyist_clients set is_lead = true
                        where lobbyist_id = %s and client_key = %s and active""", (lid, key))
