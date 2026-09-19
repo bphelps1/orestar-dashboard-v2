@@ -116,7 +116,7 @@ USABLE_RESULT_FIELDS = (
     "superseded", "evidence_version", "checked", "collection_started_at",
     "checked_at", "transaction_snapshot_id", "filer_transaction_digest",
     "range_start", "range_end", "filer_digest_version",
-    "exact_search_count", "amount_changed", "amount_checked",
+    "exact_search_count", "amount_changed", "amount_checked", "live_originals",
 )
 
 # Two re-checks of committees whose withdrawn rows are moving a balance for
@@ -1806,6 +1806,7 @@ def report() -> int:
     mis = [r for r in ok if r.get("missing")]
     sup = [r for r in ok if r.get("superseded")]
     drift = [r for r in ok if r.get("amount_changed")]
+    live = [r for r in ok if r.get("live_originals")]
     unpriced = [r for r in ok if "amount_checked" not in r]
     clean = [r for r in ok if not r.get("surplus") and not r.get("missing")
              and not r.get("amount_changed")]
@@ -1821,6 +1822,9 @@ def report() -> int:
     print(f"  amounts changed on ORESTAR : {len(drift):,}   "
           f"{sum(len(r['amount_changed']) for r in drift):,} rows   "
           f"${sum(i['orestar'] - i['held'] for r in drift for i in r['amount_changed']):+,.2f}")
+    print(f"  live amended originals     : {len(live):,}   "
+          f"{sum(len(r['live_originals']) for r in live):,} rows "
+          "(ORESTAR still counts them; kept)")
     if unpriced:
         print(f"  amounts never compared     : {len(unpriced):,}   "
               "(diffed before amounts were recorded)")
@@ -2260,6 +2264,7 @@ def _run_atomic_scope_plan(args: argparse.Namespace) -> int:
                         "superseded": sorted(absent & superseded_by_us),
                         "amount_changed": amount_changed,
                         "amount_checked": amount_checked,
+                        "live_originals": sorted(set(theirs) & superseded_by_us),
                         **_evidence_fields(
                             transaction_id,
                             local_digests[fid],
@@ -2630,6 +2635,14 @@ def main() -> int:
                     # still carry ORESTAR's current amounts.
                     "amount_changed": amount_changed,
                     "amount_checked": amount_checked,
+                    # Originals ORESTAR still returns although an amendment we
+                    # hold points at them. ORESTAR's default search omits the
+                    # originals it expired, so these are live on ORESTAR and
+                    # counted in its summary (Oregon Firearms Federation PAC
+                    # 2041931 and its amendment 2041946 are both counted).
+                    # Unlike `superseded`, this list survives our keeping the
+                    # row, which is what lets the merge go on keeping it.
+                    "live_originals": sorted(set(theirs) & superseded_by_us),
                     **_evidence_fields(
                         transaction_id,
                         local_digests[fid],
