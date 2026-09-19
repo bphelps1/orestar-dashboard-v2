@@ -51,6 +51,9 @@ FETCHED_LOG_TRN = RAW_DIR.parent / "fetched_windows_tran.json"  # tran-date mode
 # apart from the fetch logs above: those record windows as done for good, and
 # a re-read exists precisely to revisit windows that are already done.
 FETCHED_LOG_MISC = RAW_DIR.parent / "fetched_windows_misc.json"
+# Deletion records the merge has applied (process.DELETIONS_PATH). Read here
+# only to count them when deciding whether a window is already held.
+DELETIONS_LOG = RAW_DIR.parent / "orestar_deletions.json"
 
 # ORESTAR edits lumped "Miscellaneous ... $100 and under" rows in place: the
 # Tran ID, status and filed date stay the same while the amount changes (Eli
@@ -220,6 +223,22 @@ def _validate_download(path: Path) -> int:
         return -1
 
 
+def _include_deleted(page) -> None:
+    """Tick "view deleted transactions" so the export carries deletion records.
+
+    Deleting a transaction files a new record (status "Deleted") whose
+    Original Id names the deleted row. ORESTAR's default search hides it, so a
+    row deleted after its window was fetched stayed counted here forever. The
+    expired original itself stays out (expired transactions are not asked for):
+    the export is ORESTAR's live rows plus its deletion records, and the merge
+    turns each deletion record into the removal of the row it names.
+    """
+    try:
+        page.check('input[name="viewDeletedTransactions"]', timeout=5_000)
+    except Exception as exc:          # never fail a fetch over the option
+        log.warning("Could not ask ORESTAR for deletion records: %s", exc)
+
+
 def _return_to_search(page) -> None:
     """
     Reset the form for the next search.
@@ -309,6 +328,7 @@ def download_week(
         else:
             page.fill('input[name="cneSearchTranFiledStartDate"]', start.strftime("%m/%d/%Y"))
             page.fill('input[name="cneSearchTranFiledEndDate"]',   end.strftime("%m/%d/%Y"))
+        _include_deleted(page)
 
         # Narrowing filters, used only when a window has already been split as
         # far as date and type allow.
@@ -1030,12 +1050,61 @@ def _held_rows(filer_id, tran_type, start, end, amt_from, amt_to, payee_prefix):
             args.append(payee_prefix.upper() + "%")
         with _HELD_CONN.cursor() as cur:
             cur.execute(" ".join(sql), args)
-            return cur.fetchone()[0]
+            held = cur.fetchone()[0]
+        # ORESTAR's count includes the deletion records we ask for, and the
+        # merge never stores those, so add the ones already applied for this
+        # window. Without them a window with a deletion looks short forever.
+        return held + _recorded_deletions(filer_id, tran_type, start, end,
+                                          amt_from, amt_to, payee_prefix)
     except Exception as exc:
         log.warning("Could not read held rows (%s) — proceeding without the skip", exc)
         _HELD_UNAVAILABLE = True
         _HELD_CONN = None
         return None
+
+
+_DELETIONS_CACHE: list[dict] | None = None
+
+
+def _recorded_deletions(filer_id, tran_type, start, end, amt_from, amt_to,
+                        payee_prefix) -> int:
+    """Applied deletion records inside exactly the window _held_rows counts."""
+    global _DELETIONS_CACHE
+    if _DELETIONS_CACHE is None:
+        try:
+            loaded = json.loads(DELETIONS_LOG.read_text()) if DELETIONS_LOG.exists() else []
+            _DELETIONS_CACHE = [e.get("deletion") or {} for e in loaded
+                                if isinstance(e, dict)] if isinstance(loaded, list) else []
+        except (OSError, ValueError):
+            _DELETIONS_CACHE = []
+    count = 0
+    for row in _DELETIONS_CACHE:
+        if str(row.get("filer id") or "").strip() != str(filer_id):
+            continue
+        if tran_type and tran_type != "ALL" and row.get("tran_type") != tran_type:
+            continue
+        try:
+            when = datetime.strptime(str(row.get("tran_date"))[:10], "%m/%d/%Y").date()
+        except ValueError:
+            try:
+                when = date.fromisoformat(str(row.get("tran_date"))[:10])
+            except ValueError:
+                continue
+        if not (start <= when <= end):
+            continue
+        try:
+            amount = float(str(row.get("amount")).replace("$", "").replace(",", ""))
+        except ValueError:
+            amount = None
+        if amt_from is not None and (amount is None or amount < float(amt_from)):
+            continue
+        if amt_to is not None and (amount is None or amount > float(amt_to)):
+            continue
+        if payee_prefix and not str(row.get("contributor_payee") or "").upper() \
+                .startswith(payee_prefix.upper()):
+            continue
+        count += 1
+    return count
 
 
 def _prior_counts() -> dict:
@@ -1214,6 +1283,7 @@ def download_filer_window(
         # Transaction date range
         page.fill('input[name="cneSearchTranStartDate"]', start.strftime("%m/%d/%Y"))
         page.fill('input[name="cneSearchTranEndDate"]', end.strftime("%m/%d/%Y"))
+        _include_deleted(page)
 
         # Narrowing filters, used only once type and date are spent.
         if amt_from is not None:

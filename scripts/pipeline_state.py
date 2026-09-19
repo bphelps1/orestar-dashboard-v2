@@ -57,6 +57,9 @@ PROFILE_FILES = {
         # Progress of the history-wide lumped-row re-read (fetch.py misc-reread).
         "data/fetched_windows_misc.json",
         "data/fetched_windows_tran.json",
+        # Every deletion record the merge applied, with each row it removed kept
+        # in full. Travels with the shards: they no longer hold those rows.
+        "data/orestar_deletions.json",
         "data/record_counts.json",
         "data/truncated_windows.json",
     ),
