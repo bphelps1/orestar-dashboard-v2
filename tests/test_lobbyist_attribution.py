@@ -410,3 +410,20 @@ def test_committee_named_for_its_sponsor(committee, org):
 ])
 def test_board_members_employer_is_not_the_sponsor(committee, org):
     assert not names_same_org(committee, org)
+
+
+def test_an_organizations_own_row_leads_over_a_contract_lobbyist():
+    lobbyists = [_person(1, "Debbie Koreski", "debbie@mahoniapublicaffairs.com"),
+                 _person(2, "Courtney Graham", "grahamc@seiu503.org"),
+                 _person(3, "Melissa Unger", "ungerm@seiu503.org", on_cc=False)]
+    clients = [{"lobbyist_id": i, "client_key": "seiu local 503 opeu", "client_name": "SEIU Local 503-OPEU",
+                "is_lead": False, "active": True} for i in (1, 2)]
+    cur = _Cur({"lobbyists": lobbyists, "lobbyist_clients": clients})
+    ml.seed_client_leads(cur, [
+        {"first": "Debbie", "last": "Koreski", "firm": "Mahonia Public Affairs",
+         "clients": "Mahonia Public Affairs; SEIU 503; SEIU Local 503", "addl_lobbyists": ""},
+        {"first": "Melissa", "last": "Unger", "firm": "SEIU Local 503", "clients": "SEIU Local 503",
+         "addl_lobbyists": "Len Norwitz 503-708-8594 Courtney Graham 503-330-8422"},
+    ])
+    # Melissa Unger is off Capitol Club, so her row's next person leads.
+    assert [p for _, p in cur.updates] == [(2, "seiu local 503 opeu")]
