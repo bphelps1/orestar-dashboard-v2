@@ -20,7 +20,8 @@
       <a href="/">← Back to Dashboard</a> &mdash;
       Find recommended donors for a candidate committee &mdash;
       <a href="https://github.com/bphelps1/orestar-dashboard/blob/main/docs/RECOMMENDATIONS.md"
-         target="_blank" rel="noopener">How this works &amp; the weights</a>
+         target="_blank" rel="noopener">How this works &amp; the weights</a> &mdash;
+      <a href="/admin/lobbyists">Lobbyist attribution</a>
     </p>
   </div>
 </header>
@@ -80,6 +81,7 @@
         <span class="export-group-label">Export:</span>
         <button class="btn-small" id="export-full-csv">Full Plan CSV</button>
         <button class="btn-small" id="export-full-xlsx">Full Plan Excel</button>
+        <button class="btn-small" id="export-lobbyist-xlsx">Lobbyist Plan Excel</button>
       </div>
     </div>
 
@@ -87,13 +89,54 @@
 
     <!-- ══════ Tabs ══════ -->
     <div class="results-tabs">
-      <button class="tab-btn active" data-tab="tab-repeat">Donor Targets <span class="tab-badge">0</span></button>
+      <button class="tab-btn active" data-tab="tab-lobbyist-plan">Lobbyist Plan <span class="tab-badge">0</span></button>
+      <button class="tab-btn" data-tab="tab-repeat">Donor Targets <span class="tab-badge">0</span></button>
       <button class="tab-btn" data-tab="tab-prospects">New Donor Prospects <span class="tab-badge">0</span></button>
       <button class="tab-btn" data-tab="tab-not-recommended">Not Recommended <span class="tab-badge">0</span></button>
     </div>
 
+    <!-- ══════ Tab: Lobbyist Plan ══════ -->
+    <div id="tab-lobbyist-plan" class="tab-panel active">
+      <div class="section-header">
+        <h3>Lobbyist Plan</h3>
+        <p class="section-desc">Every donor target and new prospect, grouped under the lobbyist who handles
+          that donor — the call list, one lobbyist at a time. A donor shows under one lobbyist (the tracker's
+          “Lobbyist 1” or the strongest match); others are listed beside it. Attributions are reviewed at
+          <a href="/admin/lobbyists">/admin/lobbyists</a>.</p>
+        <div class="export-btns">
+          <button class="btn-small" id="export-lobbyist-csv">CSV</button>
+          <button class="btn-small" id="export-lobbyist-xlsx-2">Excel</button>
+        </div>
+      </div>
+      <div class="table-search-bar plan-controls">
+        <input type="search" id="plan-search" class="table-search" placeholder="Search lobbyists or donors…" />
+        <label class="plan-toggle"><input type="checkbox" id="plan-include-suggested" checked />
+          Include unreviewed matches</label>
+        <label class="plan-toggle"><input type="checkbox" id="plan-show-unattributed" checked />
+          Show donors with no lobbyist</label>
+      </div>
+      <div id="plan-status" class="plan-status"></div>
+      <div class="table-wrapper">
+        <table id="plan-table" class="data-table plan-table">
+          <thead>
+            <tr>
+              <th>Lobbyist / Donor</th>
+              <th>Type</th>
+              <th class="num">Target</th>
+              <th class="num">Given This Cycle</th>
+              <th class="num">Remaining</th>
+              <th class="num">Last Cycle</th>
+              <th class="num">Comparable Max</th>
+              <th>Attribution</th>
+            </tr>
+          </thead>
+          <tbody id="plan-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- ══════ Tab: Donor Targets ══════ -->
-    <div id="tab-repeat" class="tab-panel active">
+    <div id="tab-repeat" class="tab-panel">
       <div id="repeat-donors-section" hidden>
         <div class="section-header">
           <h3>Donor Targets</h3>
@@ -113,6 +156,7 @@
               <tr>
                 <th>#</th>
                 <th class="sortable" data-col="donor" data-table="repeat">Donor</th>
+                <th>Lobbyist</th>
                 <th class="sortable num" data-col="prev_cycles" data-table="repeat">Prev Cycles</th>
                 <th class="sortable num" data-col="last_cycle_amt" data-table="repeat">Last Cycle</th>
                 <th class="sortable num" data-col="target" data-table="repeat">Target</th>
@@ -148,6 +192,7 @@
             <tr>
               <th>#</th>
               <th class="sortable" data-col="donor">Donor</th>
+              <th>Lobbyist</th>
               <th class="sortable num" data-col="score">Score</th>
               <th class="sortable num" data-col="already_given">Already Given</th>
               <th class="sortable num" data-col="target_ask">Target Ask</th>
@@ -202,6 +247,7 @@
 
 <script src="lib/supabase.js"></script>
 <script src="lib/data.js"></script>
+<script src="lib/lobbyists.js"></script>
 <script src="recommend.js"></script>
 </body>
 </html>

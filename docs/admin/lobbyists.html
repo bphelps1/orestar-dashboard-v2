@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lobbyist Attribution Admin — Oregon Campaign Finance</title>
+  <link rel="stylesheet" href="../style.css" />
+  <link rel="stylesheet" href="../recommend.css" />
+  <link rel="stylesheet" href="donors.css" />
+  <link rel="stylesheet" href="lobbyists.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <h1>Lobbyist Attribution</h1>
+    <p class="subtitle">
+      <a href="/">← Dashboard</a> &mdash;
+      <a href="/recommend">Recommendations</a> &mdash;
+      <a href="/admin/donors">Donor identity admin</a> &mdash;
+      Review which lobbyist handles which donor
+    </p>
+  </div>
+</header>
+
+<div id="login-form" class="login-container">
+  <div class="login-box">
+    <h2>Sign In</h2>
+    <p class="login-desc">Admin access required.</p>
+    <form id="login-form-el" autocomplete="on">
+      <label for="login-email">Email</label>
+      <input type="email" id="login-email" required autocomplete="email" />
+      <label for="login-password">Password</label>
+      <input type="password" id="login-password" required autocomplete="current-password" />
+      <button type="submit" class="btn-primary" id="login-btn">Sign In</button>
+      <p class="login-error" id="login-error" hidden></p>
+    </form>
+  </div>
+</div>
+
+<main id="app-content" hidden>
+  <div class="toolbar">
+    <span id="user-info"></span>
+    <button class="btn-small" id="sign-out-btn">Sign Out</button>
+  </div>
+
+  <p class="lob-banner" id="role-banner" hidden>
+    You can browse, but only admins and reviewers can record decisions.
+  </p>
+  <div id="load-status" class="status-msg loading">Loading lobbyists and suggestions…</div>
+
+  <div class="lob-stats" id="lob-stats"></div>
+
+  <div class="admin-tabs">
+    <button class="admin-tab-btn active" data-admin-tab="tab-queue">Review queue <span class="tab-count" id="count-queue"></span></button>
+    <button class="admin-tab-btn" data-admin-tab="tab-lobbyists">Lobbyists <span class="tab-count" id="count-lobbyists"></span></button>
+    <button class="admin-tab-btn" data-admin-tab="tab-unmatched">Unmatched donors</button>
+    <button class="admin-tab-btn" data-admin-tab="tab-decisions">Decisions <span class="tab-count" id="count-decisions"></span></button>
+  </div>
+
+  <!-- ── Review queue ─────────────────────────────────────────────────── -->
+  <section id="tab-queue" class="admin-tab active">
+    <p class="section-desc">
+      Machine suggestions, strongest first. <strong>Committee contacts</strong> come from ORESTAR's
+      “Persons Associated with Committee” (treasurer, correspondence recipient, directors) matched to
+      Capitol Club by email, name or a shared private email domain. <strong>Client names</strong> pair a
+      donor with a client a lobbyist lists on Capitol Club — confirming one attributes the donor to every
+      lobbyist listing that client.
+    </p>
+    <div class="lob-filters">
+      <div class="lob-chip-group" id="queue-kind">
+        <button class="lob-chip active" data-kind="all">All</button>
+        <button class="lob-chip" data-kind="contact">Committee contacts</button>
+        <button class="lob-chip" data-kind="exact">Client name — exact</button>
+        <button class="lob-chip" data-kind="fuzzy">Client name — similar</button>
+      </div>
+      <input type="search" id="queue-search" class="table-search" placeholder="Filter by donor, client or lobbyist…" />
+      <button class="btn-small" id="queue-bulk" title="Confirm every suggestion currently shown">Confirm all shown</button>
+    </div>
+    <div id="queue-list" class="lob-list"></div>
+    <div class="lob-more" id="queue-more"></div>
+  </section>
+
+  <!-- ── Lobbyists ────────────────────────────────────────────────────── -->
+  <section id="tab-lobbyists" class="admin-tab">
+    <div class="lob-filters">
+      <input type="search" id="lob-search" class="table-search" placeholder="Search lobbyists, firms, emails or clients…" />
+      <label class="lob-check"><input type="checkbox" id="lob-only-attributed" /> Only with attributed donors</label>
+      <label class="lob-check"><input type="checkbox" id="lob-show-off-cc" checked /> Include lobbyists not on Capitol Club</label>
+      <button class="btn-primary btn-compact" id="lob-add-btn">+ Add lobbyist</button>
+    </div>
+
+    <form id="lob-add-form" class="lob-form" hidden>
+      <h3>Add a lobbyist or firm</h3>
+      <p class="section-desc">For anyone who isn't on Capitol Club. A firm entry (e.g. “Tonkon Torp”) lets a
+        plan group donors under the firm when no single person is known.</p>
+      <div class="lob-form-grid">
+        <label>Type
+          <select name="kind"><option value="person">Person</option><option value="firm">Firm</option></select>
+        </label>
+        <label>Name <input name="name" required placeholder="First Last" /></label>
+        <label>Firm / organization <input name="firm" /></label>
+        <label>Email <input name="email" type="email" /></label>
+        <label>Phone <input name="phone" /></label>
+        <label>Other phone <input name="phone_alt" /></label>
+        <label class="span-2">Address <input name="address" /></label>
+        <label>City <input name="city" /></label>
+        <label>State <input name="state" maxlength="2" value="OR" /></label>
+        <label>ZIP <input name="zip" /></label>
+        <label class="span-2">Clients <input name="clients" placeholder="Semicolon-separated: Kroger; Idaho Power" /></label>
+        <label class="span-3">Other names used for them <input name="aliases" placeholder="e.g. DALTON, AMANDA; Dalton Advocacy" /></label>
+        <label class="span-3">Notes <textarea name="notes" rows="2"></textarea></label>
+      </div>
+      <div class="cluster-actions">
+        <button type="submit" class="btn-primary">Save lobbyist</button>
+        <button type="button" class="btn-small" id="lob-add-cancel">Cancel</button>
+      </div>
+    </form>
+
+    <div class="table-wrapper">
+      <table class="data-table" id="lob-table">
+        <thead>
+          <tr>
+            <th>Lobbyist</th>
+            <th>Contact</th>
+            <th class="num">Clients</th>
+            <th class="num">Donors</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody id="lob-tbody"></tbody>
+      </table>
+    </div>
+    <div class="lob-more" id="lob-more"></div>
+  </section>
+
+  <!-- ── Unmatched donors ─────────────────────────────────────────────── -->
+  <section id="tab-unmatched" class="admin-tab">
+    <p class="section-desc">
+      The largest non-individual donors since 2021 with no lobbyist attributed (and none pending review).
+      Assign a lobbyist directly, or link the donor to a Capitol Club client.
+    </p>
+    <div class="lob-filters">
+      <div class="lob-chip-group" id="unmatched-type">
+        <button class="lob-chip active" data-type="all">All types</button>
+        <button class="lob-chip" data-type="Political Committee">Political committees</button>
+        <button class="lob-chip" data-type="Business Entity">Businesses</button>
+        <button class="lob-chip" data-type="Labor Organization">Labor</button>
+        <button class="lob-chip" data-type="other">Other</button>
+      </div>
+      <input type="search" id="unmatched-search" class="table-search" placeholder="Search donors…" />
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Donor</th>
+            <th>Type</th>
+            <th class="num">Given since 2021</th>
+            <th class="num">Recipients</th>
+            <th>Last gift</th>
+            <th>Assign</th>
+          </tr>
+        </thead>
+        <tbody id="unmatched-tbody"></tbody>
+      </table>
+    </div>
+    <div class="lob-more" id="unmatched-more"></div>
+  </section>
+
+  <!-- ── Decisions ────────────────────────────────────────────────────── -->
+  <section id="tab-decisions" class="admin-tab">
+    <p class="section-desc">Confirmed and rejected attributions. Undo returns a pair to the review queue
+      (a manual link is removed instead).</p>
+    <div class="lob-filters">
+      <div class="lob-chip-group" id="decision-status">
+        <button class="lob-chip active" data-status="all">All</button>
+        <button class="lob-chip" data-status="confirmed">Confirmed</button>
+        <button class="lob-chip" data-status="rejected">Rejected</button>
+      </div>
+      <input type="search" id="decision-search" class="table-search" placeholder="Filter…" />
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr><th>Donor</th><th>Attributed to</th><th>How</th><th>Decision</th><th>By</th><th></th></tr>
+        </thead>
+        <tbody id="decision-tbody"></tbody>
+      </table>
+    </div>
+    <div class="lob-more" id="decision-more"></div>
+  </section>
+
+  <datalist id="lobbyist-options"></datalist>
+  <datalist id="client-options"></datalist>
+</main>
+
+<footer>
+  <p>Oregon Campaign Finance &mdash; Lobbyist Attribution Admin</p>
+</footer>
+
+<script src="../lib/supabase.js"></script>
+<script src="../lib/lobbyists.js"></script>
+<script src="lobbyists.js"></script>
+</body>
+</html>

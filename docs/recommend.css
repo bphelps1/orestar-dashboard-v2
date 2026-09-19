@@ -503,3 +503,45 @@
   .filer-stats { flex-direction: column; gap: 8px; }
   .results-summary { flex-direction: column; }
 }
+
+/* ── Lobbyist plan ─────────────────────────────────────────────────────── */
+.plan-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.plan-controls .table-search { flex: 1 1 240px; max-width: 420px; }
+.plan-toggle { font-size: 0.85rem; color: var(--color-text-muted); display: inline-flex; align-items: center; gap: 6px; }
+.plan-status { font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 8px; }
+.plan-status:empty { display: none; }
+.plan-empty { text-align: center; color: var(--color-text-muted); padding: 24px; }
+
+.plan-table tr.plan-group td {
+  background: var(--color-surface-alt);
+  border-top: 2px solid var(--color-border);
+  font-weight: 600;
+  vertical-align: top;
+}
+.plan-table tr.plan-group:hover td { background: var(--color-surface-alt); }
+.plan-lobbyist { font-size: 0.95rem; color: var(--color-text); }
+.plan-none { color: var(--color-text-muted); font-style: italic; }
+.plan-contact { font-size: 0.78rem; font-weight: 400; color: var(--color-text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.plan-count { font-size: 0.8rem; font-weight: 400; color: var(--color-text-muted); white-space: nowrap; }
+.plan-firm {
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  background: var(--color-accent-light); color: var(--color-accent); border-radius: 8px; padding: 1px 6px;
+}
+.plan-table td:first-child { min-width: 240px; }
+.plan-table tr.plan-donor td:first-child { padding-left: 28px; }
+.plan-also { font-size: 0.75rem; color: var(--color-text-muted); }
+.plan-attr { font-size: 0.78rem; color: var(--color-text-muted); min-width: 180px; max-width: 320px; }
+.plan-type {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  border-radius: 8px; padding: 2px 7px; white-space: nowrap;
+}
+.plan-type.is-target { background: #dcfce7; color: #166534; }
+.plan-type.is-prospect { background: var(--color-accent-light); color: var(--color-accent-dark); }
+
+.lob-unreviewed {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #fef3c7; color: #92400e; font-size: 0.7rem; font-weight: 700; cursor: help;
+}
+.lob-also { font-size: 0.75rem; color: var(--color-text-muted); cursor: help; }
+.lob-none, .lob-pending { color: var(--color-text-light); }

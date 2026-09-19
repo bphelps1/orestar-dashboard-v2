@@ -30,6 +30,7 @@ MIGRATIONS = [
     "013_candidate_committee_links.sql",
     "014_donor_leaderboard.sql",
     "015_donor_date_index.sql",
+    "016_lobbyists.sql",
 ]
 
 

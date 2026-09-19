@@ -125,6 +125,81 @@ The `race_margins` view, built from official Secretary of State results
 
 ---
 
+## Lobbyist Plan — who asks each donor
+
+The results open on the **Lobbyist Plan** tab: every donor target and new
+prospect grouped under the lobbyist who handles that donor, with the lobbyist's
+contact details and subtotals — the layout of the fundraising PLAN sheet. The
+**Lobbyist Plan Excel** export writes the same thing: a lobbyist row carrying
+the subtotals, then one row per donor with the lobbyist repeated in column A.
+
+A donor is listed under one lobbyist. Order of preference:
+
+1. a link marked primary — the Fundraising Tracker's "Lobbyist 1", or the
+   client's lead (below);
+2. a confirmed link over an unreviewed one;
+3. the stronger match.
+
+Anyone else attached to the donor appears as "also: …". Unreviewed matches are
+marked **?** and can be hidden with *Include unreviewed matches*.
+
+### Where attributions come from
+
+ORESTAR never records who lobbies for a donor, so the link is assembled from
+three sources and confirmed by a person at **/admin/lobbyists**:
+
+| Source | What it gives | Refreshed by |
+|---|---|---|
+| [Capitol Club](https://oregoncapitolclub.org/user/) | every member lobbyist's card (title/firm, address, email, phones) and the clients they list | `scraper/fetch_capitol_club.py` |
+| ORESTAR *Persons Associated with Committee* | treasurer, correspondence recipient and directors of each donor committee | `scraper/fetch_committee_persons.py` |
+| ORESTAR donors since 2021 | the pool of 15k non-individual donors to match (`lobby_donor_pool`) | `scraper/match_lobbyists.py --refresh-pool` |
+
+`scraper/match_lobbyists.py` turns those into suggestions:
+
+| Evidence | Example | Score |
+|---|---|---|
+| A committee contact's **email** is the lobbyist's | OHPAC (161) correspondent skolmer@oregonhospitals.org → Sean Kolmer | 98 |
+| A committee contact has the lobbyist's **name** | treasurer/correspondent 90, director 80 | 80–90 |
+| A committee contact shares a private **email domain** | CAPE (33) correspondent freelandern@seiu503.org → Courtney Graham (grahamc@seiu503.org) | 55–70 |
+| A committee **director works for** a lobbyist's client | | 75 |
+| Donor name **equals** a client name (legal suffixes, "PAC", committee ids ignored) | "The Kroger Co." → Kroger | 95 |
+| Donor name **resembles** a client name | "Oregon Nurseries PAC" → Oregon Association of Nurseries | 50–90 |
+
+Mail providers, `.gov`/`.us`/`.edu` addresses and treasurer-service firms never
+count as a shared domain. Name matching never pairs a donor with a public body
+(cities, counties, ports, colleges — they cannot contribute), requires the
+client's most distinctive word, and refuses a donor that adds a place the
+client lacks ("Toyota of Portland" is a dealership, not Toyota).
+
+A **client** link attributes the donor to every lobbyist currently listing that
+client. The client's **lead** is whichever of those lobbyists a confirmed
+direct link already chose for another donor of the same client — so once one
+UFCW 555 donor record is filed under a lobbyist, the union's other donor
+records follow rather than landing under whichever lobbyist sorts first.
+
+Two seeds were loaded once from local files (never committed; the repo is
+public): the Fundraising Tracker's *Lobbyist Key* (stored as confirmed — it was
+curated by hand) and the 2024 FuturePAC lobby list (adds lobbyists missing from
+Capitol Club; its client pairs count only where no current Capitol Club
+lobbyist claims the client, since the list is dated).
+
+### Reviewing
+
+`/admin/lobbyists` (admins and reviewers):
+
+- **Review queue** — confirm or reject each suggestion; filter by kind; bulk
+  confirm what is shown.
+- **Lobbyists** — every lobbyist with contact details, clients and attributed
+  donors. Add a lobbyist or firm not on Capitol Club, add clients, link a donor
+  directly, or mark a donor "not theirs".
+- **Unmatched donors** — the largest donors since 2021 with nothing attributed;
+  assign a lobbyist or a client.
+- **Decisions** — everything confirmed or rejected, with undo.
+
+The weekly *Lobbyist Attribution* workflow re-reads Capitol Club, re-reads the
+contacts of up to 400 committees whose data is over 30 days old, and refreshes
+suggestions. A confirmed or rejected row is never changed by a re-run.
+
 ## What it deliberately does not do
 
 - **No cross-party suggestions** when the target's party is known.
@@ -142,6 +217,7 @@ The `race_margins` view, built from official Secretary of State results
 | Competitiveness bands and multipliers | `MARGIN_BANDS` / `UNOPPOSED` |
 | $1,000 prospect floor | end of `scoreDonors()` |
 | Exclude or flag a committee | `/admin` tags (`exclude`, `prolific`) |
+| Lobbyist attribution | `/admin/lobbyists`; matching rules in `scraper/match_lobbyists.py` |
 
 All weights are plain constants — there is no trained model and no hidden
 state, so a change here is fully predictable in the output.

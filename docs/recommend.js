@@ -1180,18 +1180,22 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     });
   }
 
+  document.querySelectorAll(".tab-btn[data-tab='tab-lobbyist-plan'] .tab-badge").forEach(el => el.textContent = "…");
+  loadLobbyistPlan();
+
   wireSortHeaders("repeat-table", "_repeatSortCol", "_repeatSortDir", renderFilteredRepeat);
   wireSortHeaders("rec-table", "_sortCol", "_sortDir", renderFilteredRec);
   wireSortHeaders("not-rec-table", "_notRecSortCol", "_notRecSortDir", renderFilteredNotRec);
 
   // Wire up export (re-clone to avoid duplicate listeners)
-  for (const id of ["export-csv", "export-xlsx", "export-repeat-csv", "export-repeat-xlsx", "export-full-csv", "export-full-xlsx"]) {
+  for (const id of ["export-csv", "export-xlsx", "export-repeat-csv", "export-repeat-xlsx", "export-full-csv", "export-full-xlsx",
+                    "export-lobbyist-csv", "export-lobbyist-xlsx", "export-lobbyist-xlsx-2"]) {
     const btn = document.getElementById(id);
     if (!btn) continue;
     const clone = btn.cloneNode(true);
     btn.parentNode.replaceChild(clone, btn);
     const fmt = id.includes("csv") ? "csv" : "xlsx";
-    const scope = id.includes("repeat") ? "repeat" : id.includes("full") ? "full" : "new";
+    const scope = id.includes("lobbyist") ? "lobbyist" : id.includes("repeat") ? "repeat" : id.includes("full") ? "full" : "new";
     clone.addEventListener("click", () => exportData(fmt, scope));
   }
 }
@@ -1214,7 +1218,7 @@ function renderRepeatDonors(repeatTargets) {
   const tbody = document.getElementById("repeat-tbody");
 
   if (!repeatTargets.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:24px">No donors match the current filters.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#718096;padding:24px">No donors match the current filters.</td></tr>';
     return;
   }
 
@@ -1229,6 +1233,7 @@ function renderRepeatDonors(repeatTargets) {
     <tr class="repeat-row" data-idx="${i}">
       <td>${i + 1}</td>
       <td>${esc(r.donor)}</td>
+      <td>${lobbyistCell(r.donor)}</td>
       <td class="num">${r.prev_cycles}</td>
       <td class="num">${fmt$(r.last_cycle_amt)}</td>
       <td class="num"><strong>${fmt$(r.target)}</strong></td>
@@ -1269,7 +1274,7 @@ function toggleRepeatDetail(idx, btn) {
   detailRow.className = "repeat-detail-row detail-row";
   detailRow.dataset.for = idx;
 
-  detailRow.innerHTML = `<td colspan="9"><div class="detail-content">
+  detailRow.innerHTML = `<td colspan="10"><div class="detail-content">
     <h4>Target Calculation</h4>
     <ul style="margin:0 0 0 16px;font-size:0.83rem;color:#4a5568">
       ${r.factors.map(f => {
@@ -1351,7 +1356,7 @@ function renderRecTable(rows) {
 
   const tbody = document.getElementById("rec-tbody");
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#718096;padding:24px">No recommendations found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#718096;padding:24px">No recommendations found.</td></tr>';
     return;
   }
 
@@ -1359,6 +1364,7 @@ function renderRecTable(rows) {
     <tr class="rec-row" data-idx="${i}">
       <td>${i + 1}</td>
       <td>${esc(r.donor)}</td>
+      <td>${lobbyistCell(r.donor)}</td>
       <td class="num">
         <div class="score-bar">
           <div class="score-bar-track"><div class="score-bar-fill" style="width:${r.score}%"></div></div>
@@ -1406,7 +1412,7 @@ function toggleDetail(idx, btn) {
 
   const topGifts = r.comp_gifts.sort((a, b) => b.amount - a.amount).slice(0, 10);
 
-  detailRow.innerHTML = `<td colspan="8"><div class="detail-content">
+  detailRow.innerHTML = `<td colspan="9"><div class="detail-content">
     <h4>Comparable Filer Gifts (${r.distinct_comps} filers, ${fmt$(r.total_to_comps)} total)</h4>
     ${topGifts.map(g => `
       <div class="comp-filer-row">
@@ -1425,6 +1431,198 @@ function toggleDetail(idx, btn) {
   tr.after(detailRow);
 }
 
+// ── Lobbyist plan ─────────────────────────────────────────────────────────
+// Groups every donor target and prospect under the lobbyist who handles that
+// donor, the way the fundraising sheets are worked: one lobbyist, their
+// clients, what each should be asked for. Attribution comes from the
+// donor_lobbyists view (supabase/migrations/016_lobbyists.sql), reviewed at
+// /admin/lobbyists.
+let lobbyistsById = null;
+let planControlsWired = false;
+
+async function loadLobbyistPlan() {
+  const status = document.getElementById("plan-status");
+  window._lobbyAttr = null;
+  wirePlanControls();
+  status.textContent = "Looking up lobbyists…";
+  renderLobbyistPlan();
+  const runCycle = window._cycle;
+  const runFiler = window._targetProfile;
+  try {
+    if (!lobbyistsById) {
+      lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, l]));
+    }
+    const names = [...(window._repeatTargets || []), ...(window._recommendations || [])].map(r => r.donor);
+    const attr = await LOB.attributionForLabels(names, lobbyistsById);
+    // A newer run may have started while this one was loading.
+    if (window._cycle !== runCycle || window._targetProfile !== runFiler) return;
+    window._lobbyAttr = attr;
+    status.textContent = "";
+  } catch (e) {
+    console.warn("Lobbyist attribution unavailable:", e);
+    window._lobbyAttr = new Map();
+    status.textContent = `Lobbyist attribution is unavailable (${e.message}). Donors are listed without lobbyists.`;
+  }
+  renderLobbyistPlan();
+  renderFilteredRepeat();
+  renderFilteredRec();
+}
+
+function wirePlanControls() {
+  if (planControlsWired) return;
+  planControlsWired = true;
+  document.getElementById("plan-search").addEventListener("input", renderLobbyistPlan);
+  document.getElementById("plan-show-unattributed").addEventListener("change", renderLobbyistPlan);
+  document.getElementById("plan-include-suggested").addEventListener("change", () => {
+    renderLobbyistPlan();
+    renderFilteredRepeat();
+    renderFilteredRec();
+  });
+}
+
+/** Lobbyists for a donor label, primary first; unreviewed ones only if shown. */
+function lobbyistsFor(donorName) {
+  const list = window._lobbyAttr?.get(LOB.labelKey(donorName)) || [];
+  const includeSuggested = document.getElementById("plan-include-suggested")?.checked ?? true;
+  return includeSuggested ? list : list.filter(a => a.status === "confirmed");
+}
+
+function lobbyistNames(donorName) {
+  return lobbyistsFor(donorName).map(a => a.lobbyist.name + (a.status === "confirmed" ? "" : " (unreviewed)")).join("; ");
+}
+
+function lobbyistCell(donorName) {
+  if (!window._lobbyAttr) return '<span class="lob-pending">…</span>';
+  const list = lobbyistsFor(donorName);
+  if (!list.length) return '<span class="lob-none">—</span>';
+  const [p, ...rest] = list;
+  const unreviewed = p.status === "confirmed" ? "" : ' <span class="lob-unreviewed" title="Suggested match, not yet reviewed">?</span>';
+  const also = rest.length
+    ? ` <span class="lob-also" title="${esc(rest.map(a => a.lobbyist.name).join(", "))}">+${rest.length}</span>` : "";
+  return `${esc(p.lobbyist.name)}${unreviewed}${also}`;
+}
+
+function attributionText(a) {
+  if (!a) return "";
+  const how = (a.methods || []).map(m => LOB.describeMethod(m));
+  const client = a.client_names?.length ? ` — client: ${a.client_names.join(", ")}` : "";
+  return `${a.status === "confirmed" ? "Confirmed" : "Unreviewed"}: ${[...new Set(how)].join("; ")}${client}`;
+}
+
+function planGroups() {
+  const donorRows = [
+    ...(window._repeatTargets || []).map(r => ({
+      donor: r.donor, type: "Donor Target", target: r.target, given: r.current_cycle_amt,
+      remaining: r.remaining, last_cycle: r.last_cycle_amt, comp_max: r.comp_max || 0 })),
+    ...(window._recommendations || []).map(r => ({
+      donor: r.donor, type: "New Prospect", target: r.target_ask, given: r.already_given,
+      remaining: r.remaining_ask, last_cycle: null, comp_max: r.comp_max })),
+  ];
+  const groups = new Map();
+  const none = { lobbyist: null, rows: [] };
+  for (const row of donorRows) {
+    const list = lobbyistsFor(row.donor);
+    const entry = { ...row, attribution: list[0] || null, also: list.slice(1) };
+    if (!list.length) { none.rows.push(entry); continue; }
+    const id = list[0].lobbyist.lobbyist_id;
+    if (!groups.has(id)) groups.set(id, { lobbyist: list[0].lobbyist, rows: [] });
+    groups.get(id).rows.push(entry);
+  }
+  const q = (document.getElementById("plan-search")?.value || "").trim().toLowerCase();
+  let out = [...groups.values()];
+  if (document.getElementById("plan-show-unattributed")?.checked !== false && none.rows.length) out.push(none);
+  if (q) {
+    out = out.map(g => {
+      const l = g.lobbyist;
+      const lobHit = l && [l.name, l.firm, l.affiliation, l.email].join(" ").toLowerCase().includes(q);
+      return lobHit ? g : { ...g, rows: g.rows.filter(r => r.donor.toLowerCase().includes(q)) };
+    }).filter(g => g.rows.length);
+  }
+  for (const g of out) {
+    g.rows.sort((a, b) => b.remaining - a.remaining || b.target - a.target);
+    g.target = g.rows.reduce((s, r) => s + r.target, 0);
+    g.given = g.rows.reduce((s, r) => s + r.given, 0);
+    g.remaining = g.rows.reduce((s, r) => s + r.remaining, 0);
+  }
+  out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (b.remaining - a.remaining));
+  return out;
+}
+
+function lobbyistContact(l) {
+  const org = l.kind === "firm" ? "" : (l.affiliation || l.firm);
+  return [org, l.email, l.phone].filter(Boolean).join(" · ");
+}
+
+function renderLobbyistPlan() {
+  const tbody = document.getElementById("plan-tbody");
+  if (!tbody) return;
+  if (!window._lobbyAttr) {
+    tbody.innerHTML = '<tr><td colspan="8" class="plan-empty">Loading lobbyist attribution…</td></tr>';
+    return;
+  }
+  const groups = planGroups();
+  const withLobbyist = groups.filter(g => g.lobbyist).length;
+  document.querySelectorAll(".tab-btn[data-tab='tab-lobbyist-plan'] .tab-badge").forEach(el => el.textContent = withLobbyist);
+  if (!groups.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="plan-empty">No donors match.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = groups.map(g => {
+    const l = g.lobbyist;
+    const head = l
+      ? `<div class="plan-lobbyist">${esc(l.name)}${l.kind === "firm" ? ' <span class="plan-firm">firm</span>' : ""}</div>
+         <div class="plan-contact">${esc(lobbyistContact(l))}</div>`
+      : `<div class="plan-lobbyist plan-none">No lobbyist on file</div>
+         <div class="plan-contact">Assign these at <a href="/admin/lobbyists">/admin/lobbyists</a></div>`;
+    const header = `<tr class="plan-group">
+      <td>${head}</td>
+      <td class="plan-count">${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}</td>
+      <td class="num">${fmt$(g.target)}</td>
+      <td class="num">${fmt$(g.given)}</td>
+      <td class="num">${fmt$(g.remaining)}</td>
+      <td></td><td></td><td></td>
+    </tr>`;
+    const rows = g.rows.map(r => `<tr class="plan-donor">
+      <td>${esc(r.donor)}${r.also.length ? `<div class="plan-also">also: ${esc(r.also.map(a => a.lobbyist.name).join(", "))}</div>` : ""}</td>
+      <td><span class="plan-type ${r.type === "Donor Target" ? "is-target" : "is-prospect"}">${r.type === "Donor Target" ? "Target" : "Prospect"}</span></td>
+      <td class="num"><strong>${fmt$(r.target)}</strong></td>
+      <td class="num">${fmt$(r.given)}</td>
+      <td class="num">${fmt$(r.remaining)}</td>
+      <td class="num">${r.last_cycle === null ? "—" : fmt$(r.last_cycle)}</td>
+      <td class="num">${r.comp_max ? fmt$(r.comp_max) : "—"}</td>
+      <td class="plan-attr">${r.attribution
+        ? `${r.attribution.status === "confirmed" ? "" : '<span class="lob-unreviewed" title="Suggested match, not yet reviewed">?</span> '}${esc(attributionText(r.attribution))}`
+        : ""}</td>
+    </tr>`).join("");
+    return header + rows;
+  }).join("");
+}
+
+/** Rows in the Fundraising Tracker PLAN layout: a lobbyist row carrying the
+ *  subtotals, then one row per donor with the lobbyist repeated in column A. */
+function lobbyistPlanExportRows() {
+  const out = [];
+  for (const g of planGroups()) {
+    const l = g.lobbyist;
+    const name = l ? l.name : "(no lobbyist on file)";
+    const contact = l ? { "Lobbyist Email": l.email || "", "Lobbyist Phone": l.phone || "",
+                          "Firm / Title": l.kind === "firm" ? "" : (l.affiliation || l.firm || "") }
+                      : { "Lobbyist Email": "", "Lobbyist Phone": "", "Firm / Title": "" };
+    out.push({ "Lobbyist": name, "Donor": "", "Type": `${g.rows.length} donors`,
+               "Target": Math.round(g.target), "Given This Cycle": Math.round(g.given),
+               "Remaining": Math.round(g.remaining), "Last Cycle": "", "Comparable Max": "",
+               "Attribution": "", ...contact, "Also Lobbied By": "" });
+    for (const r of g.rows) {
+      out.push({ "Lobbyist": name, "Donor": r.donor, "Type": r.type,
+                 "Target": Math.round(r.target), "Given This Cycle": Math.round(r.given),
+                 "Remaining": Math.round(r.remaining), "Last Cycle": r.last_cycle ?? "",
+                 "Comparable Max": r.comp_max || "", "Attribution": attributionText(r.attribution),
+                 ...contact, "Also Lobbied By": r.also.map(a => a.lobbyist.name).join("; ") });
+    }
+  }
+  return out;
+}
+
 // ── Export ─────────────────────────────────────────────────────────────────
 function exportData(format, scope = "new") {
   const recs = window._recommendations || [];
@@ -1436,6 +1634,7 @@ function exportData(format, scope = "new") {
   const repeatRows = repeats.map(r => ({
     "Type": "Donor Target",
     "Donor Name": r.donor,
+    "Lobbyist": lobbyistNames(r.donor),
     "Filer": target ? target.name : "",
     "Cycle": cycleLabel,
     "Score": "",
@@ -1453,6 +1652,7 @@ function exportData(format, scope = "new") {
   const newRows = recs.map(r => ({
     "Type": "New Prospect",
     "Donor Name": r.donor,
+    "Lobbyist": lobbyistNames(r.donor),
     "Filer": target ? target.name : "",
     "Cycle": cycleLabel,
     "Score": r.score,
@@ -1468,7 +1668,10 @@ function exportData(format, scope = "new") {
 
   let exportRows;
   let fileLabel;
-  if (scope === "repeat") {
+  if (scope === "lobbyist") {
+    exportRows = lobbyistPlanExportRows();
+    fileLabel = "lobbyist_plan";
+  } else if (scope === "repeat") {
     exportRows = repeatRows;
     fileLabel = "donor_targets";
   } else if (scope === "new") {
@@ -1517,6 +1720,11 @@ function exportData(format, scope = "new") {
         const ws2 = XLSX.utils.json_to_sheet(newRows);
         XLSX.utils.book_append_sheet(wb, ws2, "New Prospects");
       }
+    } else if (scope === "lobbyist") {
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      ws["!cols"] = [{ wch: 28 }, { wch: 44 }, { wch: 13 }, { wch: 11 }, { wch: 14 }, { wch: 11 },
+                     { wch: 11 }, { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 16 }, { wch: 28 }, { wch: 30 }];
+      XLSX.utils.book_append_sheet(wb, ws, "Lobbyist Plan");
     } else {
       const ws = XLSX.utils.json_to_sheet(exportRows);
       XLSX.utils.book_append_sheet(wb, ws, scope === "repeat" ? "Donor Targets" : "New Prospects");
