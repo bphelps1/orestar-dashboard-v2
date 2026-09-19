@@ -1776,6 +1776,8 @@ def aggregate(df: pd.DataFrame) -> None:
     # Update summary.json with correct global cash-on-hand (sum of per-filer COH)
     summary["global_cash_on_hand"] = global_coh_data["global_cash_on_hand"]
     summary["global_beginning_balances"] = global_coh_data["global_beginning_balances"]
+    summary["global_cash_excludes_independent_filers"] = global_coh_data[
+        "global_cash_excludes_independent_filers"]
     _write_json("summary.json", summary)
 
     log.info("Aggregation complete. JSON files written to %s", AGG_DIR)
@@ -2462,6 +2464,8 @@ def aggregate_filers(
     _closure_resets_applied = 0
     _closure_amount = 0.0
     _independent_filer_scopes = 0
+    # Independent Expenditure Filers kept out of statewide cash (see below).
+    _independent_cash_excluded = 0.0
     # Amended originals ORESTAR still counts (see _drop_superseded). The merge
     # already kept them in the mirror; here they are listed per committee so
     # the site can name every one by transaction ID.
@@ -3988,8 +3992,10 @@ def aggregate_filers(
                         "discrepancy": delta_end,
                     }
 
-        # Accumulate global beginning balances (sum across all filers per year)
-        for yr_s, bal in beginning_balances.items():
+        # Accumulate global beginning balances (sum across all filers per year).
+        # Independent Expenditure Filers hold no published balance, so they
+        # contribute none to the statewide figure (see the cash timeline below).
+        for yr_s, bal in (beginning_balances.items() if not _independent_filer else ()):
             _global_beginning_balances[yr_s] = round(
                 _global_beginning_balances.get(yr_s, 0.0) + bal, 2
             )
@@ -4286,15 +4292,24 @@ def aggregate_filers(
         # evidence-gated exclusions. Aggregate the already-correct per-filer
         # movement instead, injecting each opening balance at its first
         # effective year so date-filtered roll-forwards remain meaningful.
-        for _timeline_row in timeline:
-            _global_cash_timeline[str(_timeline_row["month"])] += float(
-                _timeline_row.get("cash_balance_net", 0)
-            )
-        if (abs(float(first_year_begin)) > 0.0
-                and _first_balance_year is not None):
-            _global_cash_timeline[
-                f"{_first_balance_year}-01"
-            ] += float(first_year_begin)
+        #
+        # Independent Expenditure Filers are left out. ORESTAR publishes no
+        # cash balance for them, and their spending comes from money that never
+        # passed through a reported committee account, so adding it as negative
+        # cash pulled the statewide figure down by money no committee held.
+        # Their spending still counts in the statewide expenditure totals.
+        if _independent_filer:
+            _independent_cash_excluded += float(cash_on_hand)
+        else:
+            for _timeline_row in timeline:
+                _global_cash_timeline[str(_timeline_row["month"])] += float(
+                    _timeline_row.get("cash_balance_net", 0)
+                )
+            if (abs(float(first_year_begin)) > 0.0
+                    and _first_balance_year is not None):
+                _global_cash_timeline[
+                    f"{_first_balance_year}-01"
+                ] += float(first_year_begin)
 
         # Donor tables use the same cash-only scope as the global leaderboard.
         # Keep the broader contribution frame for account calculations above.
@@ -4584,6 +4599,9 @@ def aggregate_filers(
             "total_in": total_in, "total_inkind": total_inkind,
             "total_out": total_out,
             "cash_on_hand": cash_on_hand,
+            # False for Independent Expenditure Filers: ORESTAR publishes no
+            # balance for them and statewide cash leaves them out.
+            "balance_published": not _independent_filer,
             "party": _party,
             "office": _office,
             "office_district": _office_raw,
@@ -5097,8 +5115,15 @@ def aggregate_filers(
 
     # Return global COH data so aggregate() can update summary.json
     return {
-        "global_cash_on_hand": round(sum(r["cash_on_hand"] for r in index_rows), 2),
+        "global_cash_on_hand": round(sum(
+            r["cash_on_hand"] for r in index_rows if r.get("balance_published", True)
+        ), 2),
         "global_beginning_balances": _global_beginning_balances,
+        # What statewide cash leaves out, so the site can say so.
+        "global_cash_excludes_independent_filers": {
+            "filers": _independent_filer_scopes,
+            "cash_excluded": round(_independent_cash_excluded, 2),
+        },
         "global_cash_timeline": {
             month: round(amount, 2)
             for month, amount in sorted(_global_cash_timeline.items())

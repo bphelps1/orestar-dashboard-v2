@@ -2239,7 +2239,27 @@ function renderFilerRaceHeader() {
     }));
 }
 
+// Statewide cash leaves out Independent Expenditure Filers: ORESTAR publishes
+// no balance for them, so their spending is not subtracted as negative cash.
+// Said in the Cash on Hand tooltip on the statewide view only.
+function setStatewideCashNote(show) {
+  const note = document.getElementById("coh-statewide-note");
+  if (!note) return;
+  const excluded = (show && summaryData && summaryData.global_cash_excludes_independent_filers) || null;
+  if (!excluded || !excluded.filers) {
+    note.innerHTML = "";
+    return;
+  }
+  const n = excluded.filers;
+  const spent = Math.abs(Number(excluded.cash_excluded) || 0);
+  note.innerHTML = `<br><strong>Statewide total:</strong> Excludes ${fmtNum(n)} independent ` +
+    `expenditure filer${n === 1 ? "" : "s"}. ORESTAR publishes no cash balance for them, so ` +
+    `the ${esc(fmt$(spent))} they spent is not subtracted from cash here. Their spending ` +
+    `is still counted in Expenditures.`;
+}
+
 function renderOverviewGlobal() {
+  setStatewideCashNote(true);
   // Always compute stat cards from timeline — ensures consistency with Account Summary
   const hasDate = state.dateStart || state.dateEnd;
   const fullGlobalTl = timelineData || [];
@@ -2910,6 +2930,7 @@ function setOverviewTiles(mode, profile) {
 }
 
 function renderOverviewSingleFiler(profile) {
+  setStatewideCashNote(false);
   const pulseEl = document.getElementById("campaign-pulse");
   if (pulseEl) pulseEl.hidden = true;
   // The comparisons now read this committee's own money rather than the state's.
@@ -2972,6 +2993,7 @@ function renderOverviewSingleFiler(profile) {
 }
 
 function renderOverviewMultiFiler(profiles) {
+  setStatewideCashNote(false);
   const pulseEl = document.getElementById("campaign-pulse");
   if (pulseEl) pulseEl.hidden = true;
   if (typeof ccSetScope === "function") ccSetScope("none");
@@ -3295,7 +3317,7 @@ function renderOverviewMultiFiler(profiles) {
         <div class="filer-card-stat-label">Total Expenditures</div>
         <div class="filer-card-stat-value">${fmt$(s.totalOut)}</div>
         <div class="filer-card-stat-label">Cash on Hand ${cohInd}</div>
-        <div class="filer-card-stat-value">${fmt$(s.cashOnHand)}</div>
+        <div class="filer-card-stat-value">${balanceUnpublished(p) ? "—" : fmt$(s.cashOnHand)}</div>
         <div class="filer-card-stat-label">Total Transactions</div>
         <div class="filer-card-stat-value">${tranCount}</div>
       </div>
