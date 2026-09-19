@@ -195,6 +195,9 @@ def _parse_yearly_summary(html: str) -> dict | None:
     return {
         **required,
         "summary_field_version": SUMMARY_FIELD_VERSION,
+        # ORESTAR's own filer-type code. "IF" pages hide the balance section
+        # above: an Independent Expenditure Filer has no published balance.
+        "filer_type": orestar_parse.parse_filer_type(html),
         "loans_received": _parse_dollar(html, "Loans Received (Non-Exempt)"),
         "loans_received_exempt": _parse_dollar(html, "Loans Received (Exempt)"),
         "loan_payments": _parse_dollar(html, "Loan Payments (Non-Exempt)"),

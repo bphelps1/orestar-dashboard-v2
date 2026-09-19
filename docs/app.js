@@ -1099,13 +1099,19 @@ function renderAcctSummaryTiles(profile, year) {
     return;
   }
 
-  grid.innerHTML = CALC_GROUPS.map(group => {
+  const unpublished = balanceUnpublished(profile);
+  grid.innerHTML = (unpublished
+    ? `<p class="disc-note">${esc(UNPUBLISHED_BALANCE_NOTE)}</p>` : "") +
+    CALC_GROUPS.map(group => {
     // Hide ORESTAR validation/balance groups if no ORESTAR data
     if (group.title.startsWith("ORESTAR") && !calcData._has_orestar) return "";
+    // No published balance: nothing to validate against, and no cash lane.
+    if (unpublished && group.title.startsWith("ORESTAR")) return "";
 
     const tiles = group.fields.map(field => {
       const meta = CALC_TILE_META[field];
       if (!meta) return "";
+      if (unpublished && meta.coh) return "";
 
       let val;
       if (meta.compute) {
@@ -2347,6 +2353,15 @@ function updateCohIndicator(profile) {
     return;
   }
 
+  if (balanceUnpublished(profile)) {
+    ind.hidden = false;
+    ind.className = "coh-indicator coh-estimated";
+    ind.textContent = "IE";
+    ind.setAttribute("tabindex", "0");
+    ind.setAttribute("title", UNPUBLISHED_BALANCE_NOTE);
+    return;
+  }
+
   // Compute COH from timeline (same as stat card) instead of using stored value
   const fullTl = profile.timeline || [];
   const calcCoh = statsFromTimeline(fullTl, profile.beginning_balances).cashOnHand;
@@ -2773,9 +2788,40 @@ function amendmentChainNoteText(profile) {
     `counts them the same way: ${parts.join("; ")}.`;
 }
 
+// Discontinued committees (scraper/orestar_closures.py). After a committee
+// files a Discontinuation, ORESTAR's later statements are blank and open at
+// $0.00, so the last balance vanishes without a transaction. The balance here
+// does the same, and says so.
+function closureResetNoteText(profile) {
+  const items = (profile && profile.orestar_closure_resets) || [];
+  if (!items.length) return "";
+  return items.map(r => {
+    const closed = fmtCents(r.orestar_prior_ending);
+    const tail = Math.abs(Number(r.tail_offset) || 0) > 0.005
+      ? ` Our own rows in the blank years already move ${fmtSignedCents(r.tail_offset)}, ` +
+        `so ${fmtSignedCents(r.amount)} is applied.`
+      : "";
+    return `This committee filed a Discontinuation (effective ${r.discontinued_on}). ` +
+      `ORESTAR's last statement closed at ${closed} for ${r.boundary[0]}; its ${r.year} ` +
+      `statement and every one after it are blank and open at $0.00, with no transaction ` +
+      `behind the change. This balance does the same.${tail}`;
+  }).join(" ");
+}
+
+// ORESTAR publishes no cash balance for an Independent Expenditure Filer: its
+// own page script hides the balance section and shows only expenditures.
+function balanceUnpublished(profile) {
+  return !!profile && profile.balance_published === false;
+}
+
+const UNPUBLISHED_BALANCE_NOTE =
+  "ORESTAR does not publish a cash balance for independent expenditure filers, " +
+  "only their expenditures, so none is shown or compared here.";
+
 function cashTreatmentNoteText(profile) {
   return [
     certificateNoteText(profile),
+    closureResetNoteText(profile),
     amendmentChainNoteText(profile),
     liveOriginalNoteText(profile),
     orestarAbsentNoteText(profile),
@@ -2794,6 +2840,9 @@ function cohIndicatorHTML(profile) {
   const disc = comparable ? Math.round(comparison.delta_at_capture * 100) / 100 : 0;
   const absDisc = Math.abs(disc);
   const treatmentText = cashTreatmentNoteText(profile);
+  if (balanceUnpublished(profile)) {
+    return `<span class="coh-indicator coh-estimated" tabindex="0" title="${esc(UNPUBLISHED_BALANCE_NOTE)}">IE</span>`;
+  }
   // Same rule as updateCohIndicator: a finished committee is labelled, not
   // warned about. Kept in step with that function deliberately — two badges
   // describing the same balance differently is worse than either alone.
@@ -2885,11 +2934,16 @@ function renderOverviewSingleFiler(profile) {
   document.getElementById("stat-contributions").textContent = fmt$(totalIn);
   document.getElementById("stat-inkind").textContent        = fmt$(totalInKind);
   document.getElementById("stat-expenditures").textContent  = fmt$(totalOut);
-  document.getElementById("stat-cash-on-hand").textContent  = fmt$(cashOnHand);
+  document.getElementById("stat-cash-on-hand").textContent  =
+    balanceUnpublished(profile) ? "—" : fmt$(cashOnHand);
   document.getElementById("stat-transactions").textContent  = count ? fmtNum(count) : "—";
   updateCohIndicator(profile);
   const cohNote = document.getElementById("coh-note");
-  if (cohNote) cohNote.textContent = "Calculated from transaction data";
+  if (cohNote) {
+    cohNote.textContent = balanceUnpublished(profile)
+      ? "Not published by ORESTAR for independent expenditure filers"
+      : "Calculated from transaction data";
+  }
   document.getElementById("stat-cards").hidden             = false;
   document.getElementById("filer-comparison-grid").hidden  = true;
   document.getElementById("overview-donut-box").hidden     = false;

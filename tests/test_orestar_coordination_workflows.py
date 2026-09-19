@@ -36,7 +36,7 @@ def _concurrency_block(text: str) -> str:
         (
             "filer-metadata.yml",
             "Scrape filer metadata (party, office, type)",
-            ("max_filers", "force"),
+            ("max_filers", "force", "filer_ids"),
         ),
         ("candidate-filings.yml", "Scrape candidate filings", ()),
         ("amendment-chains.yml", "Collect amendment chains", ("targets",)),

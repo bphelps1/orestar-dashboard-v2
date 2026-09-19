@@ -24,6 +24,12 @@ on:
         description: "Force re-scrape even if cached"
         required: false
         default: "false"
+      filer_ids:
+        description: >
+          Space-separated filer IDs to refresh even if cached (e.g. to record a
+          Discontinuation filing). Targeted runs do not chain into a full sweep.
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -72,7 +78,8 @@ jobs:
         run: |
           bash scripts/dispatch_retry.sh filer-metadata.yml --ref "${{ github.ref_name }}" \
             -f max_filers="${{ github.event.inputs.max_filers || '500' }}" \
-            -f force="${{ github.event.inputs.force || 'false' }}"
+            -f force="${{ github.event.inputs.force || 'false' }}" \
+            -f filer_ids="${{ github.event.inputs.filer_ids || '' }}"
 
       - name: Refuse uncoordinated metadata scrape
         if: steps.orestar_wait.outcome == 'failure'
@@ -116,7 +123,15 @@ jobs:
         run: |
           MAX="${{ github.event.inputs.max_filers || '500' }}"
           FORCE="${{ github.event.inputs.force || 'false' }}"
+          FILER_IDS="${{ github.event.inputs.filer_ids || '' }}"
           ARGS=""
+          if [ -n "$FILER_IDS" ]; then
+            # Targeted refresh: exactly these filers, no chained sweep after.
+            # shellcheck disable=SC2086
+            xvfb-run --auto-servernum python scraper/fetch_filer_metadata.py --filer-ids $FILER_IDS
+            echo "remaining=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$MAX" != "0" ]; then
             ARGS="$ARGS --max-filers $MAX"
           fi

@@ -51,6 +51,13 @@ from orestar_amendment_chains import (
     evaluate_target,
     targets_for_filer,
 )
+from orestar_closures import (
+    CLOSURE_ID_PREFIX,
+    CLOSURE_SUB_TYPE,
+    closure_reset,
+    discontinued_on,
+)
+from orestar_parse import INDEPENDENT_FILER_TYPE
 from orestar_certificates import (
     CERTIFICATES_FILENAME,
     GHOST_ID_PREFIX,
@@ -2452,6 +2459,9 @@ def aggregate_filers(
             log.warning("Ignoring unreadable %s: %s", _chains_path.name, exc)
     _chain_decisions: Counter = Counter()
     _chain_rows_added = 0
+    _closure_resets_applied = 0
+    _closure_amount = 0.0
+    _independent_filer_scopes = 0
     # Amended originals ORESTAR still counts (see _drop_superseded). The merge
     # already kept them in the mirror; here they are listed per committee so
     # the site can name every one by transaction ID.
@@ -2985,6 +2995,77 @@ def aggregate_filers(
             )
             _chain_rows_added += len(_chain_rows)
 
+        # Discontinued committees (see orestar_closures.py): ORESTAR's
+        # statements after a Discontinuation are blank and open at $0.00, so
+        # the last balance vanishes without a transaction. The row is measured
+        # against ORESTAR's last real close and our own rows in the blank
+        # years, so neither those rows nor an earlier data gap are absorbed.
+        _closures_here: list[dict] = []
+        _closure_by_year: dict[str, float] = defaultdict(float)
+        for _fid in _name_to_fids.get(name, []):
+            _disc_date = discontinued_on(_filer_metadata.get(str(_fid)))
+            if not _disc_date or _fid_owners.get(_fid, 0) > 1:
+                continue
+            _nets: dict[int, float] = defaultdict(float)
+            for _frame, _sign in ((_c_for_coh, 1), (_or_for_coh, 1), (_e_for_coh, -1),
+                                  (_od_for_coh, -1), (_ba_for_coh, 1)):
+                if (_frame is None or _frame.empty
+                        or not {"filer id", "year", "amount"} <= set(_frame.columns)):
+                    continue
+                _own = _frame[
+                    _frame["filer id"].astype(str).str.replace(r"\.0$", "", regex=True)
+                    == str(_fid)
+                ]
+                if "sub_type" in _own.columns:
+                    _own = _own[~_own["sub_type"].isin(
+                        {GHOST_SUB_TYPE, CHAIN_SUB_TYPE, CLOSURE_SUB_TYPE})]
+                for _yr, _amt in _own.groupby("year")["amount"].sum().items():
+                    _nets[int(_yr)] += _sign * float(_amt)
+            _spec = closure_reset(
+                (_yearly_summaries.get(str(_fid)) or {}).get("years") or {},
+                (_certificates.get(str(_fid)) or {}).keys(),
+                dict(_nets),
+                _disc_date,
+            )
+            if _spec is None:
+                continue
+            _when = pd.Timestamp(_spec["date"])
+            _ba_for_coh = pd.concat([_ba_for_coh, pd.DataFrame([{
+                "tran_id": f"{CLOSURE_ID_PREFIX}{_fid}-{_spec['year']}",
+                "original_id": None,
+                "tran_date": _when,
+                "filed_date": _when,
+                "tran_type": "O",
+                "sub_type": CLOSURE_SUB_TYPE,
+                "contributor_payee": "ORESTAR closure restatement",
+                "amount": float(_spec["amount"]),
+                "year": int(_when.year),
+                "month": _when.to_period("M").strftime("%Y-%m"),
+                "filer id": str(_fid),
+                filer_col: name,
+                "_undated": False,
+            }])], ignore_index=True)
+            _closures_here.append({**_spec, "filer_id": str(_fid)})
+            _closure_by_year[str(_spec["year"])] += float(_spec["amount"])
+            _closure_resets_applied += 1
+            _closure_amount += abs(float(_spec["amount"]))
+
+        # Independent Expenditure Filers: ORESTAR's own page script hides the
+        # balance section for filer type "IF", so ORESTAR publishes no cash
+        # balance for them. A scope made only of such filers is shown and
+        # compared without one. The type comes from ORESTAR's page, never
+        # guessed from a filer's transactions.
+        _filer_types: list[str | None] = []
+        for _fid in _name_to_fids.get(name, []):
+            _fyears = (_yearly_summaries.get(str(_fid)) or {}).get("years") or {}
+            _typed = [(_y, _r.get("filer_type")) for _y, _r in _fyears.items()
+                      if isinstance(_r, dict) and _r.get("filer_type")]
+            _filer_types.append(max(_typed)[1] if _typed else None)
+        _independent_filer = bool(_filer_types) and all(
+            _t == INDEPENDENT_FILER_TYPE for _t in _filer_types)
+        if _independent_filer:
+            _independent_filer_scopes += 1
+
         _ghost_by_year: dict[str, float] = defaultdict(float)
         for _spec in _ghost_specs:
             _ghost_by_year[str(_spec["year"])] += float(_spec["amount"])
@@ -3453,8 +3534,11 @@ def aggregate_filers(
                 and not _comparison.get("orestar_data_changed_since_capture")
                 and not _summary_treatment_pending_years
                 and not is_closed
+                and not _independent_filer
             )
-            if is_closed:
+            if _independent_filer:
+                _comparison["actionability_reason"] = "no_published_balance"
+            elif is_closed:
                 _comparison["actionability_reason"] = "closed_trailing_summary"
             elif _comparison.get("orestar_data_changed_since_capture"):
                 _comparison["actionability_reason"] = "newer_summary_was_not_paired"
@@ -3801,6 +3885,11 @@ def aggregate_filers(
                         "certificate_restatement": (
                             round(_ghost_by_year[yr_s], 2)
                             if yr_s in _ghost_by_year else None
+                        ),
+                        # ORESTAR's drop to $0.00 after a discontinuation.
+                        "closure_reset": (
+                            round(_closure_by_year[yr_s], 2)
+                            if yr_s in _closure_by_year else None
                         ),
                         # Cash moved onto ORESTAR's line by early-era
                         # amendment-chain versions it still counts.
@@ -4401,6 +4490,13 @@ def aggregate_filers(
             # versions added or taken away and every version of their chains,
             # so each dollar can be traced to ORESTAR's history pages.
             "orestar_amendment_chains": _chains_here,
+            # Discontinued committees whose last ORESTAR balance vanished at
+            # the first blank statement (see orestar_closures.py).
+            "orestar_closure_resets": _closures_here,
+            # ORESTAR publishes no cash balance for Independent Expenditure
+            # Filers; the site shows none and compares none for them.
+            "filer_kind": "independent_expenditure" if _independent_filer else None,
+            "balance_published": not _independent_filer,
             # Annual non-exempt loan totals used for the cash lane when a
             # trustworthy ORESTAR statement differs from the eligible held
             # transaction total. Raw loan rows remain visible in the timeline;
@@ -4543,6 +4639,11 @@ def aggregate_filers(
         len(_ghost_skipped_ambiguous),
     )
     log.info(
+        "Closure resets: %d applied (|$%s|); independent expenditure filer "
+        "scopes without a published balance: %d",
+        _closure_resets_applied, f"{_closure_amount:,.2f}", _independent_filer_scopes,
+    )
+    log.info(
         "Amendment chains: %d derived rows; decisions %s",
         _chain_rows_added, dict(sorted(_chain_decisions.items())),
     )
@@ -4560,6 +4661,7 @@ def aggregate_filers(
     _comparable_count = 0
     _population_count = 0
     _unchecked_count = 0
+    _no_published_balance = 0
     for _row in _filer_detail_rows:
         _d = _row["detail"]
         _acct = _d.get("orestar_account_summary") or {}
@@ -4567,6 +4669,11 @@ def aggregate_filers(
         if not _audit_fids:
             # Without a physical filer ID there is no ORESTAR account-summary
             # scope to capture. Keep this outside the measurable population.
+            continue
+        if _d.get("balance_published") is False:
+            # ORESTAR publishes no balance to compare against (Independent
+            # Expenditure Filers). Counted, never flagged.
+            _no_published_balance += 1
             continue
         _population_count += 1
         if _acct.get("ending_cash_balance") is None:
@@ -4745,6 +4852,7 @@ def aggregate_filers(
         "unpaired": len(_unpaired_rows),
         "refresh_needed": len(_refresh_rows),
         "nonactionable": len(_nonactionable_rows),
+        "no_published_balance": _no_published_balance,
         "flagged": len(_disc_rows),
         "newer_app_data": _newer_count,
         "newer_app_data_amount": _newer_amount,
