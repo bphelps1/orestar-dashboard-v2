@@ -232,3 +232,55 @@ def test_an_independent_expenditure_filer_has_no_balance_to_compare(tmp_path) ->
     assert not any(r.get("filer_ids") == ["1"]
                    for key in ("rows", "refresh_rows", "nonactionable_rows")
                    for r in disc.get(key) or [])
+
+
+# ── Statewide cash leaves independent expenditure filers out ────────────────
+
+def test_statewide_cash_excludes_independent_expenditure_filers(tmp_path) -> None:
+    from unittest.mock import patch
+
+    import generate_activity_snapshot
+    import process as P
+
+    data_dir = tmp_path / "data"
+    agg_dir = data_dir / "aggregated"
+    transactions = data_dir / "transactions"
+    agg_dir.mkdir(parents=True)
+    transactions.mkdir()
+    (data_dir / "orestar_yearly_summaries.json").write_text(json.dumps({
+        "1": {"ts": 1_800_000_000.0, "years": {
+            "2019": {**_statement(0.0, -9640.0, expenditures=9640.0), "filer_type": "IF"}}},
+        "2": {"ts": 1_800_000_000.0, "years": {
+            "2019": {**_statement(0.0, 500.0, contributions=500.0), "filer_type": "PAC"}}},
+    }))
+    independent = _row("e1", 9640.0, "E", "Cash Expenditure", "2019-08-06")
+    independent.update({"filer": "Tyler Miller", "filer id": "1"})
+    committee = _row("c1", 500.0, "C", "Cash Contribution", "2019-05-01")
+    committee.update({"filer": "A Committee", "filer id": "2"})
+    df = pd.DataFrame([independent, committee])
+
+    with patch.object(P, "DATA_DIR", data_dir), \
+         patch.object(P, "AGG_DIR", agg_dir), \
+         patch.object(P, "TRANS_DIR", transactions), \
+         patch.object(P, "transaction_snapshot_id", return_value="sha256:now"), \
+         patch.object(P, "_row_completeness", return_value={}), \
+         patch.object(P, "_row_diff", return_value=({}, [])), \
+         patch.object(P, "_certified_orestar_absent", return_value=({}, set(), None)), \
+         patch.object(P.supabase_sync, "bulk_upsert_filer_detail"), \
+         patch.object(P.supabase_sync, "upsert_dashboard_cache"), \
+         patch.object(P.supabase_sync, "get_dashboard_cache", return_value={}), \
+         patch.object(generate_activity_snapshot, "generate",
+                      return_value={"meta": {"total_candidates": 0}, "legislative_map": {}}):
+        result = P.aggregate_filers(
+            df, df[df["tran_type"] == "C"], df.iloc[0:0], df[df["tran_type"] == "E"],
+            df.iloc[0:0], df.iloc[0:0], df.iloc[0:0], "filer", "contributor_payee",
+        )
+
+    # Only the committee's cash is statewide cash.
+    assert result["global_cash_on_hand"] == 500.0
+    assert round(sum(result["global_cash_timeline"].values()), 2) == 500.0
+    assert result["global_cash_excludes_independent_filers"] == {
+        "filers": 1, "cash_excluded": -9640.0}
+    index = json.loads((agg_dir / "filer_index.json").read_text())
+    assert {r["name"]: r["balance_published"] for r in index} == {
+        "Tyler Miller": False, "A Committee": True}
