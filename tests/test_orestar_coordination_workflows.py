@@ -42,6 +42,11 @@ def _concurrency_block(text: str) -> str:
         ("amendment-chains.yml", "Collect amendment chains", ("targets",)),
         ("misc-reread.yml", "Re-read lumped Miscellaneous rows", ("start_year", "chain_index")),
         (
+            "lobbyist-attribution.yml",
+            "Scrape committee contacts",
+            ("max_committees", "max_age_days"),
+        ),
+        (
             "verify-filers.yml",
             "Verify filer transactions",
             ("filer_id", "discrepancy_threshold", "max_filers", "force"),
@@ -90,7 +95,7 @@ def test_orestar_workflow_requeues_same_request_instead_of_overlapping(
 @pytest.mark.parametrize(
     "filename",
     ["coverage-survey.yml", "filer-metadata.yml", "candidate-filings.yml",
-     "amendment-chains.yml", "misc-reread.yml"],
+     "amendment-chains.yml", "misc-reread.yml", "lobbyist-attribution.yml"],
 )
 def test_requeued_workflow_has_non_evicting_pending_slot(filename: str) -> None:
     concurrency = _concurrency_block(_workflow(filename))
@@ -181,6 +186,7 @@ def test_every_scheduled_pipeline_is_disabled_until_cutover() -> None:
         "earliest-balances.yml",
         "filer-metadata.yml",
         "leadership-refresh.yml",
+        "lobbyist-attribution.yml",
     }
     gate = (
         "if: github.event_name == 'workflow_dispatch' || "

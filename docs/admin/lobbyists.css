@@ -1,0 +1,178 @@
+/* ── Lobbyist attribution admin ─────────────────────────────────────────── */
+
+.admin-tab { display: none; }
+.admin-tab.active { display: block; }
+.tab-count {
+  display: inline-block;
+  min-width: 1.4em;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lob-banner {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+}
+
+.lob-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.sc-sub { font-size: 0.75rem; color: var(--color-text-muted); }
+
+.lob-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 12px 0 16px;
+}
+.lob-filters .table-search { flex: 1 1 240px; max-width: 420px; }
+.lob-check { font-size: 0.85rem; color: var(--color-text-muted); display: inline-flex; gap: 6px; align-items: center; }
+
+.lob-chip-group { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.lob-chip {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.lob-chip:hover { color: var(--color-text); }
+.lob-chip.active {
+  background: var(--color-accent-light);
+  border-color: #bfdbfe;
+  color: var(--color-accent-dark);
+  font-weight: 600;
+}
+
+.btn-compact { padding: 6px 14px; font-size: 0.85rem; width: auto; margin: 0; }
+
+.lob-list { display: flex; flex-direction: column; gap: 12px; }
+.lob-card { padding: 14px 18px; }
+.lob-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.lob-pair > div { min-width: 0; }
+.lob-arrow {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-light);
+}
+.lob-donor, .lob-name { display: block; font-weight: 600; font-size: 0.95rem; color: var(--color-text); }
+a.lob-name { color: var(--color-accent-dark); text-decoration: none; display: inline; }
+a.lob-name:hover { text-decoration: underline; }
+.lob-meta { display: block; font-size: 0.8rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
+td.lob-meta, span.lob-meta.inline { display: table-cell; }
+ul.pair-evidence { list-style: none; margin: 4px 0 10px; }
+ul.pair-evidence li + li { margin-top: 2px; }
+
+.lob-more { margin: 14px 0 28px; text-align: center; }
+
+.badge-green { background: #dcfce7; color: #166534; }
+.badge-red { background: #fee2e2; color: #991b1b; }
+
+.lob-row.open td { background: var(--color-accent-light); }
+.lob-detail { padding: 8px 4px 16px; }
+.lob-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 16px;
+}
+.lob-cols h4 { font-size: 0.9rem; margin-bottom: 8px; }
+.lob-client-list { list-style: none; margin: 0 0 10px; padding: 0; max-height: 320px; overflow-y: auto; }
+.lob-client-list li {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.lob-client-list li .lob-meta { display: inline; }
+.lob-client-list li.inactive { color: var(--color-text-light); }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0;
+  text-decoration: underline;
+}
+.link-btn:hover { color: var(--color-accent-dark); }
+
+.lob-inline { display: flex; gap: 8px; align-items: center; position: relative; }
+.lob-inline input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+}
+
+.lob-form {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.lob-detail .lob-form { background: var(--color-surface); }
+.lob-form h3 { font-size: 1rem; margin-bottom: 4px; }
+.lob-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 10px 0 12px;
+}
+.lob-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.lob-form-grid input, .lob-form-grid select, .lob-form-grid textarea {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--color-text);
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+}
+.lob-form-grid .span-2 { grid-column: span 2; }
+.lob-form-grid .span-3 { grid-column: span 3; }
+
+@media (max-width: 760px) {
+  .lob-pair, .lob-cols { grid-template-columns: 1fr; }
+  .lob-form-grid { grid-template-columns: 1fr; }
+  .lob-form-grid .span-2, .lob-form-grid .span-3 { grid-column: span 1; }
+}
+
+.lob-firm-members { margin-top: 16px; }
+.lob-firm-members h4 { font-size: 0.9rem; margin-bottom: 4px; }
+.lob-firm-members .lob-client-list { max-height: none; }
+.lob-member-of { margin-top: 12px; }
