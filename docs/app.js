@@ -1214,7 +1214,17 @@ function renderAcctSummaryTiles(profile, year) {
         const diffText = (d.reconciles || certClean) ? "✓"
           : (certExplained ? "ⓒ " : "") + (endDisc > 0 ? "+" : "") + fmt$(endDisc);
         const rowId = `disc-detail-${yr}`;
-        discHTML += `<div class="disc-row ${severity}" style="cursor:pointer" data-detail="${rowId}"${certTip ? ` title="${esc(certTip)}"` : ""}>
+        // Amended originals ORESTAR still counts in this year, named by ID.
+        const liveIds = d.live_originals || [];
+        const liveItems = ((profile.orestar_live_originals) || [])
+          .filter(item => liveIds.includes(item.original_id));
+        const liveTip = liveItems.length
+          ? `ORESTAR still counts the original transaction ` +
+            `${liveItems.map(liveOriginalPairText).join("; ")}. ORESTAR never ` +
+            `marked it expired, so this balance counts it too.`
+          : "";
+        const rowTip = [certTip, liveTip].filter(Boolean).join(" ");
+        discHTML += `<div class="disc-row ${severity}" style="cursor:pointer" data-detail="${rowId}"${rowTip ? ` title="${esc(rowTip)}"` : ""}>
           <span class="disc-col-year">${yr} ▸</span>
           <span class="disc-col-num">${fmt$(d.our_end)}</span>
           <span class="disc-col-num">${fmt$(d.orestar_end)}</span>
@@ -1238,6 +1248,14 @@ function renderAcctSummaryTiles(profile, year) {
             <span class="disc-col-num">${fmt$(line.ours)}</span>
             <span class="disc-col-num">${line.theirs != null ? fmt$(line.theirs) : '—'}</span>
             <span class="disc-col-num disc-col-diff">${line.delta > 0 ? "+" : ""}${fmt$(line.delta)}</span>
+          </div>`;
+        }
+        for (const item of liveItems) {
+          discHTML += `<div class="disc-detail-row disc-cert" title="${esc(liveTip)}">
+            <span class="disc-detail-label">Live original #${esc(item.original_id)}</span>
+            <span class="disc-col-num">${item.amount != null ? esc(fmtCents(item.amount)) : "—"}</span>
+            <span class="disc-col-num">amended ${esc((item.amended || []).map(a => `#${a.tran_id}`).join(", "))}</span>
+            <span class="disc-col-num disc-col-diff">counted</span>
           </div>`;
         }
         if (restate != null) {
@@ -2685,9 +2703,42 @@ function certificateNoteText(profile) {
     `(${parts.join("; ")}${more})${tail}`;
 }
 
+// Amended originals ORESTAR still counts (see _drop_superseded in
+// scraper/process.py). Amending a transaction normally expires the original;
+// sometimes ORESTAR leaves it live, and its summary then counts both versions.
+// The balance follows ORESTAR, so every such pair is named by transaction ID
+// for the reader to look up. Cents matter here: these are single rows.
+function fmtCents(v) {
+  const n = Number(v) || 0;
+  return `${n < 0 ? "\u2212" : ""}$` +
+    Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function liveOriginalPairText(item) {
+  const amended = (item.amended || []).map(a =>
+    `#${a.tran_id}` + (a.sub_type && a.sub_type !== item.sub_type ? ` (${a.sub_type})` : ""));
+  const when = item.tran_date ? `, ${item.tran_date}` : "";
+  const what = [item.amount != null ? fmtCents(item.amount) : "", item.sub_type || ""]
+    .filter(Boolean).join(" ");
+  return `#${item.original_id} (${what}${when}), amended as ${amended.join(" and ")}`;
+}
+
+function liveOriginalNoteText(profile) {
+  const items = (profile && profile.orestar_live_originals) || [];
+  if (!items.length) return "";
+  const one = items.length === 1;
+  return `ORESTAR still counts ${one ? "an original transaction" : `${items.length} original transactions`} ` +
+    `after ${one ? "it was" : "they were"} amended: ${items.map(liveOriginalPairText).join("; ")}. ` +
+    `Amending a transaction normally retires the original, but ORESTAR never marked ` +
+    `${one ? "this one" : "these"} expired: its own search still lists ` +
+    `${one ? "it" : "them"} next to the amendment, and its account summary still ` +
+    `counts ${one ? "it" : "them"}. This balance counts ${one ? "it" : "them"} the same way.`;
+}
+
 function cashTreatmentNoteText(profile) {
   return [
     certificateNoteText(profile),
+    liveOriginalNoteText(profile),
     orestarAbsentNoteText(profile),
     nonexemptLoanNoteText(profile),
     exemptLoanNoteText(profile),

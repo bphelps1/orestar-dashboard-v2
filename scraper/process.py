@@ -258,6 +258,40 @@ def _row_diff() -> tuple[dict, list[dict]]:
         return {}, []
 
 
+def _live_original_ids(rows: list | None = None) -> dict[str, str]:
+    """Amended originals ORESTAR still counts: tran_id -> physical filer ID.
+
+    Read from the current exact coverage result for each filer. A diff searches
+    ORESTAR the way its public default does, which leaves out transactions
+    ORESTAR expired, so an original it still returns is live there. Both lists
+    qualify: ``superseded`` (live, and dropped by us) and ``live_originals``
+    (live, whether or not we hold it). The second is what keeps the evidence
+    once the row is restored, because a held row is no longer "superseded".
+
+    Only well-formed exact results count. A legacy or malformed row, or a
+    failed diff, contributes nothing, so without evidence the merge drops
+    originals exactly as before. If ORESTAR later expires one, the next diff
+    stops listing it and the merge drops it again.
+    """
+    if rows is None:
+        path = DATA_DIR / "coverage_diff.json"
+        try:
+            rows = json.loads(path.read_text()) if path.exists() else []
+        except (OSError, ValueError):
+            return {}
+    live: dict[str, str] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if (not isinstance(row, dict) or row.get("evidence_version") is None
+                or type(row.get("complete")) is not bool
+                or not exact_coverage_result_shape_is_valid(row)):
+            continue
+        fid = str(row.get("filer_id") or "").strip()
+        for tran_id in [*(row.get("superseded") or []),
+                        *(row.get("live_originals") or [])]:
+            live[str(tran_id).strip()] = fid
+    return live
+
+
 def _paired_evidence_requirements(
     name_to_fids: dict[str, list[str]],
     comparisons: dict[str, dict],
@@ -1076,7 +1110,61 @@ def _save_transactions(df: pd.DataFrame) -> None:
 # Main processing pipeline
 # ---------------------------------------------------------------------------
 
-def _drop_superseded(df):
+def _live_originals_for(rows: pd.DataFrame, evidence: dict[str, str]) -> list[dict]:
+    """The live amended originals among one committee's rows, for display.
+
+    An ID qualifies only if coverage evidence lists it AND an Amended row here
+    names it as its original; otherwise it is an ordinary row and says nothing
+    about amendments. Amounts and types come from our copy of each row.
+    """
+    needed = {"tran_id", "original id", "tran status"}
+    if not evidence or rows is None or rows.empty or not needed <= set(rows.columns):
+        return []
+    ids = rows["tran_id"].astype(str).str.strip()
+    originals = rows[ids.isin(evidence)]
+    if originals.empty:
+        return []
+    amended = rows[rows["tran status"].astype(str).str.strip() == "Amended"]
+    amended_orig = amended["original id"].astype(str).str.strip()
+
+    def _date(value):
+        parsed = pd.to_datetime(value, errors="coerce")
+        return None if pd.isna(parsed) else parsed.strftime("%Y-%m-%d")
+
+    def _amount(value):
+        try:
+            return round(float(value), 2)
+        except (TypeError, ValueError):
+            return None
+
+    out = []
+    for _, row in originals.iterrows():
+        tran_id = str(row["tran_id"]).strip()
+        amends = amended[amended_orig == tran_id]
+        if amends.empty:
+            continue
+        when = _date(row.get("tran_date"))
+        out.append({
+            "original_id": tran_id,
+            "filer_id": str(row.get("filer id") or "").strip() or evidence.get(tran_id),
+            "tran_date": when,
+            "year": int(when[:4]) if when else None,
+            "sub_type": str(row.get("sub_type") or "").strip() or None,
+            "amount": _amount(row.get("amount")),
+            "amended": [
+                {
+                    "tran_id": str(a.get("tran_id")).strip(),
+                    "sub_type": str(a.get("sub_type") or "").strip() or None,
+                    "amount": _amount(a.get("amount")),
+                }
+                for _, a in amends.sort_values("tran_id").iterrows()
+            ],
+        })
+    out.sort(key=lambda item: (item["tran_date"] or "", item["original_id"]))
+    return out
+
+
+def _drop_superseded(df, keep_live=frozenset()):
     """Keep only the version of each transaction that ORESTAR still counts.
 
     Two rules, and we had only the first:
@@ -1099,7 +1187,22 @@ def _drop_superseded(df):
     logic as step 4b". They were the same, which is why fixing rule 2 in one
     would have left the other wrong. Returns (df, removed_tran_ids) so callers
     that sync to Postgres can delete what they dropped.
+
+    Rule 1 has one exception, ``keep_live``: originals ORESTAR never expired.
+    Normally amending a transaction expires the original, ORESTAR's default
+    search stops returning it and its summary stops counting it. Sometimes
+    ORESTAR leaves the original live, and then its summary counts BOTH
+    versions. Oregon Firearms Federation PAC's $100 contribution 2041931 was
+    amended eleven minutes later as 2041946 to fix the contributor's details;
+    ORESTAR's history links the two, yet both are live, both show a $200
+    aggregate for the donor, and ORESTAR's 2015 contributions include both.
+    Elect Dave Hoppe's $600 cash expenditure 1672602, re-entered as the
+    personal expenditure 1927730, is the same. The balance follows ORESTAR, so
+    those originals are kept. Only exact coverage evidence (ORESTAR's default
+    search returning the ID) can put an ID in ``keep_live``; see
+    ``_live_original_ids``.
     """
+    keep_live = {str(v).strip() for v in keep_live or ()}
     removed: set[str] = set()
     orig_col = "original id" if "original id" in df.columns else None
     status_col = "tran status" if "tran status" in df.columns else None
@@ -1112,6 +1215,11 @@ def _drop_superseded(df):
         superseded = set(
             amended[orig_col].dropna().astype(str).str.strip()
         ) & set(df["tran_id"].astype(str).str.strip())
+        live = superseded & keep_live
+        if live:
+            log.info("Kept %d amended original(s) ORESTAR still counts as live: %s",
+                     len(live), ", ".join(sorted(live, key=lambda v: (len(v), v))))
+        superseded -= live
         if superseded:
             before = len(df)
             df = df[~df["tran_id"].astype(str).str.strip().isin(superseded)]
@@ -1159,7 +1267,7 @@ def process() -> None:
         # Ensure amount is numeric for re-aggregation path
         df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0.0)
 
-        df, _ = _drop_superseded(df)
+        df, _ = _drop_superseded(df, keep_live=_live_original_ids())
     else:
         # ── 2. Type coercion ─────────────────────────────────────────────────
         for col in ["tran_id", "contributor_payee", "filer", "contributor_type",
@@ -1213,7 +1321,7 @@ def process() -> None:
         # filed on different dates (hence fetched in different weekly windows).
         # ORESTAR's Account Summary counts only the latest version, so we must
         # drop the originals to avoid double-counting.
-        df, superseded_ids = _drop_superseded(df)
+        df, superseded_ids = _drop_superseded(df, keep_live=_live_original_ids())
 
         # ── 5. Name normalization + fuzzy dedup ───────────────────────────────
         all_names = (
@@ -2325,6 +2433,12 @@ def aggregate_filers(
     _ghost_committees = 0
     _ghost_row_count = 0
     _ghost_amount = 0.0
+    # Amended originals ORESTAR still counts (see _drop_superseded). The merge
+    # already kept them in the mirror; here they are listed per committee so
+    # the site can name every one by transaction ID.
+    _live_originals_evidence = _live_original_ids()
+    _live_original_committees = 0
+    _live_original_rows = 0
 
     # Load filer metadata (party, office, committee type) from scraper cache
     _filer_metadata_path = DATA_DIR / "filer_metadata.json"
@@ -2783,6 +2897,15 @@ def aggregate_filers(
                 _certificate_years_here.setdefault(str(_cy), []).append(
                     {"filer_id": str(_fid), **_cert}
                 )
+
+        _live_originals_here = _live_originals_for(filer_all, _live_originals_evidence)
+        _live_originals_by_year: dict[str, list[str]] = defaultdict(list)
+        for _lo in _live_originals_here:
+            if _lo.get("year") is not None:
+                _live_originals_by_year[str(_lo["year"])].append(_lo["original_id"])
+        if _live_originals_here:
+            _live_original_committees += 1
+            _live_original_rows += len(_live_originals_here)
 
         yearly_nets = _yearly_net(_c_for_coh, _e_for_coh, _or_for_coh, _od_for_coh, _ba_for_coh)
 
@@ -3582,6 +3705,13 @@ def aggregate_filers(
                             round(_ghost_by_year[yr_s], 2)
                             if yr_s in _ghost_by_year else None
                         ),
+                        # Amended originals ORESTAR still counts in this year,
+                        # by transaction ID, so the row can name them.
+                        "live_originals": (
+                            sorted(_live_originals_by_year[yr_s],
+                                   key=lambda v: (len(v), v))
+                            if yr_s in _live_originals_by_year else None
+                        ),
                         "our_begin": our_begin,
                         "our_contributions": our_c,
                         "our_expenditures": our_e,
@@ -4158,6 +4288,11 @@ def aggregate_filers(
             "certificate_restatement_total": round(
                 sum(float(_spec["amount"]) for _spec in _ghost_specs), 2
             ),
+            # Originals ORESTAR never expired after they were amended, and so
+            # still counts alongside the amendment. Kept in the balance to
+            # match ORESTAR; each entry names the original and every amendment
+            # pointing at it, so a reader can look both up on ORESTAR.
+            "orestar_live_originals": _live_originals_here,
             # Annual non-exempt loan totals used for the cash lane when a
             # trustworthy ORESTAR statement differs from the eligible held
             # transaction total. Raw loan rows remain visible in the timeline;
@@ -4298,6 +4433,11 @@ def aggregate_filers(
         "(|$%s| moved); %d filers skipped as claimed by more than one committee",
         _ghost_row_count, _ghost_committees, f"{_ghost_amount:,.2f}",
         len(_ghost_skipped_ambiguous),
+    )
+    log.info(
+        "Live amended originals: %d kept across %d committees (ORESTAR still "
+        "counts them); %d IDs in coverage evidence",
+        _live_original_rows, _live_original_committees, len(_live_originals_evidence),
     )
     _disc_rows = []
     _unpaired_rows = []
@@ -4822,7 +4962,7 @@ if __name__ == "__main__":
             if "filed_date" in df.columns:
                 _fd = pd.to_datetime(df["filed_date"], format="mixed", dayfirst=False, errors="coerce")
                 df["filed_date"] = _fd.dt.strftime("%Y-%m-%d").fillna(df["filed_date"])
-                df, _superseded = _drop_superseded(df)
+                df, _superseded = _drop_superseded(df, keep_live=_live_original_ids())
                 _save_transactions(df)
             else:
                 log.warning("No filed_date column — cannot split by year")

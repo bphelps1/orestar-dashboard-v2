@@ -554,7 +554,35 @@ def exact_coverage_result_shape_is_valid(row: Any) -> bool:
         return False
     if not _amount_drift_shape_is_valid(row, held, set().union(*sets)):
         return False
+    if not _live_originals_shape_is_valid(row, *sets):
+        return False
     return row["complete"] == (not missing and not surplus)
+
+
+def _live_originals_shape_is_valid(
+    row: dict, missing: set, surplus: set, superseded: set,
+) -> bool:
+    """Optional list of amended originals ORESTAR still returns as live.
+
+    Every ``superseded`` ID is one of them by definition (ORESTAR returns it
+    and an amendment we hold names it), so the list must contain all of those.
+    A live original is on ORESTAR and named by an amendment, so it can be
+    neither a surplus row nor a missing one.
+    """
+    if "live_originals" not in row:
+        return True
+    values = row.get("live_originals")
+    if not isinstance(values, list) or any(
+        not exact_evidence_identifier_is_valid(value) for value in values
+    ):
+        return False
+    live = set(values)
+    return (
+        len(live) == len(values)
+        and superseded <= live
+        and not live & missing
+        and not live & surplus
+    )
 
 
 def _amount_drift_shape_is_valid(row: dict, held: int, identity_ids: set) -> bool:

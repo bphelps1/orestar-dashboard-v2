@@ -231,12 +231,13 @@ def _row_requests_exact_resolution(row):
     if not isinstance(row, dict):
         return False
     if (row.get("complete") is None or bool(row.get("missing"))
-            or bool(row.get("amount_changed"))):
+            or bool(row.get("amount_changed")) or bool(row.get("superseded"))):
         return True
     history = row.get(USABLE_HISTORY_KEY) or []
     return isinstance(history, list) and any(
         isinstance(item, dict)
-        and (bool(item.get("missing")) or bool(item.get("amount_changed")))
+        and (bool(item.get("missing")) or bool(item.get("amount_changed"))
+             or bool(item.get("superseded")))
         for item in history
     )
 
@@ -296,11 +297,15 @@ for r in automation_rows.values():
     # Rows ORESTAR edited in place (same Tran ID, new amount) are repaired by
     # the same forced re-download: the merge keeps the newest copy of an ID.
     changed = len(r.get("amount_changed") or [])
+    # "Superseded" rows are originals ORESTAR still returns although an
+    # amendment we hold points at them. ORESTAR counts them, and the merge now
+    # keeps them (process._drop_superseded), so a re-download restores them.
+    restore = len(r.get("superseded") or [])
     exact_range_ends[fid] = str(r["range_end"])
-    if missing + changed <= 0:
+    if missing + changed + restore <= 0:
         continue
-    work_counts[fid] = (missing, changed)
-    work = missing + changed
+    work_counts[fid] = (missing, changed, restore)
+    work = missing + changed + restore
     # A partially completed forced tree is resumable even after the ordinary
     # retry limit. Its validated leaves must not be thrown away merely because
     # one runner made no progress.
@@ -342,8 +347,9 @@ if batch:
     print(f"Selecting {len(batch)} filer(s) by exact missing or changed rows:")
     for score, fid, name in batch:
         retry = " (RETRY)" if fid in incomplete else ""
-        missing, changed = work_counts.get(fid, (score, 0))
-        shown = f"{missing:,} exact IDs missing, {changed:,} amounts changed"
+        missing, changed, restore = work_counts.get(fid, (score, 0, 0))
+        shown = (f"{missing:,} exact IDs missing, {changed:,} amounts changed, "
+                 f"{restore:,} live originals to restore")
         print(f"  {fid}: {shown} — {name}{retry}")
     OUTPUT_FILE.write_text(" ".join(fid for _, fid, _ in batch))
     STATUS_FILE.write_text("selected\n")

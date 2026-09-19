@@ -248,7 +248,7 @@ def test_selector_repairs_a_committee_whose_only_problem_is_drift(tmp_path) -> N
     assert mode == "identity"
     assert status == "selected"
     assert end == "2026-09-02"
-    assert "0 exact IDs missing, 1 amounts changed" in output
+    assert "0 exact IDs missing, 1 amounts changed, 0 live originals to restore" in output
 
 
 def test_selector_leaves_a_clean_priced_committee_alone(tmp_path) -> None:
