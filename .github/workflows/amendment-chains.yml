@@ -15,7 +15,8 @@ on:
       targets:
         description: >
           Space-separated FILER:YEAR:TYPES, e.g. "3215:2006:C,E 2281:2007:E".
-          TYPES are C (contributions) and/or E (expenditures).
+          TYPES are C (contributions), E (expenditures), OR (other receipts)
+          and/or OD (other disbursements).
         required: true
         type: string
 

@@ -17,7 +17,7 @@ Every page is a real navigation, so the browser can answer ORESTAR's F5
 challenge, and success is judged by the results or history table rendering.
 
 Usage:
-    xvfb-run python scraper/fetch_amendment_chains.py --targets 3215:2006:C,E 2281:2007:E
+    xvfb-run python scraper/fetch_amendment_chains.py --targets 3215:2006:C,E 21452:2021:OD
 """
 
 from __future__ import annotations
@@ -54,7 +54,9 @@ BASE_URL = "https://secure.sos.state.or.us/orestar"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 OUTPUT_PATH = DATA_DIR / CHAINS_FILENAME
 
-TYPE_NAMES = {"C": "Contribution", "E": "Expenditure"}
+# ORESTAR's search codes and labels for each summary line checked.
+TYPE_NAMES = {"C": "Contribution", "E": "Expenditure",
+              "OR": "Other Receipt", "OD": "Other Disbursement"}
 PAGE_ROWS = 50
 # ORESTAR's results UI stops at 100 pages. A committee-year that large is not
 # what this tool is for; refuse it rather than collect part of it.

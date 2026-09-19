@@ -47,6 +47,26 @@ RAW_DIR = Path(__file__).parent.parent / "data" / "_raw"
 # don't share state (different searches, different result sets).
 FETCHED_LOG     = RAW_DIR.parent / "fetched_windows.json"       # filed-date mode
 FETCHED_LOG_TRN = RAW_DIR.parent / "fetched_windows_tran.json"  # tran-date mode
+# Progress of the history-wide re-read of lumped "Miscellaneous" rows. Kept
+# apart from the fetch logs above: those record windows as done for good, and
+# a re-read exists precisely to revisit windows that are already done.
+FETCHED_LOG_MISC = RAW_DIR.parent / "fetched_windows_misc.json"
+
+# ORESTAR edits lumped "Miscellaneous ... $100 and under" rows in place: the
+# Tran ID, status and filed date stay the same while the amount changes (Eli
+# for Portland 5675002: $340 -> $830). A window is never fetched twice, so
+# those edits were invisible. Re-reading just these rows by filed date, with
+# ORESTAR's "Contributor/Payee starts with" filter, brings the current
+# amounts in; the merge keeps the newest copy of each Tran ID.
+MISC_PREFIX = "Miscellaneous"
+# The types lumped rows occur in; OA has none.
+MISC_TYPES = ["C", "E", "O", "OD", "OR"]
+# Rolling re-read: rows filed in the last eight weeks, in four-week windows,
+# about ten searches a day.
+MISC_RECENT_DAYS = 56
+MISC_RECENT_WINDOW_DAYS = 28
+# History-wide re-read: quarter-year windows, split further if one overruns.
+MISC_REREAD_WINDOW_DAYS = 91
 
 # Identity remediation deliberately ignores the ordinary count/held-row skips:
 # a withdrawn row can cancel a genuinely missing row inside the same window.
@@ -680,12 +700,12 @@ def _record_truncated(tran_type: str, day: date, rows: int) -> None:
         path.write_text(json.dumps(existing, indent=1))
 
 
-def week_windows(start: date, end: date):
-    """Yield (week_start, week_end) 7-day chunks covering [start, end]."""
+def week_windows(start: date, end: date, days: int = 7):
+    """Yield (window_start, window_end) chunks of ``days`` covering [start, end]."""
     cur = start
     while cur <= end:
-        yield cur, min(cur + timedelta(days=6), end)
-        cur += timedelta(days=7)
+        yield cur, min(cur + timedelta(days=days - 1), end)
+        cur += timedelta(days=days)
 
 
 def _load_fetched(log_file: Path = FETCHED_LOG) -> set:
@@ -699,17 +719,48 @@ def _load_fetched(log_file: Path = FETCHED_LOG) -> set:
     return set()
 
 
-def _save_fetched(fetched: set, log_file: Path = FETCHED_LOG) -> None:
-    """Persist the fetched-windows set to disk immediately."""
+def _save_fetched(fetched: set, log_file: Path | None = FETCHED_LOG) -> None:
+    """Persist the fetched-windows set to disk immediately (no-op without a log)."""
+    if log_file is None:
+        return
     log_file.parent.mkdir(parents=True, exist_ok=True)
     with open(log_file, "w") as f:
         json.dump(sorted([list(x) for x in fetched]), f, indent=2)
 
 
-def _fetch_range(start: date, end: date, date_field: str = "filed") -> None:
+_DEFAULT_LOG = object()
+
+
+def _range_tasks(start: date, end: date, types, window_days: int = 7,
+                 payee_prefix: str | None = None) -> list[tuple]:
+    """Every (type, window) task for a range. The fetcher and every
+    remaining-count must build tasks here, or a chain can never finish."""
+    return [(t, ws, we, None, None, payee_prefix)
+            for ws, we in week_windows(start, end, window_days) for t in types]
+
+
+def _fetch_range(
+    start: date,
+    end: date,
+    date_field: str = "filed",
+    *,
+    payee_prefix: str | None = None,
+    types: list[str] | None = None,
+    window_days: int = 7,
+    log_file=_DEFAULT_LOG,
+) -> None:
+    """Fetch every window of [start, end], one request per transaction type.
+
+    ``payee_prefix`` restricts every request to contributors/payees starting
+    with it (the lumped-row re-read). ``log_file=None`` re-fetches every
+    window and records nothing, for the rolling re-read; the default is the
+    permanent fetch log for ``date_field``.
+    """
     SearchBudget.from_environment()  # Refuse malformed configuration before setup.
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    windows = list(week_windows(start, end))
+    types = list(types or TRAN_TYPES)
+    windows = list(week_windows(start, end, window_days))
+    tasks = _range_tasks(start, end, types, window_days, payee_prefix)
     # One request PER TRANSACTION TYPE, not one request for all of them.
     #
     # An all-types request bundles every category into a single export, and a
@@ -724,19 +775,20 @@ def _fetch_range(start: date, end: date, date_field: str = "filed") -> None:
     # per-type result is the one that provably matches ORESTAR. This is also
     # what the original tran-date backfill did, which is why the fetch log's
     # older entries are per-type.
-    tasks   = [(t, ws, we, None, None, None) for ws, we in windows for t in TRAN_TYPES]
     total   = len(tasks)
     log.info(
-        "Fetching %d windows (%d weeks x %d types, date_field=%s)",
-        total, len(windows), len(TRAN_TYPES), date_field,
+        "Fetching %d windows (%d windows of %d days x %d types, date_field=%s%s)",
+        total, len(windows), window_days, len(types), date_field,
+        f", payee~{payee_prefix}*" if payee_prefix else "",
     )
 
     # Windows recorded here are skipped on every run — they have already been
     # fetched, processed, and committed to git in a previous run.  This is the
     # key mechanism that lets us make progress across runs despite F5 rate-limiting
     # each runner IP after ~25 requests.
-    log_file = FETCHED_LOG_TRN if date_field == "tran" else FETCHED_LOG
-    fetched = _load_fetched(log_file)
+    if log_file is _DEFAULT_LOG:
+        log_file = FETCHED_LOG_TRN if date_field == "tran" else FETCHED_LOG
+    fetched = _load_fetched(log_file) if log_file is not None else set()
     skipped = sum(1 for t in tasks if _task_key(t) in fetched)
     if skipped:
         log.info("Skipping %d already-fetched windows (recorded in %s)", skipped, log_file.name)
@@ -1797,6 +1849,35 @@ def backfill_filers(
               f"completed={len(completed_filers)} incomplete={len(incomplete_filers)}")
 
 
+def run_misc_recent(days: int = MISC_RECENT_DAYS) -> None:
+    """Re-read lumped rows filed recently, every time (no progress log)."""
+    today = date.today()
+    start = today - timedelta(days=days)
+    log.info("Lumped-row re-read (recent): %s → %s", start, today)
+    _fetch_range(start, today, "filed", payee_prefix=MISC_PREFIX, types=MISC_TYPES,
+                 window_days=MISC_RECENT_WINDOW_DAYS, log_file=None)
+
+
+def run_misc_reread(start_year: int = 2006, end_year: int | None = None) -> None:
+    """History-wide re-read of lumped rows, resumable across chained runs."""
+    start = date(start_year, 1, 1)
+    end = min(date(end_year, 12, 31) if end_year else date.today(), date.today())
+    log.info("Lumped-row re-read (history): %s → %s", start, end)
+    _fetch_range(start, end, "filed", payee_prefix=MISC_PREFIX, types=MISC_TYPES,
+                 window_days=MISC_REREAD_WINDOW_DAYS, log_file=FETCHED_LOG_MISC)
+
+
+def count_misc_remaining(start_year: int = 2006, end_year: int | None = None) -> int:
+    """Windows of the history-wide re-read not yet done; mirrors run_misc_reread."""
+    start = date(start_year, 1, 1)
+    end = min(date(end_year, 12, 31) if end_year else date.today(), date.today())
+    fetched = _load_fetched(FETCHED_LOG_MISC)
+    tasks = _range_tasks(start, end, MISC_TYPES, MISC_REREAD_WINDOW_DAYS, MISC_PREFIX)
+    remaining = sum(1 for task in tasks if _task_key(task) not in fetched)
+    print(remaining)
+    return remaining
+
+
 def run_incremental(days: int = 14) -> None:
     today = date.today()
     start = today - timedelta(days=days)
@@ -1907,7 +1988,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["incremental", "backfill", "test", "count-remaining", "check-gaps"],
+        choices=["incremental", "backfill", "test", "count-remaining", "check-gaps",
+                 "misc-recent", "misc-reread", "count-misc-remaining"],
         default="incremental",
     )
     parser.add_argument("--days",        type=int,  default=14,   dest="days")
@@ -1989,6 +2071,12 @@ def main() -> None:
                         date_field=args.date_field)
     elif args.mode == "check-gaps":
         check_split_gaps(date_field=args.date_field)
+    elif args.mode == "misc-recent":
+        run_misc_recent(days=args.days if args.days != 14 else MISC_RECENT_DAYS)
+    elif args.mode == "misc-reread":
+        run_misc_reread(start_year=args.start_year or 2006, end_year=args.end_year)
+    elif args.mode == "count-misc-remaining":
+        count_misc_remaining(start_year=args.start_year or 2006, end_year=args.end_year)
 
 
 if __name__ == "__main__":

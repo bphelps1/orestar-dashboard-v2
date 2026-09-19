@@ -54,6 +54,8 @@ PUBLICATION_LOCK_ID = int.from_bytes(b"PIPELINE", "big", signed=True)
 PROFILE_FILES = {
     "transactions": (
         "data/fetched_windows.json",
+        # Progress of the history-wide lumped-row re-read (fetch.py misc-reread).
+        "data/fetched_windows_misc.json",
         "data/fetched_windows_tran.json",
         "data/record_counts.json",
         "data/truncated_windows.json",
@@ -72,6 +74,8 @@ PROFILE_FILES = {
         "data/orestar_yearly_summaries.json",
     ),
     "auxiliary": (
+        # Rows each merge re-priced (lumped rows ORESTAR edited in place).
+        "data/amount_updates.json",
         "data/backfilled_filers.txt",
         "data/candidate_filings.json",
         "data/coverage_diff.json",
