@@ -47,7 +47,8 @@ def test_public_bodies_and_bare_places_never_match():
     for name in ("City of Eugene", "Clackamas County", "Port of Morrow", "Business Oregon",
                  "Salem-Keizer School District 24J", "Redmond", "Sisters"):
         assert is_public_client(name), name
-    for name in ("Oregon Business & Industry", "Oregon Association of Nurseries", "Kroger"):
+    for name in ("Oregon Business & Industry", "Oregon Association of Nurseries", "Kroger",
+                 "Tillamook County Creamery Association"):
         assert not is_public_client(name), name
 
 
@@ -153,7 +154,8 @@ CLIENTS = [
     "Kroger", "DaVita HealthCare Partners", "Everytown", "Hospital Association of Oregon",
     "Associated Oregon Hazelnut Industries", "Oregon Mortgage Bankers Association", "Toyota",
     "Oregon Humane Society", "Albertsons/Safeway", "AAA Oregon/Idaho", "Apple", "Redmond",
-    "Oregon Association of Nurseries",
+    "Oregon Association of Nurseries", "Regence BlueCross BlueShield of OR (Regence)",
+    "Williams & Russell CDC",
 ]
 
 
@@ -162,7 +164,8 @@ def _pool(*names, prefix="d"):
 
 
 _COMMON = ["safety", "gun", "health", "healthcare", "care", "partners", "services", "group", "fund",
-           "action", "auto", "body", "city", "power", "insurance", "society", "education", "industries"]
+           "action", "auto", "body", "city", "power", "insurance", "society", "education", "industries",
+           "williams"]
 _FILLER = _pool(*[f"Oregon Association of {_COMMON[i % len(_COMMON)]} Widgets {i}" for i in range(6000)],
                 prefix="f")
 
@@ -185,6 +188,8 @@ def _matches(*donors):
     ("Oregon Hospital Political Action Committee", "Hospital Association of Oregon"),
     ("Safeway", "Albertsons/Safeway"),
     ("Oregon Nurseries Political Action Committee", "Oregon Association of Nurseries"),
+    ("Regence", "Regence BlueCross BlueShield of OR (Regence)"),
+    ("Regence Blue Cross Blue Shield", "Regence BlueCross BlueShield of OR (Regence)"),
 ])
 def test_finds_real_matches(donor, client):
     assert (donor, client) in _matches(donor)
@@ -198,6 +203,7 @@ def test_finds_real_matches(donor, client):
     "Idaho Power Company",                       # AAA's service area, not a company
     "Apple City Auto Body",
     "Redmond Education Association",             # "Redmond" is the city
+    "The Williams Companies",                    # not Williams & Russell CDC
 ])
 def test_rejects_known_false_positives(donor):
     assert not _matches(donor), _matches(donor)

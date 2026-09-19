@@ -73,6 +73,7 @@ def core_org(name: str) -> str:
     s = s.replace("&", " and ")
     s = re.sub(r"\bd/?b/?a\b.*$", " ", s)            # "Activehours Inc. dba Earnin" → before dba
     s = re.sub(r"[^a-z0-9' ]+", " ", s)
+    s = re.sub(r"\bblue (cross|shield)\b", r"blue\1", s)     # "Blue Cross" = "BlueCross"
     words = [_ABBR.get(w, w) for w in s.split()]
     s = " ".join(words)
     s = re.sub(_PAC_WORDS, " ", s)
@@ -88,7 +89,9 @@ def core_org(name: str) -> str:
 # agency Business Oregon.
 _PUBLIC_CLIENT = re.compile(
     r"^(city|town|port|county|state|university|office|department|dept) of\b|"
-    r"\b(county|counties|school district|community college|"
+    # "Clackamas County" is the county; "Tillamook County Creamery" is not.
+    r"\b(county|counties)\s*$|"
+    r"\b(school district|community college|"
     r"transit|water district|water services|sanitary|fire district|fire and rescue|"
     r"library|department|commission|board of|authority|council of governments|"
     r"service district|parks and recreation|school board|education service district|"

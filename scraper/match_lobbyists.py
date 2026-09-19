@@ -149,24 +149,29 @@ def fuzzy_score(idx: OrgIndex, donor: str, client: str) -> float:
     c_client, c_donor, shared = idx.overlap(donor, client)
     if shared < FUZZY_MIN_IDF and not (c_client == 1.0 and c_donor == 1.0):
         return 0.0
-    # The client's most distinctive word must be shared: "Associated Oregon
-    # Industries" is not "Associated Oregon Hazelnut Industries".
-    if max(client.split(), key=idx.idf) not in donor.split():
-        return 0.0
     # A place the client lacks makes the donor a local outfit or affiliate.
     if place_tokens(donor) - place_tokens(client):
         return 0.0
-    f = 2 * c_client * c_donor / (c_client + c_donor) if c_client + c_donor else 0.0
     anchored = donor.split()[0] == client.split()[0]
+    toks = donor.split()
+    top_client_idf = max(idx.idf(t) for t in client.split())
+    # A one-word brand that leads the client's name and is its most
+    # distinctive word: "Davita" ↔ "DaVita HealthCare Partners", "Regence" ↔
+    # "Regence BlueCross BlueShield" — but not "Williams" ↔ "Williams &
+    # Russell CDC", whose rarer words say it is someone else.
+    if (anchored and len(toks) == 1 and idx.idf(toks[0]) >= BRAND_MIN_IDF
+            and idx.idf(toks[0]) >= top_client_idf - 0.5):
+        return round(0.5 + 0.3 * c_client, 3)
+    # Otherwise the client's most distinctive word must be shared:
+    # "Associated Oregon Industries" is not "Associated Oregon Hazelnut
+    # Industries".
+    if max(client.split(), key=idx.idf) not in toks:
+        return 0.0
+    f = 2 * c_client * c_donor / (c_client + c_donor) if c_client + c_donor else 0.0
     if f >= FUZZY_MIN_F:
         return round(0.5 + 0.4 * f, 3)
     if anchored and c_client >= 0.99 and c_donor >= FUZZY_ANCHORED:
         return round(0.5 + 0.3 * c_donor, 3)
-    # A one-word brand that leads the client's name: "Davita" ↔ "DaVita
-    # HealthCare Partners", "Charter" ↔ "Charter Communications".
-    toks = donor.split()
-    if anchored and len(toks) == 1 and c_donor >= 0.99 and idx.idf(toks[0]) >= BRAND_MIN_IDF:
-        return round(0.5 + 0.3 * c_client, 3)
     return 0.0
 
 
@@ -414,7 +419,7 @@ def write_links(cur, table: str, key_fields: tuple, rows: dict[tuple, dict],
               status = excluded.status, decided_by = excluded.decided_by,
               decided_at = case when excluded.status = 'suggested' then null else now() end,
               updated_at = now()
-          where {table}.status = 'suggested'
+          where ({table}.status = 'suggested' and {table}.method not in ('manual', 'reviewed'))
              or ({table}.decided_by = '{TRACKER_DECIDER}' and excluded.decided_by = '{TRACKER_DECIDER}')
     """, values, page_size=500)
     cur.execute(f"""update {table} set decided_at = now()
@@ -497,11 +502,14 @@ def main():
 
     # Suggestions the evidence no longer supports go away; decisions stay.
     from psycopg2.extras import execute_values
+    # Pairs a person proposed (method manual/reviewed) are not the matcher's
+    # to withdraw.
+    mine = "status = 'suggested' and method not in ('manual', 'reviewed')"
     stale_c = [(k["donor_id"], k["client_key"]) for k in
-               _rows(cur, "select donor_id, client_key from donor_client_links where status='suggested'")
+               _rows(cur, f"select donor_id, client_key from donor_client_links where {mine}")
                if (k["donor_id"], k["client_key"]) not in client_links]
     stale_l = [(k["donor_id"], k["lobbyist_id"]) for k in
-               _rows(cur, "select donor_id, lobbyist_id from donor_lobbyist_links where status='suggested'")
+               _rows(cur, f"select donor_id, lobbyist_id from donor_lobbyist_links where {mine}")
                if (k["donor_id"], k["lobbyist_id"]) not in lob_links and
                (k["donor_id"], k["lobbyist_id"]) not in tracker_links]
     if stale_c:
@@ -612,35 +620,35 @@ def seed_tracker_people(cur, rows, prefer_emails: set[str]) -> None:
 
 def tracker_suggestions(rows, pool, lobbyists, prefer_emails: set[str] = frozenset()):
     by_cid = {d["committee_id"]: d for d in pool if d["committee_id"]}
-    by_label = {}
-    for d in pool:
-        for n in [d["display_name"], *(d["names"] or [])]:
-            by_label.setdefault(n.lower(), d)
+    # One name can belong to several donor records (the resolver splits an
+    # organization by address), and the tracker means all of them.
+    by_label = defaultdict(list)
     by_core = defaultdict(list)
     for d in pool:
+        for n in {d["display_name"].lower(), *(d["names"] or [])}:
+            by_label[re.sub(r"\s+", " ", n).strip()].append(d)
         by_core[core_org(d["display_name"])].append(d)
     out, unresolved = {}, []
     for contributor, cid, *labels in rows:
         m = re.search(r"\((\d+)\)\s*$", contributor)
         cid = cid if cid.isdigit() else (m.group(1) if m else "")
-        donor = by_cid.get(cid) if cid else None
-        donor = donor or by_label.get(re.sub(r"\s+", " ", contributor).lower())
-        if not donor:
-            cands = by_core.get(core_org(contributor), [])
-            donor = max(cands, key=lambda d: d["total_since_2021"]) if cands else None
-        if not donor:
+        donors = [by_cid[cid]] if cid in by_cid else []
+        donors = donors or by_label.get(re.sub(r"\s+", " ", contributor).strip().lower(), [])
+        donors = donors or by_core.get(core_org(contributor), [])
+        if not donors:
             unresolved.append(f"donor {contributor!r}")
             continue
         for i, label in enumerate(labels):
             _, found = resolve_label(label, lobbyists, prefer_emails)
             if not found:
                 unresolved.append(f"lobbyist {label!r} (for {contributor})")
-            for lob in found:
-                out[(donor["donor_id"], lob["lobbyist_id"])] = {
-                    "donor_id": donor["donor_id"], "lobbyist_id": lob["lobbyist_id"], "method": "tracker",
-                    "score": 0.97, "is_primary": i == 0,
-                    "evidence": [{"type": "tracker", "contributor": contributor,
-                                  "label": label, "position": i + 1}]}
+            for donor in {d["donor_id"]: d for d in donors}.values():
+                for lob in found:
+                    out[(donor["donor_id"], lob["lobbyist_id"])] = {
+                        "donor_id": donor["donor_id"], "lobbyist_id": lob["lobbyist_id"],
+                        "method": "tracker", "score": 0.97, "is_primary": i == 0,
+                        "evidence": [{"type": "tracker", "contributor": contributor,
+                                      "label": label, "position": i + 1}]}
     return out, unresolved
 
 
