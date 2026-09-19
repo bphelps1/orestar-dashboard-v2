@@ -143,6 +143,23 @@ A donor is listed under one lobbyist. Order of preference:
 Anyone else attached to the donor appears as "also: …". Unreviewed matches are
 marked **?** and can be hidden with *Include unreviewed matches*.
 
+Contact details are each lobbyist's **email and primary phone**. A donor filed
+under a **firm** (Thorn Run, Oxley & Associates) shows the firm's primary
+contact first and its other members in a collapsed list; the export puts the
+primary in *Contact / Email / Phone* and the rest in *Other Firm Contacts*.
+
+Who leads is seeded from the fundraising sheets and editable at
+`/admin/lobbyists`:
+
+- **Firm primary** — the person the 2024 lobby list names for the firm (Gary
+  Oxley), provided Capitol Club still lists them there; otherwise the person
+  the Fundraising Tracker names. Members are the people Capitol Club places at
+  the firm (affiliation or email domain), so someone who has moved firms since
+  2024 is dropped rather than listed.
+- **Client lead** — for a client several lobbyists list, the one the 2024 list
+  names (then its "Additional Lobbyists", in order). Donors reached through
+  that client are filed under the lead.
+
 ### Where attributions come from
 
 ORESTAR never records who lobbies for a donor, so the link is assembled from

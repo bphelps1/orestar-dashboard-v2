@@ -27,6 +27,9 @@ GENERIC_EMAIL_DOMAINS = {
     "mail.com", "pacifier.com", "embarqmail.com", "yahoo.co", "googlemail.com",
 }
 
+# Oregon public bodies on bare .us domains.
+PUBLIC_US_DOMAINS = {"clackamas.us", "multco.us", "lanecounty.us", "co.lane.or.us"}
+
 # Treasurer / compliance firms that serve many unrelated committees. Matching on
 # their domain would tie every client committee to each other.
 SERVICE_DOMAIN_HINTS = ("c-esystems.com", "politicalcompliance", "campaigncompliance",
@@ -178,7 +181,11 @@ def is_private_domain(domain: str) -> bool:
         return False
     # Government and school addresses are shared by thousands of unrelated
     # people; the Capitol Club scraper excluded them for the same reason.
-    return not domain.endswith((".gov", ".us", ".edu", ".mil"))
+    # ".us" alone is not government (summitstrategies.us, johnpowell.us);
+    # state, county and school forms of it are.
+    if domain.endswith((".gov", ".edu", ".mil")) or domain in PUBLIC_US_DOMAINS:
+        return False
+    return not re.search(r"\.(k12|state|co|ci|[a-z]{2})\.[a-z]{2}\.us$|\.[a-z]{2}\.us$", domain)
 
 
 def norm_person(name: str) -> str:
@@ -233,10 +240,16 @@ def person_label(label: str) -> tuple[str, list[str]]:
         lasts = norm_person(last).replace("-", " ").split()
         return (firsts[0] if firsts else ""), lasts
     toks = norm_person(raw).replace("-", " ").split()
-    if len(toks) == 1:
+    if len(toks) <= 1:
         return "", toks
     return toks[0], toks[-1:]
 
 
 def person_tokens(name: str) -> list[str]:
     return norm_person(name).replace("-", " ").split()
+
+
+def nicknames(name: str) -> set[str]:
+    """What a name says to call them: "James L. (J.L.) Wilson" → {"jl"},
+    "Michael C. (Mike) Freese" → {"mike"}."""
+    return {re.sub(r"[^a-z]", "", n.lower()) for n in re.findall(r"\(([^)]*)\)", _ascii(name))} - {""}

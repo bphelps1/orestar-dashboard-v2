@@ -338,8 +338,8 @@ function renderLobbyists() {
     return `<tr class="lob-row${S.openLobbyist === l.lobbyist_id ? " open" : ""}" data-lobbyist="${l.lobbyist_id}">
       <td><a href="#" data-open-lobbyist="${l.lobbyist_id}" class="lob-name">${esc(l.name)}</a>
         ${l.kind === "firm" ? '<span class="badge badge-blue">firm</span>' : ""}
-        <div class="lob-meta">${esc(l.affiliation || l.firm || "")}</div></td>
-      <td class="lob-meta">${esc([l.email, l.phone].filter(Boolean).join(" · "))}</td>
+        <div class="lob-meta">${esc(l.kind === "firm" ? "" : (l.affiliation || l.firm || ""))}</div></td>
+      <td class="lob-meta">${esc(contactSummary(l))}</td>
       <td class="num">${clients}</td>
       <td class="num">${donors}</td>
       <td class="lob-meta">${esc(source)}${l.on_capitol_club ? "" : ' · <span class="badge badge-gray">not on CC</span>'}</td>
@@ -348,6 +348,53 @@ function renderLobbyists() {
   document.getElementById("lob-more").innerHTML = rows.length > S.lobShown
     ? `<button class="btn-small" id="lob-more-btn">Show more (${rows.length - S.lobShown} left)</button>` : "";
   wireDonorPickers(tbody);
+}
+
+/** A firm's contacts in order: the primary, then the other members. */
+function firmMembers(f) {
+  const ids = [...new Set([f.firm_primary_id, ...(f.firm_member_ids || [])].filter(Boolean))];
+  return ids.map(id => S.lobbyists.get(id)).filter(Boolean);
+}
+
+function contactSummary(l) {
+  if (l.kind === "firm" && !(l.email || l.phone)) {
+    const p = S.lobbyists.get(l.firm_primary_id);
+    return p ? `via ${p.name} · ${[p.email, p.phone].filter(Boolean).join(" · ")}` : "";
+  }
+  return [l.email, l.phone].filter(Boolean).join(" · ");
+}
+
+function firmMembersBlock(f) {
+  const members = firmMembers(f);
+  const w = S.canWrite;
+  return `<div class="lob-firm-members">
+    <h4>Firm contacts</h4>
+    <p class="lob-meta">The primary's email and phone lead this firm's rows in a plan and its export; the
+      others are listed after. Seeded from the fundraising sheets, keeping only people Capitol Club still
+      lists at the firm.</p>
+    <ul class="lob-client-list">${members.map(m => `
+      <li>
+        ${m.lobbyist_id === f.firm_primary_id ? '<span class="badge badge-green">primary</span>' : ""}
+        <a href="#" data-open-lobbyist="${m.lobbyist_id}">${esc(m.name)}</a>
+        <span class="lob-meta">${esc([m.email, m.phone].filter(Boolean).join(" · "))}</span>
+        ${w && m.lobbyist_id !== f.firm_primary_id
+          ? `<button class="link-btn" data-firm-primary="${m.lobbyist_id}" data-firm="${f.lobbyist_id}">make primary</button>` : ""}
+        ${w ? `<button class="link-btn" data-firm-remove="${m.lobbyist_id}" data-firm="${f.lobbyist_id}">remove</button>` : ""}
+      </li>`).join("") || '<li class="lob-meta">No contacts yet.</li>'}
+    </ul>
+    <form class="lob-inline" data-add-member="${f.lobbyist_id}">
+      <input name="member" list="person-options" placeholder="Add a lobbyist to this firm…" ${w ? "" : "disabled"} />
+      <button class="btn-small" ${w ? "" : "disabled"}>Add</button>
+    </form>
+  </div>`;
+}
+
+function memberOfLine(l) {
+  const firms = [...S.lobbyists.values()].filter(f => f.kind === "firm"
+    && (f.firm_primary_id === l.lobbyist_id || (f.firm_member_ids || []).includes(l.lobbyist_id)));
+  if (!firms.length) return "";
+  return `<p class="lob-meta lob-member-of">Contact for ${firms.map(f =>
+    `<a href="#" data-open-lobbyist="${f.lobbyist_id}">${esc(f.name)}</a>${f.firm_primary_id === l.lobbyist_id ? " (primary)" : ""}`).join(", ")}</p>`;
 }
 
 function lobbyistDetail(l) {
@@ -372,6 +419,8 @@ function lobbyistDetail(l) {
       <div class="cluster-actions"><button type="submit" class="btn-small" ${dis}>Save details</button></div>
     </form>
 
+    ${l.kind === "firm" ? firmMembersBlock(l) : memberOfLine(l)}
+
     <div class="lob-cols">
       <div>
         <h4>Clients (${clients.filter(c => c.active).length} current)</h4>
@@ -380,6 +429,9 @@ function lobbyistDetail(l) {
             ${esc(c.client_name)}
             <span class="badge ${c.source === "capitol_club" ? "badge-blue" : "badge-gray"}">${esc({ capitol_club: "Capitol Club", sheet_2024: "2024 list", manual: "manual" }[c.source] || c.source)}</span>
             ${c.active ? "" : '<span class="lob-meta">not current</span>'}
+            ${c.is_lead ? '<span class="badge badge-green" title="Donors reached through this client are filed under this lobbyist">lead</span>' : ""}
+            ${c.active && S.canWrite && (S.lobbyistsByClient.get(c.client_key)?.size || 0) > 1
+              ? `<button class="link-btn" data-lead-client="${esc(c.client_key)}" data-lobbyist="${l.lobbyist_id}" data-on="${c.is_lead ? "0" : "1"}">${c.is_lead ? "unset lead" : "make lead"}</button>` : ""}
             ${c.source !== "capitol_club" && S.canWrite ? `<button class="link-btn" data-toggle-client="${esc(c.client_key)}" data-source="${esc(c.source)}" data-lobbyist="${l.lobbyist_id}">${c.active ? "mark not current" : "mark current"}</button>` : ""}
           </li>`).join("") || '<li class="lob-meta">None listed.</li>'}
         </ul>
@@ -485,6 +537,14 @@ function refreshDatalists() {
   const clients = [...S.clientNames.values()].sort((a, b) => a.localeCompare(b));
   document.getElementById("client-options").innerHTML =
     clients.map(c => `<option value="${esc(c)}"></option>`).join("");
+  let people = document.getElementById("person-options");
+  if (!people) {
+    people = document.createElement("datalist");
+    people.id = "person-options";
+    document.body.appendChild(people);
+  }
+  people.innerHTML = lobs.filter(l => l.kind === "person")
+    .map(l => `<option value="${esc(lobbyistOptionLabel(l))}"></option>`).join("");
   let assign = document.getElementById("assign-options");
   if (!assign) {
     assign = document.createElement("datalist");
@@ -572,6 +632,37 @@ async function setClientActive(lobbyistId, clientKey, source, active) {
   const all = [...S.clientsByLobbyist.values()].flat();
   const c = all.find(x => x.lobbyist_id === lobbyistId && x.client_key === clientKey && x.source === source);
   if (c) c.active = active;
+  indexClients(all);
+}
+
+async function saveFirmMembers(firmId, primaryId, memberIds) {
+  const members = [...new Set(memberIds.filter(Boolean))];
+  const primary = members.includes(primaryId) ? primaryId : (members[0] || null);
+  const ordered = primary ? [primary, ...members.filter(id => id !== primary)] : [];
+  const sb = await getSupabase();
+  const { data, error } = await sb.from("lobbyists")
+    .update({ firm_primary_id: primary, firm_member_ids: ordered, updated_at: now() })
+    .eq("lobbyist_id", firmId).select().single();
+  if (error) throw new Error(error.message);
+  S.lobbyists.set(firmId, data);
+}
+
+/** One lead per client: making someone lead clears it from the others. */
+async function setClientLead(lobbyistId, clientKey, on) {
+  const sb = await getSupabase();
+  if (on) {
+    const { error } = await sb.from("lobbyist_clients").update({ is_lead: false }).eq("client_key", clientKey);
+    if (error) throw new Error(error.message);
+  }
+  const { error } = await sb.from("lobbyist_clients").update({ is_lead: on })
+    .eq("client_key", clientKey).eq("lobbyist_id", lobbyistId);
+  if (error) throw new Error(error.message);
+  const all = [...S.clientsByLobbyist.values()].flat();
+  for (const c of all) {
+    if (c.client_key !== clientKey) continue;
+    if (c.lobbyist_id === lobbyistId) c.is_lead = on;
+    else if (on) c.is_lead = false;
+  }
   indexClients(all);
 }
 
@@ -747,6 +838,28 @@ function wireUi() {
       });
       return;
     }
+    if (t.dataset.firmPrimary || t.dataset.firmRemove) {
+      const firm = S.lobbyists.get(Number(t.dataset.firm));
+      const ids = firmMembers(firm).map(m => m.lobbyist_id);
+      await guarded(async () => {
+        if (t.dataset.firmPrimary) {
+          await saveFirmMembers(firm.lobbyist_id, Number(t.dataset.firmPrimary), ids);
+        } else {
+          const gone = Number(t.dataset.firmRemove);
+          const rest = ids.filter(id => id !== gone);
+          await saveFirmMembers(firm.lobbyist_id, firm.firm_primary_id === gone ? rest[0] : firm.firm_primary_id, rest);
+        }
+        renderAll();
+      });
+      return;
+    }
+    if (t.dataset.leadClient) {
+      await guarded(async () => {
+        await setClientLead(Number(t.dataset.lobbyist), t.dataset.leadClient, t.dataset.on === "1");
+        renderAll();
+      });
+      return;
+    }
     if (t.dataset.toggleClient) {
       const lid = Number(t.dataset.lobbyist);
       const c = (S.clientsByLobbyist.get(lid) || []).find(x => x.client_key === t.dataset.toggleClient && x.source === t.dataset.source);
@@ -767,6 +880,16 @@ function wireUi() {
       });
     } else if (form.classList.contains("lob-edit")) {
       await guarded(async () => { await saveLobbyistEdits(form); renderAll(); });
+    } else if (form.dataset.addMember) {
+      const v = form.member.value.trim();
+      const id = Number((v.match(/#(\d+)$/) || [])[1]);
+      await guarded(async () => {
+        if (!S.lobbyists.has(id)) throw new Error("Pick a lobbyist from the list.");
+        const firm = S.lobbyists.get(Number(form.dataset.addMember));
+        const ids = firmMembers(firm).map(m => m.lobbyist_id);
+        await saveFirmMembers(firm.lobbyist_id, firm.firm_primary_id || id, [...ids, id]);
+        renderAll();
+      });
     } else if (form.dataset.addClient) {
       const name = form.client.value.trim();
       if (!name) return;

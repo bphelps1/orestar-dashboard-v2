@@ -280,3 +280,109 @@ def test_same_named_lobbyists_resolved_by_2024_list():
 def test_firm_labels():
     kind, found = ml.resolve_label("TONKON TORP S1", LOBBYISTS)
     assert kind == "firm" and [l["lobbyist_id"] for l in found] == [20]
+
+
+# ── Firm contacts and client leads ───────────────────────────────────────────
+
+@pytest.mark.parametrize(("note", "firm", "people"), [
+    ("THORN RUN - Dan Bates S3", "THORN RUN", ["Dan Bates"]),
+    ("OXLEY & ASSOCIATES (Evyan) S2", "OXLEY & ASSOCIATES", ["Evyan"]),
+    ("CFM - Dale Penn 503-510-2200 S2", "CFM", ["Dale Penn"]),
+    ("SUMMIT STRATEGIES - Kristine Evertz/Michelle Giguere S1", "SUMMIT STRATEGIES",
+     ["Kristine Evertz", "Michelle Giguere"]),
+    ("PAC WEST S3", "PAC WEST", []),
+])
+def test_tracker_firm_notes(note, firm, people):
+    assert ml.parse_firm_note(note) == (firm, people)
+
+
+def test_additional_lobbyists_cell():
+    assert ml._names_in("Drew Hagedorn 503-380-1075 Katy McDowell 541-261-9112") == [
+        "Drew Hagedorn", "Katy McDowell"]
+
+
+def test_nicknames_and_initials():
+    people = [_lob(1, "James L. (J.L.) Wilson", "jlwilson@pacounsel.com"),
+              _lob(2, "Kelsey Wilson", "kelsey@block84ga.com"),
+              _lob(3, "Michael C. (Mike) Freese", "mfreese@rflawlobby.com")]
+    assert [l["lobbyist_id"] for l in ml.match_person("JL Wilson", people)] == [1]
+    assert [l["lobbyist_id"] for l in ml.match_person("JL", people)] == [1]
+    assert [l["lobbyist_id"] for l in ml.match_person("Mike Freese", people)] == [3]
+
+
+def test_dot_us_is_not_automatically_government():
+    assert is_private_domain("summitstrategies.us")
+    assert is_private_domain("johnpowell.us")
+    assert not is_private_domain("co.washington.or.us")
+    assert not is_private_domain("clackamas.us")
+
+
+class _Cur:
+    """Just enough cursor for the seeders: canned SELECTs, recorded UPDATEs."""
+
+    def __init__(self, tables):
+        self.tables, self.updates, self.description, self._rows = tables, [], None, []
+
+    def execute(self, sql, params=()):
+        sql = " ".join(sql.split())
+        if sql.startswith("update"):
+            self.updates.append((sql, params))
+            self.rowcount = 1
+            return
+        if "from lobbyist_clients where active" in sql and "client_key" in sql:
+            rows = [(c["client_key"], c["lobbyist_id"], c["is_lead"], c["client_name"])
+                    for c in self.tables["lobbyist_clients"] if c["active"]]
+            self.description = [("client_key",), ("lobbyist_id",), ("is_lead",), ("client_name",)]
+        elif "from lobbyist_clients" in sql:
+            rows = [(c["lobbyist_id"],) for c in self.tables["lobbyist_clients"] if c["active"]]
+            self.description = [("lobbyist_id",)]
+        else:
+            cols = list(self.tables["lobbyists"][0])
+            rows = [tuple(l[c] for c in cols) for l in self.tables["lobbyists"]]
+            self.description = [(c,) for c in cols]
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+def _person(i, name, email, affiliation="", on_cc=True, firm=None):
+    return {"lobbyist_id": i, "kind": "person", "name": name, "email": email, "affiliation": affiliation,
+            "firm": firm, "on_capitol_club": on_cc, "aliases": [], "firm_primary_id": None,
+            "firm_member_ids": []}
+
+
+def test_firm_primary_comes_from_the_sheets_among_current_members():
+    lobbyists = [
+        {**_person(100, "Tonkon Torp", None), "kind": "firm", "aliases": ["TONKON TORP"]},
+        {**_person(101, "Oxley & Associates", None), "kind": "firm", "aliases": ["OXLEY & ASSOCIATES"]},
+        _person(1, "Rocky Dallum", "rocky@oregonga.com", "Oregon Government Affairs Advisors, LLC"),
+        _person(2, "Maureen McGee", "maureen.mcgee@tonkon.com", "Tonkon Torp LLP"),
+        _person(3, "Gary Oxley", "gary@oxleyandassociates.com"),
+        _person(4, "Evyan Jarvis Andries", "evyan@oxleyandassociates.com"),
+        _person(5, "Deborah Imse", "deborah@multifamilynw.org"),
+    ]
+    cur = _Cur({"lobbyists": lobbyists, "lobbyist_clients": []})
+    tracker = [("Kroger", "", "OXLEY & ASSOCIATES", "JARVIS ANDRIES, EVYAN")]
+    notes = ["OXLEY & ASSOCIATES (Evyan) S2"]
+    sheet = [{"first": "Rocky", "last": "Dallum", "firm": "Tonkon Torp",
+              "addl_lobbyists": "Maureen McGee 503-802-5726"},
+             {"first": "Gary", "last": "Oxley", "firm": "Oxley and Associates",
+              "addl_lobbyists": "Evyan Jarvis Andries (503) 320-7127"}]
+    ml.seed_firm_contacts(cur, tracker, notes, sheet)
+    got = {params[2]: (params[0], params[1]) for _, params in cur.updates}
+    # Rocky Dallum led Tonkon Torp in 2024 but has since moved firms.
+    assert got[100] == (2, [2])
+    # The 2024 list's lead stays primary; the tracker's contact comes next.
+    assert got[101] == (3, [3, 4])
+
+
+def test_client_lead_follows_the_2024_list():
+    lobbyists = [_person(1, "Dan Bates", "dbates@thornrun.com"),
+                 _person(2, "Madeline Do", "mdo@thornrun.com")]
+    clients = [{"lobbyist_id": i, "client_key": "microsoft", "client_name": "Microsoft",
+                "is_lead": False, "active": True} for i in (1, 2)]
+    cur = _Cur({"lobbyists": lobbyists, "lobbyist_clients": clients})
+    ml.seed_client_leads(cur, [{"first": "Dan", "last": "Bates", "clients": "Microsoft; 211info",
+                                "addl_lobbyists": "Madeline Do 503-830-8077"}])
+    assert [p for _, p in cur.updates] == [(1, "microsoft")]

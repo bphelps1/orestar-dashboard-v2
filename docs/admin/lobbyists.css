@@ -171,3 +171,8 @@ ul.pair-evidence li + li { margin-top: 2px; }
   .lob-form-grid { grid-template-columns: 1fr; }
   .lob-form-grid .span-2, .lob-form-grid .span-3 { grid-column: span 1; }
 }
+
+.lob-firm-members { margin-top: 16px; }
+.lob-firm-members h4 { font-size: 0.9rem; margin-bottom: 4px; }
+.lob-firm-members .lob-client-list { max-height: none; }
+.lob-member-of { margin-top: 12px; }

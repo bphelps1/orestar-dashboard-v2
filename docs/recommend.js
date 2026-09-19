@@ -1522,7 +1522,12 @@ function planGroups() {
   const none = { lobbyist: null, rows: [] };
   for (const row of donorRows) {
     const list = lobbyistsFor(row.donor);
-    const entry = { ...row, attribution: list[0] || null, also: list.slice(1) };
+    // People reachable through the firm the donor is filed under are already
+    // on its row; "also" is for anyone else.
+    const firm = list[0] ? firmContacts(list[0].lobbyist) : { primary: null, others: [] };
+    const atFirm = new Set([firm.primary, ...firm.others].filter(Boolean).map(m => m.lobbyist_id));
+    const entry = { ...row, attribution: list[0] || null,
+                    also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
     if (!list.length) { none.rows.push(entry); continue; }
     const id = list[0].lobbyist.lobbyist_id;
     if (!groups.has(id)) groups.set(id, { lobbyist: list[0].lobbyist, rows: [] });
@@ -1534,7 +1539,9 @@ function planGroups() {
   if (q) {
     out = out.map(g => {
       const l = g.lobbyist;
-      const lobHit = l && [l.name, l.firm, l.affiliation, l.email].join(" ").toLowerCase().includes(q);
+      const members = l ? [firmContacts(l).primary, ...firmContacts(l).others].filter(Boolean) : [];
+      const lobHit = l && [l.name, l.firm, l.affiliation, l.email, ...members.map(m => m.name)]
+        .join(" ").toLowerCase().includes(q);
       return lobHit ? g : { ...g, rows: g.rows.filter(r => r.donor.toLowerCase().includes(q)) };
     }).filter(g => g.rows.length);
   }
@@ -1549,8 +1556,41 @@ function planGroups() {
 }
 
 function lobbyistContact(l) {
-  const org = l.kind === "firm" ? "" : (l.affiliation || l.firm);
-  return [org, l.email, l.phone].filter(Boolean).join(" · ");
+  return [l.affiliation || l.firm, l.email, l.phone].filter(Boolean).join(" · ");
+}
+
+/** Who to call at a firm: its primary contact first, then the other members.
+ *  Set at /admin/lobbyists (seeded from the fundraising sheets). A firm with
+ *  its own email or phone typed in by an admin uses that for the primary. */
+function firmContacts(l) {
+  if (l.kind !== "firm") return { primary: null, others: [] };
+  const get = id => lobbyistsById?.get(id);
+  const primary = get(l.firm_primary_id) || (l.email || l.phone ? null : get((l.firm_member_ids || [])[0])) || null;
+  const others = (l.firm_member_ids || []).map(get)
+    .filter(m => m && (!primary || m.lobbyist_id !== primary.lobbyist_id));
+  return { primary, others };
+}
+
+function contactLine(m) {
+  return [m.email, m.phone].filter(Boolean).join(" · ");
+}
+
+function lobbyistHeader(l) {
+  if (l.kind !== "firm") {
+    return `<div class="plan-lobbyist">${esc(l.name)}</div>
+            <div class="plan-contact">${esc(lobbyistContact(l))}</div>`;
+  }
+  const { primary, others } = firmContacts(l);
+  const own = contactLine(l);
+  const lead = primary
+    ? `<div class="plan-contact"><span class="plan-primary">${esc(primary.name)}</span>${own || contactLine(primary) ? " · " : ""}${esc(own || contactLine(primary))}</div>`
+    : own ? `<div class="plan-contact">${esc(own)}</div>` : "";
+  const item = m => `<li>${esc(m.name)}${contactLine(m) ? ` <span>${esc(contactLine(m))}</span>` : ""}</li>`;
+  const more = others.length
+    ? `<details class="plan-members"><summary>${others.length} other${others.length === 1 ? "" : "s"} at the firm</summary>
+         <ul>${others.map(item).join("")}</ul></details>`
+    : "";
+  return `<div class="plan-lobbyist">${esc(l.name)} <span class="plan-firm">firm</span></div>${lead}${more}`;
 }
 
 function renderLobbyistPlan() {
@@ -1570,8 +1610,7 @@ function renderLobbyistPlan() {
   tbody.innerHTML = groups.map(g => {
     const l = g.lobbyist;
     const head = l
-      ? `<div class="plan-lobbyist">${esc(l.name)}${l.kind === "firm" ? ' <span class="plan-firm">firm</span>' : ""}</div>
-         <div class="plan-contact">${esc(lobbyistContact(l))}</div>`
+      ? lobbyistHeader(l)
       : `<div class="plan-lobbyist plan-none">No lobbyist on file</div>
          <div class="plan-contact">Assign these at <a href="/admin/lobbyists">/admin/lobbyists</a></div>`;
     const header = `<tr class="plan-group">
@@ -1605,10 +1644,21 @@ function lobbyistPlanExportRows() {
   for (const g of planGroups()) {
     const l = g.lobbyist;
     const name = l ? l.name : "(no lobbyist on file)";
-    const contact = l ? { "Lobbyist Email": l.email || "", "Lobbyist Phone": l.phone || "",
-                          "Firm / Title": l.kind === "firm" ? "" : (l.affiliation || l.firm || "") }
-                      : { "Lobbyist Email": "", "Lobbyist Phone": "", "Firm / Title": "" };
-    out.push({ "Lobbyist": name, "Donor": "", "Type": `${g.rows.length} donors`,
+    let contact = { "Contact": "", "Email": "", "Phone": "", "Firm / Title": "", "Other Firm Contacts": "" };
+    if (l && l.kind === "firm") {
+      const { primary, others } = firmContacts(l);
+      contact = {
+        "Contact": primary ? primary.name : "",
+        "Email": l.email || primary?.email || "",
+        "Phone": l.phone || primary?.phone || "",
+        "Firm / Title": "",
+        "Other Firm Contacts": others.map(m => [m.name, m.email, m.phone].filter(Boolean).join(" · ")).join("; "),
+      };
+    } else if (l) {
+      contact = { "Contact": l.name, "Email": l.email || "", "Phone": l.phone || "",
+                  "Firm / Title": l.affiliation || l.firm || "", "Other Firm Contacts": "" };
+    }
+    out.push({ "Lobbyist": name, "Donor": "", "Type": `${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}`,
                "Target": Math.round(g.target), "Given This Cycle": Math.round(g.given),
                "Remaining": Math.round(g.remaining), "Last Cycle": "", "Comparable Max": "",
                "Attribution": "", ...contact, "Also Lobbied By": "" });
@@ -1723,7 +1773,8 @@ function exportData(format, scope = "new") {
     } else if (scope === "lobbyist") {
       const ws = XLSX.utils.json_to_sheet(exportRows);
       ws["!cols"] = [{ wch: 28 }, { wch: 44 }, { wch: 13 }, { wch: 11 }, { wch: 14 }, { wch: 11 },
-                     { wch: 11 }, { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 16 }, { wch: 28 }, { wch: 30 }];
+                     { wch: 11 }, { wch: 14 }, { wch: 30 }, { wch: 24 }, { wch: 30 }, { wch: 15 },
+                     { wch: 28 }, { wch: 60 }, { wch: 30 }];
       XLSX.utils.book_append_sheet(wb, ws, "Lobbyist Plan");
     } else {
       const ws = XLSX.utils.json_to_sheet(exportRows);

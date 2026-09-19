@@ -58,10 +58,19 @@ create table if not exists lobbyists (
   aliases          text[] not null default '{}',
   source           text not null default 'manual',   -- 'capitol_club' | 'manual' | 'sheet_2024' | 'tracker'
   notes            text,
+  -- For a firm entry: who to call. The primary's email and phone lead the
+  -- firm's row in a plan; the other members are listed after it. Seeded from
+  -- the fundraising sheets (current members only), then edited by admins.
+  firm_primary_id  bigint references lobbyists(lobbyist_id) on delete set null,
+  firm_member_ids  bigint[] not null default '{}',
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
   constraint lobbyists_kind_check check (kind in ('person', 'firm'))
 );
+
+-- Added after the table first shipped; keep re-runs of this file additive.
+alter table lobbyists add column if not exists firm_primary_id bigint references lobbyists(lobbyist_id) on delete set null;
+alter table lobbyists add column if not exists firm_member_ids bigint[] not null default '{}';
 
 create index if not exists idx_lobbyists_email on lobbyists (lower(email));
 create index if not exists idx_lobbyists_name on lobbyists (lower(name));
@@ -76,8 +85,13 @@ create table if not exists lobbyist_clients (
   -- used to represent a client is still visible to the reviewer.
   active       boolean not null default true,
   last_seen    date,
+  -- The client's lead lobbyist when several list it (the Hospital Association
+  -- lists three). Donors reached through the client are filed under the lead.
+  is_lead      boolean not null default false,
   primary key (lobbyist_id, client_key, source)
 );
+
+alter table lobbyist_clients add column if not exists is_lead boolean not null default false;
 
 create index if not exists idx_lobbyist_clients_key on lobbyist_clients (client_key);
 
@@ -177,8 +191,9 @@ create index if not exists idx_dll_status on donor_lobbyist_links (status);
 --
 -- is_primary marks who a plan should list the donor under. A direct link can
 -- carry it (the tracker's "Lobbyist 1"). For a donor reached through a
--- client, the client's lead is whoever a confirmed direct link already chose
--- for another donor of that client. A union can appear as two donor records
+-- client, it is the client's lead: lobbyist_clients.is_lead if one is set,
+-- else whoever a confirmed direct link already chose for another donor of
+-- that client. A union can appear as two donor records
 -- ("United Food and Commercial Workers Union Local 555", "UFCW Local 555");
 -- once one is filed under a lobbyist, the other follows rather than landing
 -- under whichever of the client's lobbyists sorts first.
@@ -200,8 +215,13 @@ paths as (
   union all
   select c.donor_id, lc.lobbyist_id, c.status, 'client:' || c.method, c.score,
          c.client_name,
-         exists (select 1 from client_leads cl
-                 where cl.client_key = c.client_key and cl.lobbyist_id = lc.lobbyist_id)
+         -- An explicit lead (set by an admin or seeded from the sheets) wins;
+         -- without one, fall back to whoever confirmed links point at.
+         lc.is_lead or (
+           not exists (select 1 from lobbyist_clients x
+                       where x.client_key = c.client_key and x.is_lead and x.active)
+           and exists (select 1 from client_leads cl
+                       where cl.client_key = c.client_key and cl.lobbyist_id = lc.lobbyist_id))
   from donor_client_links c
   join lobbyist_clients lc on lc.client_key = c.client_key and lc.active
   where c.status <> 'rejected'

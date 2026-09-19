@@ -56,8 +56,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import supabase_sync  # noqa: E402
 from lobby_match import (  # noqa: E402
     client_alternatives, core_org, dba_names, email_domain, first_last, first_names_compatible,
-    is_private_domain, is_public_client, norm_org, norm_person, person_label, person_tokens,
-    place_tokens,
+    is_private_domain, is_public_client, nicknames, norm_org, norm_person, person_label,
+    person_tokens, place_tokens,
 )
 
 log = logging.getLogger(__name__)
@@ -330,14 +330,16 @@ def match_person(label: str, lobbyists: list[dict], prefer_emails: set[str] = fr
         toks = person_tokens(l["name"])
         return toks[0] if toks else ""
 
-    if not first:   # single-word label: a surname, or a first name alone
+    def first_ok(l):
+        return first_names_compatible(first, first_of(l)) or first in nicknames(l["name"])
+
+    if not first:   # single-word label: a surname, or a first name / nickname alone
         cands = [l for l in persons if surname_hit(l)]
-        cands = cands or [l for l in persons if first_of(l) == lasts[0]]
+        cands = cands or [l for l in persons if first_of(l) == lasts[0] or lasts[0] in nicknames(l["name"])]
     else:
-        cands = [l for l in persons if surname_hit(l) and first_names_compatible(first, first_of(l))]
+        cands = [l for l in persons if surname_hit(l) and first_ok(l)]
         if not cands:
-            cands = [l for l in persons if surname_hit(l, fuzzy=True)
-                     and first_names_compatible(first, first_of(l))]
+            cands = [l for l in persons if surname_hit(l, fuzzy=True) and first_ok(l)]
         if not cands:
             same_surname = [l for l in persons if surname_hit(l)]
             if len({norm_person(l["name"]) for l in same_surname}) == 1 \
@@ -380,6 +382,194 @@ def load_tracker(path: Path) -> list[tuple[str, str, str, str]]:
         if labels:
             out.append((str(contributor).strip(), str(cid or "").strip(), *[str(x) for x in labels]))
     return out
+
+
+def load_tracker_notes(path: Path) -> list[str]:
+    """Lobbyist Key column A: "THORN RUN - Dan Bates S3", "OXLEY & ASSOCIATES (Evyan) S2"."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    notes = []
+    for r in wb["Lobbyist Key"].iter_rows(min_row=2, values_only=True):
+        if r and r[0] and str(r[0]).strip() not in notes:
+            notes.append(str(r[0]).strip())
+    return notes
+
+
+# ── Firm contacts and client leads ───────────────────────────────────────────
+#
+# A plan files some donors under a firm ("THORN RUN") and needs a person to
+# call there; a client listed by several lobbyists (the Hospital Association
+# lists three) needs one to file its donors under. The fundraising sheets
+# already make both choices, so they seed them. Both are only filled where an
+# admin has not set them, and only with people Capitol Club still places at
+# the firm: the 2024 list's Tonkon Torp lead has since moved to another firm.
+
+_PHONE = re.compile(r"\(?\d{3}\)?[\s.-]*\d{3}[\s.-]\d{4}")
+_FIRM_STOP = {"and", "associates", "public", "affairs", "group", "the", "strategies", "government",
+              "relations", "communications", "partners", "lobby", "counsel", "consulting", "inc",
+              "llc", "co", "company", "strategic", "advocates"}
+
+
+def _strip_tag(label: str) -> str:
+    """Drop the tracker's tier tag and phone numbers: "CFM - Dale Penn 503-510-2200 S2"."""
+    label = _PHONE.sub(" ", label)
+    return re.sub(r"\s+S\d\b.*$|\s+-\s*$", "", label.strip()).strip(" -")
+
+
+def _firm_phrase(name: str) -> str:
+    return norm_org(name.replace("Communcations", "Communications").replace("COMMUNCATIONS", "COMMUNICATIONS"))
+
+
+def parse_firm_note(note: str) -> tuple[str, list[str]]:
+    """"OXLEY & ASSOCIATES (Evyan) S2" → ("OXLEY & ASSOCIATES", ["Evyan"])."""
+    raw = _strip_tag(note)
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)", raw)
+    if m:
+        firm, people = m.group(1), m.group(2)
+    elif " - " in raw:
+        firm, people = raw.split(" - ", 1)
+    else:
+        return raw, []
+    return firm.strip(), [p.strip() for p in re.split(r"[/;]", _PHONE.sub(" ", people)) if p.strip()]
+
+
+def _names_in(text: str) -> list[str]:
+    """Person names in a free-text "Additional Lobbyists" cell."""
+    out = []
+    for chunk in re.split(r"[;,:]|" + _PHONE.pattern, text or ""):
+        toks = [t for t in re.split(r"\s+", chunk.strip(" -.")) if t]
+        i = 0
+        while i + 1 < len(toks):
+            out.append(f"{toks[i]} {toks[i + 1]}")
+            i += 2
+    return out
+
+
+def seed_firm_contacts(cur, tracker_rows, notes: list[str], sheet2024: list[dict]) -> None:
+    lobbyists = _rows(cur, "select * from lobbyists")
+    persons = [l for l in lobbyists if l["kind"] == "person"]
+    by_id = {l["lobbyist_id"]: l for l in persons}
+    n_clients = Counter(r[0] for r in _rows_raw(cur, "select lobbyist_id from lobbyist_clients where active"))
+    for f in lobbyists:
+        if f["kind"] != "firm" or f["firm_member_ids"] or f["firm_primary_id"]:
+            continue                      # an admin's (or an earlier seed's) choice stands
+        labels = {_firm_phrase(_strip_tag(a)) for a in [f["name"], *(f["aliases"] or [])]}
+        phrase = _firm_phrase(f["name"])
+        toks = [t for t in phrase.split() if t not in _FIRM_STOP and len(t) > 1]
+
+        squashed = phrase.replace(" ", "")
+
+        def names_firm(text: str) -> bool:
+            """"Focuspoint Communications" and "Focus Point" are one firm."""
+            flat = norm_org(text).replace(" ", "")
+            return bool(flat) and (squashed in flat or flat in squashed)
+
+        def at_firm(p) -> bool:
+            if names_firm(" ".join(filter(None, [p["affiliation"], p["firm"]]))):
+                return True
+            dom = email_domain(p["email"])
+            label = dom.split(".")[0] if dom and is_private_domain(dom) else ""
+            if not label:
+                return False
+            # A short or generic firm word ("NW") must come with the rest of
+            # the name, or every @multifamilynw.org address would qualify.
+            if squashed in label:
+                return True
+            if toks and len("".join(toks)) >= 4 and all(t in label for t in toks):
+                return True
+            return bool(toks) and len(toks[0]) >= 5 and toks[0] in label
+
+        def surname_in_firm(p) -> bool:
+            return bool(person_tokens(p["name"])) and person_tokens(p["name"])[-1] in toks
+
+        scores: Counter = Counter()
+        leads_2024: set[int] = set()
+        for note in notes:
+            firm_part, names = parse_firm_note(note)
+            if _firm_phrase(firm_part) in labels:
+                for n in names:
+                    for p in match_person(n, persons):
+                        scores[p["lobbyist_id"]] += 10      # the tracker names them for the firm
+        for _, _, *labs in tracker_rows:
+            if len(labs) == 2 and _firm_phrase(_strip_tag(labs[0])) in labels:
+                for p in match_person(labs[1], persons):
+                    scores[p["lobbyist_id"]] += 3           # paired with the firm on a donor
+        for r in sheet2024:
+            if not names_firm(r.get("firm") or ""):
+                continue
+            for p in match_person(f"{r.get('first', '')} {r.get('last', '')}", persons):
+                scores[p["lobbyist_id"]] += 5               # the 2024 list's lead for the firm
+                leads_2024.add(p["lobbyist_id"])
+            for n in _names_in(r.get("addl_lobbyists") or ""):
+                for p in match_person(n, persons):
+                    scores[p["lobbyist_id"]] += 1
+
+        members = {p["lobbyist_id"] for p in persons if at_firm(p)}
+        # A firm named for people ("RAINEY & JL WILSON") keeps the people it
+        # names wherever Capitol Club files them.
+        members |= {pid for pid in scores if surname_in_firm(by_id[pid])}
+        gone = [by_id[pid]["name"] for pid in scores if pid not in members]
+        if not members:
+            log.info("firm %s: no current members found (sheet names now elsewhere: %s)", f["name"], gone)
+            continue
+        # The 2024 list's named person for the firm is its primary (Gary
+        # Oxley, not the tracker's day-to-day contact) as long as Capitol Club
+        # still lists them there; the tracker's names order everyone else.
+        primary = max(members, key=lambda pid: (by_id[pid]["on_capitol_club"], pid in leads_2024,
+                                                scores[pid], n_clients[pid], -pid))
+        dom = email_domain(by_id[primary]["email"])
+        if is_private_domain(dom):
+            members |= {p["lobbyist_id"] for p in persons if email_domain(p["email"]) == dom}
+        ordered = [primary] + sorted(members - {primary},
+                                     key=lambda pid: (-scores[pid], not surname_in_firm(by_id[pid]),
+                                                      by_id[pid]["name"]))
+        cur.execute("""update lobbyists set firm_primary_id = %s, firm_member_ids = %s, updated_at = now()
+                       where lobbyist_id = %s and firm_primary_id is null and firm_member_ids = '{}'""",
+                    (primary, ordered, f["lobbyist_id"]))
+        log.info("firm %s: primary %s; %d members%s", f["name"], by_id[primary]["name"], len(ordered),
+                 f" (sheet names now elsewhere: {', '.join(gone)})" if gone else "")
+
+
+def _rows_raw(cur, sql, params=()):
+    cur.execute(sql, params)
+    return cur.fetchall()
+
+
+def seed_client_leads(cur, sheet2024: list[dict]) -> None:
+    """For a client several lobbyists list, the one the 2024 list names leads.
+
+    The 2024 row's own lobbyist first, then its "Additional Lobbyists" in
+    order, skipping anyone Capitol Club no longer lists for the client.
+    Clients that already have a lead (an admin's choice) are left alone.
+    """
+    persons = [l for l in _rows(cur, "select * from lobbyists") if l["kind"] == "person"]
+    listed: dict[str, set[int]] = defaultdict(set)
+    by_core: dict[str, set[str]] = defaultdict(set)
+    has_lead = set()
+    for key, lid, lead, name in _rows_raw(cur, """select client_key, lobbyist_id, is_lead, client_name
+                                                   from lobbyist_clients where active"""):
+        listed[key].add(lid)
+        by_core[core_org(name)].add(key)
+        if lead:
+            has_lead.add(key)
+    set_leads = []
+    for r in sheet2024:
+        people = []
+        for n in [f"{r.get('first', '')} {r.get('last', '')}", *_names_in(r.get("addl_lobbyists") or "")]:
+            people += [p["lobbyist_id"] for p in match_person(n, persons) if p["lobbyist_id"] not in people]
+        for client in [c.strip() for c in (r.get("clients") or "").split(";") if c.strip()]:
+            keys = {norm_org(client)} | by_core.get(core_org(client), set())
+            for key in keys:
+                if key in has_lead or len(listed.get(key, ())) < 2:
+                    continue
+                lead = next((pid for pid in people if pid in listed[key]), None)
+                if lead:
+                    set_leads.append((lead, key))
+                    has_lead.add(key)
+    for lid, key in set_leads:
+        cur.execute("""update lobbyist_clients set is_lead = true
+                       where lobbyist_id = %s and client_key = %s and active""", (lid, key))
+    log.info("client leads seeded from the 2024 list: %d", len(set_leads))
 
 
 # ── Writing ──────────────────────────────────────────────────────────────────
@@ -452,6 +642,9 @@ def main():
         seed_sheet2024(cur, sheet2024)
     if args.tracker and not args.dry_run:
         seed_tracker_people(cur, load_tracker(args.tracker), prefer_emails)
+        seed_firm_contacts(cur, load_tracker(args.tracker), load_tracker_notes(args.tracker), sheet2024)
+    if sheet2024 and not args.dry_run:
+        seed_client_leads(cur, sheet2024)
 
     pool = _rows(cur, "select * from lobby_donor_pool")
     lobbyists = _rows(cur, "select * from lobbyists")

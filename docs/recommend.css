@@ -522,6 +522,12 @@
 .plan-lobbyist { font-size: 0.95rem; color: var(--color-text); }
 .plan-none { color: var(--color-text-muted); font-style: italic; }
 .plan-contact { font-size: 0.78rem; font-weight: 400; color: var(--color-text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.plan-primary { font-weight: 600; color: var(--color-text); }
+.plan-members { font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted); margin-top: 3px; }
+.plan-members summary { cursor: pointer; }
+.plan-members ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.plan-members li { padding: 1px 0; }
+.plan-members li span { color: var(--color-text-light); }
 .plan-count { font-size: 0.8rem; font-weight: 400; color: var(--color-text-muted); white-space: nowrap; }
 .plan-firm {
   font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
