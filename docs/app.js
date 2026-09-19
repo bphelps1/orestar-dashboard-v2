@@ -2782,7 +2782,7 @@ function amendmentChainText(chain, bucket) {
   if (!original) return "";
   const amended = versions.filter(v => v.status === "Amended");
   const deleted = versions.filter(v => v.status === "Deleted");
-  const verb = bucket === "C" ? "from" : "to";
+  const verb = (bucket === "C" || bucket === "OR") ? "from" : "to";
   let text = `${fmtCents(original.amount)} ${original.sub_type || ""} ${verb} ` +
     `${original.payee || "unnamed"}, ${original.tran_date}: #${original.tran_id}`;
   if (amended.length) {
@@ -2799,7 +2799,8 @@ function amendmentChainNoteText(profile) {
   const items = (profile && profile.orestar_amendment_chains) || [];
   if (!items.length) return "";
   const parts = items.map(item =>
-    `${item.year} ${item.bucket === "C" ? "contributions" : "expenditures"}, ` +
+    `${item.year} ${({C: "contributions", E: "expenditures", OR: "other receipts",
+                     OD: "other disbursements"})[item.bucket] || "transactions"}, ` +
     `${fmtSignedCents(item.cash_effect)} to cash (` +
     (item.chains || []).map(c => amendmentChainText(c, item.bucket)).join("; ") + `)`);
   return `In its first years ORESTAR counted every amendment of a transaction, less ` +

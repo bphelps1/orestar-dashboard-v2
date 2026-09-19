@@ -349,7 +349,8 @@ def test_targets_parse_into_one_collection_per_type() -> None:
     import fetch_amendment_chains as F
 
     assert F.parse_target("3215:2006:C,E") == [("3215", 2006, "C"), ("3215", 2006, "E")]
-    for bad in ("3215:2006", "x:2006:E", "3215:06:E", "3215:2006:OR"):
+    assert F.parse_target("21452:2021:OR,OD") == [("21452", 2021, "OR"), ("21452", 2021, "OD")]
+    for bad in ("3215:2006", "x:2006:E", "3215:06:E", "3215:2006:O", "3215:2006:OA"):
         with pytest.raises(ValueError):
             F.parse_target(bad)
 
@@ -368,3 +369,113 @@ def test_result_pages_follow_orestars_paging_scheme() -> None:
         assert query["viewExpiredTransactions"] == ["on"]
         assert query["cneSearchTranStartDate"] == ["01/01/2007"]
         assert query["cneSearchTranType"] == ["E"]
+
+
+
+# ── Other receipts and other disbursements ───────────────────────────────────
+
+
+def _od_entry(rows, chains):
+    return {"filer_id": "1", "year": 2021, "tran_type": "OD",
+            "reported": len(rows), "rows": rows, "chains": chains}
+
+
+def test_an_other_disbursement_chain_reconciles_like_the_cash_lines() -> None:
+    rows = [
+        _row("900", "Original", 200.0, sub_type="Return or Refund of Contribution",
+             tran_date="04/22/2021"),
+        _row("901", "Original", 50.0, expired=True,
+             sub_type="Return or Refund of Contribution", tran_date="04/22/2021"),
+        _row("902", "Amended", 50.0, expired=True,
+             sub_type="Return or Refund of Contribution", tran_date="04/22/2021"),
+        _row("903", "Amended", 50.0, sub_type="Return or Refund of Contribution",
+             tran_date="04/22/2021"),
+    ]
+    chain = [_v(t, st, 50.0, f"05/0{i + 1}/2021 10:00 AM",
+                sub_type="Return or Refund of Contribution", tran_date="04/22/2021")
+             for i, (t, st) in enumerate((("901", "Original"), ("902", "Amended"),
+                                          ("903", "Amended")))]
+    decision = AC.evaluate_target(
+        _od_entry(rows, [{"versions": chain}]),
+        {"other_disbursements": 300.0},        # 200 + both $50 amendments
+        {"900": 200.0, "903": 50.0},
+        "OD",
+    )
+
+    assert decision["applied"] is True
+    assert decision["adjustments"] == [{"tran_id": "902", "effect": "add", "amount": 50.0}]
+
+
+def test_a_summary_that_drops_a_live_row_is_not_explained_by_chains() -> None:
+    # Greg Stoll 2021: ORESTAR lists the $100 lumped refund 3803605 as a live
+    # original yet reports $0 of other disbursements. No chain can reproduce
+    # that, so the gate refuses and nothing moves.
+    rows = [_row("3803605", "Original", 100.0, sub_type="Return or Refund of Contribution",
+                 tran_date="04/22/2021")]
+    decision = AC.evaluate_target(_od_entry(rows, []), {"other_disbursements": 0.0},
+                                  {"3803605": 100.0}, "OD")
+
+    assert decision["applied"] is False
+    assert decision["reason"] == "model_does_not_reproduce_summary"
+
+
+def test_other_receipts_leave_exempt_loans_to_their_own_line() -> None:
+    assert "Loan Received (Exempt)" not in AC.CASH_BUCKETS["OR"]
+    assert "Loan Payment (Exempt)" not in AC.CASH_BUCKETS["OD"]
+    assert AC.summary_line({"other_receipts": 422.72}, "OR") == 422.72
+    assert AC.CASH_SIGN == {"C": 1.0, "OR": 1.0, "E": -1.0, "OD": -1.0}
+
+
+def test_aggregation_applies_an_other_receipt_chain_and_ignores_exempt_loans(tmp_path) -> None:
+    import json
+
+    import pandas as pd
+    from test_nonreturning_balance_guard import _aggregate_cash_rows, _cash_row
+
+    def agg_row(tran_id, amount, sub_type):
+        row = _cash_row(tran_id, amount, "OR", sub_type)
+        when = pd.Timestamp("2014-11-05")
+        row.update({"filed_date": when, "tran_date": when, "year": 2014, "month": "2014-11"})
+        return row
+
+    entry = {
+        "filer_id": "1", "year": 2014, "tran_type": "OR", "reported": 4,
+        "rows": [
+            _row("10", "Original", 500.0, sub_type="Lost or Returned Check", tran_date="11/05/2014"),
+            _row("11", "Original", 50.0, expired=True, sub_type="Lost or Returned Check",
+                 tran_date="11/05/2014"),
+            _row("12", "Amended", 50.0, expired=True, sub_type="Lost or Returned Check",
+                 tran_date="11/05/2014"),
+            _row("14", "Amended", 50.0, sub_type="Lost or Returned Check", tran_date="11/05/2014"),
+        ],
+        "chains": [{"versions": [
+            _v("11", "Original", 50.0, "11/06/2014 10:00 AM", sub_type="Lost or Returned Check",
+               tran_date="11/05/2014"),
+            _v("12", "Amended", 50.0, "11/07/2014 10:00 AM", sub_type="Lost or Returned Check",
+               tran_date="11/05/2014"),
+            _v("14", "Amended", 50.0, "11/08/2014 10:00 AM", sub_type="Lost or Returned Check",
+               tran_date="11/05/2014"),
+        ]}],
+    }
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / AC.CHAINS_FILENAME).write_text(json.dumps(
+        AC.merge_targets(None, [entry], "2026-09-19T00:00:00Z")))
+    # ORESTAR counts both $50 amendments; exempt loans sit on their own line.
+    yearly = {"1": {"ts": 1_800_000_000.0, "years": {"2014": {
+        "beginning_balance": 0.0, "ending_cash_balance": 600.0,
+        "contributions": 0.0, "expenditures": 0.0, "other_receipts": 600.0,
+        "other_disbursements": 0.0, "balance_adjustments": 0.0,
+        "loans_received_exempt": 30.0, "loan_payments_exempt": 30.0,
+    }}}}
+    rows = [agg_row("10", 500.0, "Lost or Returned Check"),
+            agg_row("14", 50.0, "Lost or Returned Check"),
+            agg_row("13", 30.0, "Loan Received (Exempt)")]
+
+    detail = _aggregate_cash_rows(tmp_path, rows, set(), yearly)
+
+    # Had the exempt loan leaked into the other-receipts check it would be a
+    # held row ORESTAR's listing lacks, and the gate would refuse. It applies.
+    [applied] = detail["orestar_amendment_chains"]
+    assert applied["bucket"] == "OR" and applied["cash_effect"] == 50.0
+    assert applied["adjustments"] == [{"tran_id": "12", "effect": "add", "amount": 50.0}]

@@ -92,6 +92,15 @@ jobs:
       - name: Fetch last 14 days from ORESTAR
         run: xvfb-run --auto-servernum python scraper/fetch.py --mode=incremental --days=14
 
+      # ORESTAR edits lumped "Miscellaneous ... $100 and under" rows in place,
+      # keeping their Tran ID and filed date, and a filed-date window is never
+      # fetched twice. Re-read the last eight weeks of those rows (about ten
+      # searches) so edits reach the merge, which keeps the newest copy. Not
+      # worth failing the refresh over: tomorrow's run re-reads the same span.
+      - name: Re-read recent lumped Miscellaneous rows
+        continue-on-error: true
+        run: xvfb-run --auto-servernum python scraper/fetch.py --mode=misc-recent --days=56
+
       - name: Process and aggregate data (also syncs to Supabase)
         run: python scraper/process.py
         env:

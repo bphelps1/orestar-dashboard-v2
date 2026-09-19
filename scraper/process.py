@@ -45,6 +45,8 @@ from exact_coverage_evidence import (
     rows_requesting_surplus,
 )
 from orestar_amendment_chains import (
+    CASH_BUCKETS,
+    CASH_SIGN,
     CHAIN_ID_PREFIX,
     CHAIN_SUB_TYPE,
     CHAINS_FILENAME,
@@ -1178,6 +1180,73 @@ def _live_originals_for(rows: pd.DataFrame, evidence: dict[str, str]) -> list[di
     return out
 
 
+AMOUNT_UPDATES_PATH = DATA_DIR / "amount_updates.json"
+AMOUNT_UPDATES_KEEP = 200
+
+
+def _amount_updates(existing: pd.DataFrame, incoming: pd.DataFrame) -> dict:
+    """Rows a download re-priced: same Tran ID, a different amount.
+
+    ORESTAR edits lumped "Miscellaneous ... $100 and under" rows in place
+    (see fetch.MISC_PREFIX), so a re-read is the only way their current
+    amounts reach us. The merge already keeps the newest copy of each ID; this
+    measures what that changed, which is the whole point of the re-read.
+    """
+    empty = {"rows": 0, "net": 0.0, "miscellaneous_rows": 0, "sample": []}
+    if (existing is None or incoming is None or existing.empty or incoming.empty
+            or "tran_id" not in existing.columns or "tran_id" not in incoming.columns
+            or "amount" not in existing.columns or "amount" not in incoming.columns):
+        return empty
+    old = existing[["tran_id", "amount"]].copy()
+    new = incoming[[c for c in ("tran_id", "amount", "contributor_payee", "filer id")
+                    if c in incoming.columns]].copy()
+    for frame in (old, new):
+        frame["tran_id"] = frame["tran_id"].astype(str).str.strip()
+        frame["amount"] = pd.to_numeric(
+            frame["amount"].astype(str).str.replace(r"[$,]", "", regex=True),
+            errors="coerce",
+        )
+    old = old.drop_duplicates("tran_id", keep="last")
+    new = new.drop_duplicates("tran_id", keep="last")
+    both = old.merge(new, on="tran_id", suffixes=("_old", "_new"))
+    changed = both[(both["amount_new"] - both["amount_old"]).abs() > 0.005]
+    if changed.empty:
+        return empty
+    payees = changed.get("contributor_payee", pd.Series("", index=changed.index))
+    return {
+        "rows": int(len(changed)),
+        "net": round(float((changed["amount_new"] - changed["amount_old"]).sum()), 2),
+        "miscellaneous_rows": int(payees.fillna("").astype(str)
+                                  .str.startswith("Miscellaneous").sum()),
+        "sample": [
+            {"tran_id": r["tran_id"], "filer_id": str(r.get("filer id") or ""),
+             "old": round(float(r["amount_old"]), 2), "new": round(float(r["amount_new"]), 2)}
+            for _, r in changed.head(25).iterrows()
+        ],
+    }
+
+
+def _record_amount_updates(existing: pd.DataFrame, incoming: pd.DataFrame) -> dict:
+    """Measure re-priced rows, log them, and append to the published record."""
+    result = _amount_updates(existing, incoming)
+    log.info("Amount updates: %d existing rows re-priced by this merge (%d lumped "
+             "\"Miscellaneous\" rows), net %s",
+             result["rows"], result["miscellaneous_rows"], f"${result['net']:+,.2f}")
+    if result["rows"]:
+        try:
+            history = json.loads(AMOUNT_UPDATES_PATH.read_text()) \
+                if AMOUNT_UPDATES_PATH.exists() else []
+            if not isinstance(history, list):
+                history = []
+        except (OSError, ValueError):
+            history = []
+        history.append({"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        **result})
+        AMOUNT_UPDATES_PATH.write_text(json.dumps(history[-AMOUNT_UPDATES_KEEP:], indent=1))
+    return result
+
+
+
 def _drop_superseded(df, keep_live=frozenset()):
     """Keep only the version of each transaction that ORESTAR still counts.
 
@@ -1318,6 +1387,7 @@ def process() -> None:
                 existing = existing.rename(columns={"book type": "book_type"})
             existing["amount"] = pd.to_numeric(existing["amount"], errors="coerce").fillna(0.0)
             existing["filed_date"] = pd.to_datetime(existing["filed_date"], errors="coerce").dt.date
+            _record_amount_updates(existing, new_df)
             df = pd.concat([existing, new_df], ignore_index=True)
         else:
             df = new_df
@@ -2939,14 +3009,19 @@ def aggregate_filers(
                 continue
             for _entry in _entries:
                 _bucket = _entry["tran_type"]
-                _frame = _c_for_coh if _bucket == "C" else _e_for_coh
+                _frame = {"C": _c_for_coh, "E": _e_for_coh,
+                          "OR": _or_for_coh, "OD": _od_for_coh}[_bucket]
                 _held: dict[str, float] = {}
                 if (_frame is not None and not _frame.empty
-                        and {"filer id", "year", "tran_id"} <= set(_frame.columns)):
+                        and {"filer id", "year", "tran_id", "sub_type"} <= set(_frame.columns)):
+                    # Only the sub types that feed this summary line: the
+                    # other-receipts frame also carries exempt loans, which
+                    # ORESTAR prints on a line of their own.
                     _mine = _frame[
                         (_frame["filer id"].astype(str).str.replace(r"\.0$", "", regex=True)
                          == str(_fid))
                         & (_frame["year"] == int(_entry["year"]))
+                        & (_frame["sub_type"].isin(CASH_BUCKETS[_bucket]))
                     ]
                     _held = {
                         str(_t).strip(): round(float(_a), 2)
@@ -2961,7 +3036,7 @@ def aggregate_filers(
                 _versions = {
                     _v["tran_id"]: _v for _c in _decision["chains"] for _v in _c["versions"]
                 }
-                _cash_sign = 1.0 if _bucket == "C" else -1.0
+                _cash_sign = CASH_SIGN[_bucket]
                 for _adj in _decision["adjustments"]:
                     _v = _versions[_adj["tran_id"]]
                     _when = pd.to_datetime(_v.get("tran_date"), format="%m/%d/%Y")
@@ -5197,6 +5272,7 @@ if __name__ == "__main__":
             log.info("No new data to merge.")
         else:
             existing = _load_all_transactions()
+            _record_amount_updates(existing, new_df)
             df = pd.concat([existing, new_df], ignore_index=True) if not existing.empty else new_df
             df["tran_id"] = df["tran_id"].astype(str).str.strip()
             before = len(df)

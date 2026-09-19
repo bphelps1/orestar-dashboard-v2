@@ -43,16 +43,31 @@ CHAIN_SUB_TYPE = "Amendment Chain Version (derived)"
 
 # Cash lines of ORESTAR's account summary, by the sub types that feed them.
 # Matches process.py's _COH_C_TYPES / _COH_E_TYPES; in-kind and personal
-# expenditures are not cash and never enter either bucket.
+# expenditures are not cash and never enter either bucket. The Other Receipts
+# and Other Disbursements lines leave exempt loans out: ORESTAR prints those
+# on their own "Loans Received (exempt)" / "Loan Payments (exempt)" lines.
 CASH_BUCKETS = {
     "C": frozenset({"Cash Contribution", "Loan Received (Non-Exempt)"}),
     "E": frozenset({"Cash Expenditure", "Loan Payment (Non-Exempt)"}),
+    "OR": frozenset({
+        "Miscellaneous Other Receipt", "Refunds and Rebates",
+        "Lost or Returned Check", "Interest/Investment Income",
+        "Items Sold at Fair Market Value",
+    }),
+    "OD": frozenset({
+        "Miscellaneous Other Disbursement", "Return or Refund of Contribution",
+        "Nonpartisan Activity",
+    }),
 }
 # The summary field each bucket is checked against, less its in-kind part.
 SUMMARY_LINES = {
     "C": ("contributions", "inkind_contributions"),
     "E": ("expenditures", "inkind_expenditures"),
+    "OR": ("other_receipts", None),
+    "OD": ("other_disbursements", None),
 }
+# Which way each bucket moves cash.
+CASH_SIGN = {"C": 1.0, "OR": 1.0, "E": -1.0, "OD": -1.0}
 SUPPORTED_TYPES = tuple(CASH_BUCKETS)
 
 _RESULTS_HEADER = ("tran id", "tran date", "status", "filer/committee",
@@ -264,7 +279,7 @@ def summary_line(summary: dict, bucket: str) -> float | None:
     """ORESTAR's cash figure for one bucket: the line less its in-kind part."""
     total_key, inkind_key = SUMMARY_LINES[bucket]
     total = summary.get(total_key)
-    inkind = summary.get(inkind_key) or 0.0
+    inkind = (summary.get(inkind_key) or 0.0) if inkind_key else 0.0
     if isinstance(total, bool) or not isinstance(total, (int, float)):
         return None
     return round(float(total) - float(inkind), 2)

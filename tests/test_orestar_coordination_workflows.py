@@ -40,6 +40,7 @@ def _concurrency_block(text: str) -> str:
         ),
         ("candidate-filings.yml", "Scrape candidate filings", ()),
         ("amendment-chains.yml", "Collect amendment chains", ("targets",)),
+        ("misc-reread.yml", "Re-read lumped Miscellaneous rows", ("start_year", "chain_index")),
         (
             "verify-filers.yml",
             "Verify filer transactions",
@@ -89,7 +90,7 @@ def test_orestar_workflow_requeues_same_request_instead_of_overlapping(
 @pytest.mark.parametrize(
     "filename",
     ["coverage-survey.yml", "filer-metadata.yml", "candidate-filings.yml",
-     "amendment-chains.yml"],
+     "amendment-chains.yml", "misc-reread.yml"],
 )
 def test_requeued_workflow_has_non_evicting_pending_slot(filename: str) -> None:
     concurrency = _concurrency_block(_workflow(filename))
@@ -201,6 +202,7 @@ def test_data_workflows_do_not_publish_generated_state_to_git() -> None:
         "supabase-load.yml",
         "verify-filers.yml",
         "amendment-chains.yml",
+        "misc-reread.yml",
     }
     for filename in migrated:
         assert "scripts/push_data.sh" not in _workflow(filename)
