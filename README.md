@@ -16,7 +16,6 @@ Every transaction is queryable: filter ~3 million records by committee, donor, d
 - **Explore tab:** filter/sort/paginate the full dataset, download filtered CSV, run read-only SQL
 - **Donor Lookup:** search resolved donor entities and view profiles — one page per donor covering every name and address variant
 - **Races:** House/Senate district map with the candidate field and cycle fundraising
-- **Recommend tab:** donor-targeting suggestions for a committee
 - **Committee search** by name, candidate name, filer ID, or race/office
 - **Fuzzy name deduplication** with a manual correction override file
 
