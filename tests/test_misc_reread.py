@@ -9,6 +9,7 @@ re-read re-prices. No browser or database is used here.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 from datetime import date
@@ -55,6 +56,75 @@ def test_remaining_count_mirrors_the_fetcher_and_its_own_log(tmp_path, monkeypat
     # Progress lives in its own log, never in the permanent fetch logs.
     assert log not in (F.FETCHED_LOG, F.FETCHED_LOG_TRN)
     capsys.readouterr()
+
+
+def _offline_fetcher(tmp_path, monkeypatch, clock: dict, seconds_per_window: float):
+    """Replace the browser with one that 'downloads' a window per call."""
+    calls: list[tuple] = []
+
+    def download_week(page, context, w_start, w_end, tran_type, raw_dir, *rest):
+        calls.append((tran_type, w_start, w_end))
+        clock["now"] += seconds_per_window
+        path = tmp_path / f"{tran_type}_{w_start}.xls"
+        path.write_text("x")
+        return path
+
+    monkeypatch.setattr(F, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(F, "FETCHED_LOG_MISC", tmp_path / "fetched_windows_misc.json")
+    monkeypatch.setattr(F, "sync_playwright", lambda: contextlib.nullcontext(object()))
+    monkeypatch.setattr(F, "setup_browser", lambda p: (_Closable(), None, None))
+    monkeypatch.setattr(F, "download_week", download_week)
+    monkeypatch.setattr(F, "_validate_download", lambda path: 10)
+    monkeypatch.setattr(F, "_flush_record_counts", lambda: None)
+    monkeypatch.setattr(F.time, "monotonic", lambda: clock["now"])
+    monkeypatch.delenv("ORESTAR_SEARCH_BUDGET_PATH", raising=False)
+    return calls
+
+
+class _Closable:
+    def close(self) -> None:
+        pass
+
+
+def test_a_run_stops_at_its_budget_and_the_next_resumes(tmp_path, monkeypatch, capsys) -> None:
+    # Without a budget, a run ORESTAR doesn't block reads until the job timeout
+    # kills it, and a killed job never merges or publishes what it read.
+    clock = {"now": 0.0}
+    calls = _offline_fetcher(tmp_path, monkeypatch, clock, seconds_per_window=60)
+    tasks = F._range_tasks(date(2026, 1, 1), date.today(), F.MISC_TYPES,
+                           F.MISC_REREAD_WINDOW_DAYS, F.MISC_PREFIX)
+    assert len(tasks) > 3
+
+    F.run_misc_reread(2026, max_minutes=2.5)        # windows start at 0s, 60s, 120s
+    assert len(calls) == 3
+    assert F.count_misc_remaining(2026) == len(tasks) - 3   # all three kept
+
+    F.run_misc_reread(2026, max_minutes=1)          # the next run picks up at task 4
+    assert calls[3] == (tasks[3][0], tasks[3][1], tasks[3][2])
+    assert F.count_misc_remaining(2026) == len(tasks) - 4
+    capsys.readouterr()
+
+
+def test_the_history_reread_is_budgeted_by_default(monkeypatch) -> None:
+    seen = {}
+    monkeypatch.setattr(F, "run_misc_reread",
+                        lambda **kwargs: seen.update(kwargs))
+    monkeypatch.setattr(sys, "argv", ["fetch.py", "--mode=misc-reread"])
+    F.main()
+    assert seen["max_minutes"] == F.MISC_REREAD_MAX_MINUTES > 0
+
+    monkeypatch.setattr(sys, "argv", ["fetch.py", "--mode=misc-reread", "--max-minutes=150"])
+    F.main()
+    assert seen["max_minutes"] == 150
+
+
+def test_the_workflow_passes_a_budget_its_timeout_can_hold() -> None:
+    text = (Path(__file__).parent.parent / ".github/workflows/misc-reread.yml").read_text()
+    budget = int(text.split("--max-minutes=")[1].split()[0])
+    timeout = int(text.split("timeout-minutes: ")[1].split()[0])
+    # 25 minutes of coordination, 25 of browser install, and the merge and
+    # publish must still fit after the fetch spends its whole budget.
+    assert budget + 25 + 25 + 30 <= timeout
 
 
 def test_a_rolling_reread_records_no_progress() -> None:

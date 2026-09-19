@@ -67,6 +67,12 @@ MISC_RECENT_DAYS = 56
 MISC_RECENT_WINDOW_DAYS = 28
 # History-wide re-read: quarter-year windows, split further if one overruns.
 MISC_REREAD_WINDOW_DAYS = 91
+# Stop starting windows after this long. Without a budget, a run the F5 defense
+# doesn't block keeps going until the job's own timeout kills it, and a killed
+# job never merges or publishes: every window it read is lost and the chain
+# stops. 90 minutes fits a 150-minute job even after a full 25-minute
+# coordination wait; the workflow passes its own figure.
+MISC_REREAD_MAX_MINUTES = 90.0
 
 # Identity remediation deliberately ignores the ordinary count/held-row skips:
 # a withdrawn row can cancel a genuinely missing row inside the same window.
@@ -748,13 +754,16 @@ def _fetch_range(
     types: list[str] | None = None,
     window_days: int = 7,
     log_file=_DEFAULT_LOG,
+    deadline: float | None = None,
 ) -> None:
     """Fetch every window of [start, end], one request per transaction type.
 
     ``payee_prefix`` restricts every request to contributors/payees starting
     with it (the lumped-row re-read). ``log_file=None`` re-fetches every
     window and records nothing, for the rolling re-read; the default is the
-    permanent fetch log for ``date_field``.
+    permanent fetch log for ``date_field``. ``deadline`` (a
+    ``time.monotonic()`` value) stops the run before its next window, leaving
+    the rest for the next run.
     """
     SearchBudget.from_environment()  # Refuse malformed configuration before setup.
     RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -805,6 +814,14 @@ def _fetch_range(
             if key in fetched:
                 i += 1
                 continue
+
+            if deadline is not None and time.monotonic() >= deadline:
+                log.warning(
+                    "Time budget reached at [%d/%d] — stopping so this run's windows "
+                    "are merged and published. The next run resumes here.",
+                    i + 1, total,
+                )
+                break
 
             log.info("[%d/%d] %s  %s → %s%s", i + 1, total, tran_type, w_start, w_end,
                      _narrowing_label(amt_from, amt_to, payee_prefix))
@@ -1858,13 +1875,17 @@ def run_misc_recent(days: int = MISC_RECENT_DAYS) -> None:
                  window_days=MISC_RECENT_WINDOW_DAYS, log_file=None)
 
 
-def run_misc_reread(start_year: int = 2006, end_year: int | None = None) -> None:
+def run_misc_reread(start_year: int = 2006, end_year: int | None = None,
+                    max_minutes: float | None = MISC_REREAD_MAX_MINUTES) -> None:
     """History-wide re-read of lumped rows, resumable across chained runs."""
     start = date(start_year, 1, 1)
     end = min(date(end_year, 12, 31) if end_year else date.today(), date.today())
-    log.info("Lumped-row re-read (history): %s → %s", start, end)
+    log.info("Lumped-row re-read (history): %s → %s, budget %s minutes",
+             start, end, max_minutes if max_minutes else "unlimited")
+    deadline = time.monotonic() + max_minutes * 60 if max_minutes else None
     _fetch_range(start, end, "filed", payee_prefix=MISC_PREFIX, types=MISC_TYPES,
-                 window_days=MISC_REREAD_WINDOW_DAYS, log_file=FETCHED_LOG_MISC)
+                 window_days=MISC_REREAD_WINDOW_DAYS, log_file=FETCHED_LOG_MISC,
+                 deadline=deadline)
 
 
 def count_misc_remaining(start_year: int = 2006, end_year: int | None = None) -> int:
@@ -2026,6 +2047,14 @@ def main() -> None:
         help="Start a new forced-remediation chain for the requested filer IDs",
     )
     parser.add_argument(
+        "--max-minutes",
+        type=float,
+        default=None,
+        dest="max_minutes",
+        help=f"misc-reread: stop starting windows after this long "
+             f"(default {MISC_REREAD_MAX_MINUTES:g})",
+    )
+    parser.add_argument(
         "--clear-identity-progress",
         action="store_true",
         help="Clear completed forced-remediation progress for --filer-ids and exit",
@@ -2074,7 +2103,9 @@ def main() -> None:
     elif args.mode == "misc-recent":
         run_misc_recent(days=args.days if args.days != 14 else MISC_RECENT_DAYS)
     elif args.mode == "misc-reread":
-        run_misc_reread(start_year=args.start_year or 2006, end_year=args.end_year)
+        run_misc_reread(start_year=args.start_year or 2006, end_year=args.end_year,
+                        max_minutes=(args.max_minutes if args.max_minutes is not None
+                                     else MISC_REREAD_MAX_MINUTES))
     elif args.mode == "count-misc-remaining":
         count_misc_remaining(start_year=args.start_year or 2006, end_year=args.end_year)
 
