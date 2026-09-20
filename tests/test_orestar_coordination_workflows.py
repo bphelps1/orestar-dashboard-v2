@@ -42,6 +42,12 @@ def _concurrency_block(text: str) -> str:
         ("amendment-chains.yml", "Collect amendment chains", ("targets",)),
         ("misc-reread.yml", "Re-read lumped Miscellaneous rows", ("start_year", "chain_index")),
         (
+            "backfill.yml",
+            "Backfill ORESTAR data",
+            ("filer_ids", "start_year", "date_field", "identity_remediation",
+             "resume_auto", "resume_progress", "verification_filer_ids", "chain_index"),
+        ),
+        (
             "lobbyist-attribution.yml",
             "Scrape committee contacts",
             ("max_committees", "max_age_days"),
@@ -95,11 +101,14 @@ def test_orestar_workflow_requeues_same_request_instead_of_overlapping(
 @pytest.mark.parametrize(
     "filename",
     ["coverage-survey.yml", "filer-metadata.yml", "candidate-filings.yml",
-     "amendment-chains.yml", "misc-reread.yml", "lobbyist-attribution.yml"],
+     "amendment-chains.yml", "misc-reread.yml", "lobbyist-attribution.yml",
+     "backfill.yml"],
 )
 def test_requeued_workflow_has_non_evicting_pending_slot(filename: str) -> None:
     concurrency = _concurrency_block(_workflow(filename))
-    assert "${{ github.run_id }}" in concurrency
+    # Either spelling of the same thing: a group of its own per run, so a
+    # replacement never takes the pending slot of another waiting run.
+    assert "github.run_id" in concurrency
     assert "cancel-in-progress: false" in concurrency
 
 
@@ -212,3 +221,29 @@ def test_data_workflows_do_not_publish_generated_state_to_git() -> None:
     }
     for filename in migrated:
         assert "scripts/push_data.sh" not in _workflow(filename)
+
+
+# A backfill chain that stopped is restarted by hand, and the restart begins at
+# chain 1 — which clears the progress of every filer the chain had already
+# finished. On 2026-09-19 that re-fetched 47 committees. resume_progress keeps
+# the record; a requeue carries it through with every other input.
+def test_a_stopped_identity_chain_can_be_restarted_without_losing_its_progress() -> None:
+    text = _workflow("backfill.yml")
+    assert "      resume_progress:" in text
+
+    resolve = _step_block(text, "Resolve filer IDs (auto mode)")
+    resume = resolve[resolve.index("inputs.resume_progress") - 400:]
+    assert 'IDENTITY_MODE" = "true"' in resume and "IDENTITY_RESUME=true" in resume
+    # The reset is what resuming avoids, and only identity mode ever resets.
+    fetch = _step_block(text, "Backfill ORESTAR data")
+    assert "--reset-identity-progress" in fetch
+    assert 'steps.resolve.outputs.identity_resume }}" != "true"' in fetch
+
+
+def test_a_requeued_backfill_is_the_same_request() -> None:
+    requeue = _step_block(_workflow("backfill.yml"), "Requeue after coordination timeout")
+    # chain_index passes through, so a chained run stays a chained run: its
+    # identity progress is kept rather than cleared by a fresh chain 1.
+    assert '-f chain_index="${{ inputs.chain_index || \'1\' }}"' in requeue
+    # A startup-retry child is coalesced by run title, so it is never requeued.
+    assert "!startsWith(inputs.end_date, 'startup:')" in requeue
