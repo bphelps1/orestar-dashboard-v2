@@ -427,3 +427,19 @@ def test_an_organizations_own_row_leads_over_a_contract_lobbyist():
     ])
     # Melissa Unger is off Capitol Club, so her row's next person leads.
     assert [p for _, p in cur.updates] == [(2, "seiu local 503 opeu")]
+
+
+# ── Capitol Club refresh vs. hand edits ──────────────────────────────────────
+
+def test_a_hand_edited_field_survives_the_weekly_refresh():
+    clause = cc._refresh_set_clause()
+    # Every field Capitol Club supplies is guarded by manual_fields.
+    for field in cc.CC_FIELDS:
+        assert f"{field} = case when " in clause
+    assert "phone = case when 'phone' = any(l.manual_fields) then l.phone else v.phone end" in clause
+    # first/last name are derived from the name, so they follow its pin.
+    assert "first_name = case when 'name' = any(l.manual_fields)" in clause
+    assert "last_name = case when 'name' = any(l.manual_fields)" in clause
+    # Nothing outside the card's own fields is touched here.
+    for column in ("cc_id", "on_capitol_club", "cc_last_seen", "notes", "aliases", "manual_fields"):
+        assert f"{column} = case" not in clause

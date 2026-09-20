@@ -9,11 +9,15 @@
  *                          Fundraising Tracker, manual)
  *   donor_client_links   — donor → Capitol Club client; the client's current
  *                          lobbyists inherit the donor
+ *   donor_contacts       — the people to call for a donor (017)
+ *   lobbyist_partners    — PARTNER standing, per chamber and party (017)
  */
 "use strict";
 
 const PAGE_SIZE = 50;
 const CONTACT_METHODS = new Set(["email_exact", "name_exact", "email_domain", "director"]);
+// Fields Capitol Club supplies; editing one here pins it (lobbyists.manual_fields).
+const CC_EDITABLE = ["name", "affiliation", "email", "phone", "phone_alt", "address", "city", "state", "zip"];
 
 const S = {
   canWrite: false,
@@ -34,7 +38,21 @@ const S = {
   decisionStatus: "all",
   decisionShown: PAGE_SIZE,
   openLobbyist: null,
+  contacts: new Map(),         // donor_id → [donor_contacts rows]
+  partners: new Map(),         // lobbyist_id → Set("house|D")
+  donorShown: PAGE_SIZE,
+  openDonor: null,
+  editing: null,               // key of the decision row being edited
 };
+
+// Partner standing is per caucus: a firm can be a partner of the House
+// Democrats and nothing to the Senate Republicans.
+const CAUCUSES = [
+  { chamber: "house",  party: "D", label: "House D" },
+  { chamber: "house",  party: "R", label: "House R" },
+  { chamber: "senate", party: "D", label: "Senate D" },
+  { chamber: "senate", party: "R", label: "Senate R" },
+];
 
 function esc(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -83,17 +101,25 @@ document.addEventListener("DOMContentLoaded", async () => {
 // ── Loading ─────────────────────────────────────────────────────────────────
 async function loadAll() {
   const sb = await getSupabase();
-  const [lobbyists, clients, dll, dcl] = await Promise.all([
+  const [lobbyists, clients, dll, dcl, contacts, partners] = await Promise.all([
     LOB.loadLobbyists(),
     LOB.loadClients(),
     LOB.fetchAll(() => sb.from("donor_lobbyist_links").select("*").order("donor_id")),
     LOB.fetchAll(() => sb.from("donor_client_links").select("*").order("donor_id")),
+    LOB.fetchAll(() => sb.from("donor_contacts").select("*").order("donor_id")),
+    LOB.fetchAll(() => sb.from("lobbyist_partners").select("*").order("lobbyist_id")),
   ]);
   S.lobbyists = new Map(lobbyists.map(l => [l.lobbyist_id, l]));
   indexClients(clients);
   S.dll = dll;
   S.dcl = dcl;
-  await ensurePool([...dll, ...dcl].map(r => r.donor_id));
+  indexContacts(contacts);
+  S.partners = new Map();
+  for (const r of partners) {
+    if (!S.partners.has(r.lobbyist_id)) S.partners.set(r.lobbyist_id, new Set());
+    S.partners.get(r.lobbyist_id).add(`${r.chamber}|${r.party}`);
+  }
+  await ensurePool([...dll, ...dcl, ...contacts].map(r => r.donor_id));
 }
 
 function indexClients(clients) {
@@ -108,6 +134,18 @@ function indexClients(clients) {
       if (!S.lobbyistsByClient.has(c.client_key)) S.lobbyistsByClient.set(c.client_key, new Set());
       S.lobbyistsByClient.get(c.client_key).add(c.lobbyist_id);
     }
+  }
+}
+
+function indexContacts(rows) {
+  S.contacts = new Map();
+  for (const r of rows) {
+    if (!S.contacts.has(r.donor_id)) S.contacts.set(r.donor_id, []);
+    S.contacts.get(r.donor_id).push(r);
+  }
+  for (const list of S.contacts.values()) {
+    list.sort((a, b) => (b.is_primary - a.is_primary) || (a.sort_order - b.sort_order)
+      || a.name.localeCompare(b.name));
   }
 }
 
@@ -183,6 +221,7 @@ function renderAll() {
   renderStats();
   renderQueue();
   renderLobbyists();
+  renderDonors();
   renderDecisions();
   refreshDatalists();
   if (document.getElementById("tab-unmatched").classList.contains("active")) renderUnmatched();
@@ -206,6 +245,26 @@ function renderStats() {
   document.getElementById("count-lobbyists").textContent = S.lobbyists.size;
   document.getElementById("count-decisions").textContent =
     S.dll.filter(r => r.status !== "suggested").length + S.dcl.filter(r => r.status !== "suggested").length;
+  document.getElementById("count-donors").textContent = attributed.size;
+}
+
+/**
+ * The lobbyist a plan files this donor under, by the same rule as the
+ * donor_lobbyists view: an explicit primary link wins, then the lead of a
+ * client the donor is linked to, then nothing.
+ */
+function primaryFor(donorId) {
+  const direct = S.dll.find(r => r.donor_id === donorId && r.is_primary && r.status !== "rejected");
+  if (direct) return { lobbyist: S.lobbyists.get(direct.lobbyist_id), why: "set here" };
+  for (const c of S.dcl) {
+    if (c.donor_id !== donorId || c.status === "rejected") continue;
+    for (const lc of [...S.clientsByLobbyist.values()].flat()) {
+      if (lc.client_key === c.client_key && lc.active && lc.is_lead) {
+        return { lobbyist: S.lobbyists.get(lc.lobbyist_id), why: `lead for ${lc.client_name}` };
+      }
+    }
+  }
+  return null;
 }
 
 function donorBlock(id) {
@@ -389,12 +448,45 @@ function firmMembersBlock(f) {
   </div>`;
 }
 
-function memberOfLine(l) {
+/** The firms a person is a contact for, editable from their own entry. */
+function firmsForPersonBlock(l) {
   const firms = [...S.lobbyists.values()].filter(f => f.kind === "firm"
     && (f.firm_primary_id === l.lobbyist_id || (f.firm_member_ids || []).includes(l.lobbyist_id)));
-  if (!firms.length) return "";
-  return `<p class="lob-meta lob-member-of">Contact for ${firms.map(f =>
-    `<a href="#" data-open-lobbyist="${f.lobbyist_id}">${esc(f.name)}</a>${f.firm_primary_id === l.lobbyist_id ? " (primary)" : ""}`).join(", ")}</p>`;
+  const w = S.canWrite;
+  return `<div class="lob-firm-members">
+    <h4>Firms</h4>
+    <p class="lob-meta">Which firm entries list this person. The firm's primary leads its rows in a plan
+      and its export.</p>
+    <ul class="lob-client-list">${firms.map(f => `
+      <li>
+        ${f.firm_primary_id === l.lobbyist_id ? '<span class="badge badge-green">primary</span>' : ""}
+        <a href="#" data-open-lobbyist="${f.lobbyist_id}">${esc(f.name)}</a>
+        ${w && f.firm_primary_id !== l.lobbyist_id
+          ? `<button class="link-btn" data-firm-primary="${l.lobbyist_id}" data-firm="${f.lobbyist_id}">make primary</button>` : ""}
+        ${w ? `<button class="link-btn" data-firm-remove="${l.lobbyist_id}" data-firm="${f.lobbyist_id}">remove</button>` : ""}
+      </li>`).join("") || '<li class="lob-meta">Not listed at any firm.</li>'}
+    </ul>
+    <form class="lob-inline" data-join-firm="${l.lobbyist_id}">
+      <input name="firm" list="firm-options" placeholder="Add them to a firm…" ${w ? "" : "disabled"} />
+      <button class="btn-small" ${w ? "" : "disabled"}>Add</button>
+    </form>
+  </div>`;
+}
+
+/** PARTNER standing, per chamber and party — the 2024 lobby list's top tier. */
+function partnerBlock(l) {
+  const have = S.partners.get(l.lobbyist_id) || new Set();
+  const dis = S.canWrite ? "" : "disabled";
+  return `<div class="lob-partners">
+    <h4>Partner</h4>
+    <p class="lob-meta">A standing relationship with a caucus. Partners lead a plan for that chamber and
+      party, above every computed tier. Nothing here affects the other caucuses.</p>
+    <div class="lob-partner-checks">${CAUCUSES.map(c => `
+      <label class="lob-check"><input type="checkbox" data-partner="${l.lobbyist_id}"
+        data-chamber="${c.chamber}" data-party="${c.party}"
+        ${have.has(`${c.chamber}|${c.party}`) ? "checked" : ""} ${dis} /> ${c.label}</label>`).join("")}
+    </div>
+  </div>`;
 }
 
 function lobbyistDetail(l) {
@@ -415,11 +507,16 @@ function lobbyistDetail(l) {
         <label class="span-2">Other names <input name="aliases" value="${esc((l.aliases || []).join("; "))}" ${dis} /></label>
         <label class="span-3">Notes <textarea name="notes" rows="2" ${dis}>${esc(l.notes || "")}</textarea></label>
       </div>
-      ${l.on_capitol_club ? `<p class="lob-meta">Contact details refresh from Capitol Club on each scrape; edits to them will be overwritten.</p>` : ""}
-      <div class="cluster-actions"><button type="submit" class="btn-small" ${dis}>Save details</button></div>
+      ${l.on_capitol_club ? `<p class="lob-meta">Contact details refresh from Capitol Club each week. A field you
+        edit here is pinned and keeps your value${(l.manual_fields || []).length
+          ? `: <strong>${esc((l.manual_fields || []).join(", "))}</strong>` : "."}</p>` : ""}
+      <div class="cluster-actions"><button type="submit" class="btn-small" ${dis}>Save details</button>
+        ${(l.manual_fields || []).length && S.canWrite
+          ? `<button type="button" class="btn-small" data-revert-edits="${l.lobbyist_id}">Revert to Capitol Club</button>` : ""}</div>
     </form>
 
-    ${l.kind === "firm" ? firmMembersBlock(l) : memberOfLine(l)}
+    ${partnerBlock(l)}
+    ${l.kind === "firm" ? firmMembersBlock(l) : firmsForPersonBlock(l)}
 
     <div class="lob-cols">
       <div>
@@ -460,6 +557,148 @@ function lobbyistDetail(l) {
   </div>`;
 }
 
+// ── Donors ──────────────────────────────────────────────────────────────────
+function donorRowsForTab() {
+  const known = new Set([...S.dll, ...S.dcl].filter(r => r.status !== "rejected").map(r => r.donor_id));
+  for (const id of S.contacts.keys()) known.add(id);
+  const onlyAttr = document.getElementById("donor-only-attributed").checked;
+  const pool = onlyAttr ? [...known].map(id => S.pool.get(id)).filter(Boolean)
+                        : [...new Set([...known, ...(S.unmatchedRows || []).map(r => r.donor_id)])]
+                            .map(id => S.pool.get(id)).filter(Boolean);
+  const q = document.getElementById("donor-search").value.trim().toLowerCase();
+  const rows = q ? pool.filter(d => d.display_name.toLowerCase().includes(q)) : pool;
+  return rows.sort((a, b) => Number(b.total_since_2021 || 0) - Number(a.total_since_2021 || 0));
+}
+
+async function renderDonors() {
+  const tbody = document.getElementById("donor-tbody");
+  if (!tbody) return;
+  if (!document.getElementById("donor-only-attributed").checked && !S.unmatchedRows) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-msg">Loading…</td></tr>`;
+    await loadUnmatched();
+  }
+  const rows = donorRowsForTab();
+  tbody.innerHTML = rows.slice(0, S.donorShown).map(d => {
+    const p = primaryFor(d.donor_id);
+    const contacts = S.contacts.get(d.donor_id) || [];
+    const first = contacts[0];
+    return `<tr class="lob-row${S.openDonor === d.donor_id ? " open" : ""}" data-donor-row="${esc(d.donor_id)}">
+      <td><a href="#" data-open-donor="${esc(d.donor_id)}" class="lob-name">${esc(d.display_name)}</a>
+        <div class="lob-meta">${esc([d.book_type, d.committee_id ? `#${d.committee_id}` : ""].filter(Boolean).join(" · "))}</div></td>
+      <td>${p?.lobbyist ? `${esc(p.lobbyist.name)}<div class="lob-meta">${esc(p.why)}</div>` : '<span class="lob-meta">—</span>'}</td>
+      <td>${first ? `${esc(first.name)}<div class="lob-meta">${esc([first.email, first.phone].filter(Boolean).join(" · "))}</div>`
+                  : '<span class="lob-meta">none recorded</span>'}</td>
+      <td class="num">${fmt$(d.total_since_2021)}</td>
+      <td class="num">${contacts.length}</td>
+    </tr>${S.openDonor === d.donor_id ? `<tr class="detail-row"><td colspan="5">${donorDetail(d)}</td></tr>` : ""}`;
+  }).join("") || `<tr><td colspan="5" class="empty-msg">No donors match.</td></tr>`;
+  document.getElementById("donor-more").innerHTML = rows.length > S.donorShown
+    ? `<button class="btn-small" id="donor-more-btn">Show more (${rows.length - S.donorShown} left)</button>` : "";
+}
+
+/** Who this donor is filed under, and the people to call for it. */
+function donorDetail(d) {
+  const dis = S.canWrite ? "" : "disabled";
+  const p = primaryFor(d.donor_id);
+  const contacts = S.contacts.get(d.donor_id) || [];
+  const links = [
+    ...S.dll.filter(r => r.donor_id === d.donor_id).map(r => ({
+      what: S.lobbyists.get(r.lobbyist_id)?.name || r.lobbyist_id, how: LOB.describeMethod(r.method), status: r.status })),
+    ...S.dcl.filter(r => r.donor_id === d.donor_id).map(r => ({
+      what: `client: ${r.client_name}`, how: LOB.describeMethod("client:" + r.method), status: r.status })),
+  ];
+  const badge = st => st === "confirmed" ? '<span class="badge badge-green">confirmed</span>'
+    : st === "rejected" ? '<span class="badge badge-red">rejected</span>' : '<span class="badge badge-gray">suggested</span>';
+  return `<div class="lob-detail">
+    <div class="lob-cols">
+      <div>
+        <h4>Filed under</h4>
+        <p class="lob-meta">The lobbyist or firm this donor appears under in a plan. Setting it here beats
+          every other rule, so a donor never lands under two people.</p>
+        <p>${p?.lobbyist ? `<strong>${esc(p.lobbyist.name)}</strong> <span class="lob-meta">(${esc(p.why)})</span>`
+                         : '<span class="lob-meta">Nobody — the plan falls back to the strongest match.</span>'}</p>
+        <form class="lob-inline" data-file-under="${esc(d.donor_id)}">
+          <input name="target" list="lobbyist-options" placeholder="Firm or lobbyist…" ${dis} />
+          <button class="btn-small" ${dis}>Set as primary</button>
+        </form>
+        ${p?.lobbyist && S.canWrite
+          ? `<button class="link-btn" data-clear-primary="${esc(d.donor_id)}">clear</button>` : ""}
+        <h4>Attributions</h4>
+        <ul class="lob-client-list">${links.map(l =>
+          `<li>${esc(l.what)} <span class="lob-meta">${esc(l.how)}</span> ${badge(l.status)}</li>`).join("")
+          || '<li class="lob-meta">None yet.</li>'}</ul>
+      </div>
+      <div>
+        <h4>Contacts (${contacts.length})</h4>
+        <p class="lob-meta">Who to call at this donor. The primary leads the donor's row in a plan and its
+          export; the rest follow.</p>
+        <ul class="lob-client-list">${contacts.map(c => `
+          <li>
+            ${c.is_primary ? '<span class="badge badge-green">primary</span>' : ""}
+            ${esc(c.name)}${c.title ? ` <span class="lob-meta">${esc(c.title)}</span>` : ""}
+            <span class="lob-meta">${esc([c.email, c.phone].filter(Boolean).join(" · "))}</span>
+            ${S.canWrite && !c.is_primary ? `<button class="link-btn" data-contact-primary="${c.contact_id}">make primary</button>` : ""}
+            ${S.canWrite ? `<button class="link-btn" data-contact-remove="${c.contact_id}">remove</button>` : ""}
+          </li>`).join("") || '<li class="lob-meta">None recorded.</li>'}
+        </ul>
+        <form class="lob-form lob-contact-form" data-add-contact="${esc(d.donor_id)}">
+          <div class="lob-form-grid">
+            <label>Name <input name="name" ${dis} /></label>
+            <label>Title <input name="title" placeholder="Director of Government Affairs" ${dis} /></label>
+            <label>Email <input name="email" type="email" ${dis} /></label>
+            <label>Phone <input name="phone" ${dis} /></label>
+            <label class="span-2">From the lobbyist list <input name="lobbyist" list="lobbyist-options"
+              placeholder="Optional — fills the details" ${dis} /></label>
+            <label class="lob-check span-1"><input type="checkbox" name="is_primary" ${dis} /> Primary</label>
+          </div>
+          <div class="cluster-actions"><button class="btn-small" ${dis}>Add contact</button></div>
+        </form>
+      </div>
+    </div>
+  </div>`;
+}
+
+function decisionKey(table, r) {
+  return `${table}|${r.donor_id}|${table === "dll" ? r.lobbyist_id : r.client_key}`;
+}
+
+/** The last note an admin left on a decision, if any. */
+function noteText(r) {
+  const notes = (r.evidence || []).filter(e => e.type === "review_note");
+  return notes.length ? `<div class="lob-meta">${esc(notes[notes.length - 1].note)}</div>` : "";
+}
+
+/**
+ * Editing a decision in place. Moving it to another lobbyist or client is the
+ * interesting case: the old pair is rejected (so the matcher does not suggest
+ * it again) and the new one is created as a confirmed link, both carrying the
+ * reason.
+ */
+function decisionEditor(table, r, i) {
+  const isDll = table === "dll";
+  return `<form class="lob-form lob-decision-edit" data-decision="${i}">
+    <div class="lob-form-grid">
+      <label>Decision
+        <select name="status">
+          <option value="confirmed"${r.status === "confirmed" ? " selected" : ""}>confirmed</option>
+          <option value="rejected"${r.status === "rejected" ? " selected" : ""}>rejected</option>
+        </select>
+      </label>
+      <label class="span-2">Move to ${isDll ? "another lobbyist or firm" : "another client"}
+        <input name="move" list="${isDll ? "lobbyist-options" : "client-options"}"
+               placeholder="${esc(isDll ? S.lobbyists.get(r.lobbyist_id)?.name || "" : r.client_name)}" />
+      </label>
+      ${isDll ? `<label class="lob-check"><input type="checkbox" name="is_primary"${r.is_primary ? " checked" : ""} />
+        File the donor under them</label>` : '<div></div>'}
+      <label class="span-2">Note <input name="note" placeholder="Why this is right — kept with the decision" /></label>
+    </div>
+    <div class="cluster-actions">
+      <button type="submit" class="btn-small">Save</button>
+      <button type="button" class="btn-small" data-cancel-edit="1">Cancel</button>
+    </div>
+  </form>`;
+}
+
 function renderDecisions() {
   const q = document.getElementById("decision-search").value.trim().toLowerCase();
   const rows = [
@@ -472,13 +711,16 @@ function renderDecisions() {
   const tbody = document.getElementById("decision-tbody");
   tbody.innerHTML = rows.slice(0, S.decisionShown).map(({ table, r }, i) => `
     <tr>
-      <td>${esc(S.pool.get(r.donor_id)?.display_name || r.donor_id)}</td>
-      <td>${table === "dll" ? esc(S.lobbyists.get(r.lobbyist_id)?.name || r.lobbyist_id) : `client: ${esc(r.client_name)}`}</td>
-      <td class="lob-meta">${esc(LOB.describeMethod(table === "dcl" ? "client:" + r.method : r.method))}</td>
+      <td><a href="#" class="lob-name" data-open-donor="${esc(r.donor_id)}">${esc(S.pool.get(r.donor_id)?.display_name || r.donor_id)}</a></td>
+      <td>${table === "dll" ? esc(S.lobbyists.get(r.lobbyist_id)?.name || r.lobbyist_id) : `client: ${esc(r.client_name)}`}
+        ${table === "dll" && r.is_primary ? '<span class="badge badge-green">primary</span>' : ""}</td>
+      <td class="lob-meta">${esc(LOB.describeMethod(table === "dcl" ? "client:" + r.method : r.method))}${noteText(r)}</td>
       <td><span class="badge ${r.status === "confirmed" ? "badge-green" : "badge-red"}">${esc(r.status)}</span></td>
       <td class="lob-meta">${esc(r.decided_by || "")}</td>
-      <td>${S.canWrite ? `<button class="link-btn" data-undo="${i}">undo</button>` : ""}</td>
-    </tr>`).join("") || `<tr><td colspan="6" class="empty-msg">No decisions yet.</td></tr>`;
+      <td>${S.canWrite ? `<button class="link-btn" data-edit="${i}">edit</button>
+                          <button class="link-btn" data-undo="${i}">undo</button>` : ""}</td>
+    </tr>${S.editing === decisionKey(table, r) ? `<tr class="detail-row"><td colspan="6">${decisionEditor(table, r, i)}</td></tr>` : ""}`)
+    .join("") || `<tr><td colspan="6" class="empty-msg">No decisions yet.</td></tr>`;
   tbody._rows = rows;
   document.getElementById("decision-more").innerHTML = rows.length > S.decisionShown
     ? `<button class="btn-small" id="decision-more-btn">Show more (${rows.length - S.decisionShown} left)</button>` : "";
@@ -533,7 +775,8 @@ function lobbyistOptionLabel(l) {
 function refreshDatalists() {
   const lobs = [...S.lobbyists.values()].sort((a, b) => a.name.localeCompare(b.name));
   document.getElementById("lobbyist-options").innerHTML =
-    lobs.map(l => `<option value="${esc(lobbyistOptionLabel(l))}"></option>`).join("");
+    [...lobs].sort((a, b) => ((b.kind === "firm") - (a.kind === "firm")) || a.name.localeCompare(b.name))
+      .map(l => `<option value="${esc(lobbyistOptionLabel(l))}"></option>`).join("");
   const clients = [...S.clientNames.values()].sort((a, b) => a.localeCompare(b));
   document.getElementById("client-options").innerHTML =
     clients.map(c => `<option value="${esc(c)}"></option>`).join("");
@@ -544,6 +787,14 @@ function refreshDatalists() {
     document.body.appendChild(people);
   }
   people.innerHTML = lobs.filter(l => l.kind === "person")
+    .map(l => `<option value="${esc(lobbyistOptionLabel(l))}"></option>`).join("");
+  let firms = document.getElementById("firm-options");
+  if (!firms) {
+    firms = document.createElement("datalist");
+    firms.id = "firm-options";
+    document.body.appendChild(firms);
+  }
+  firms.innerHTML = lobs.filter(l => l.kind === "firm")
     .map(l => `<option value="${esc(lobbyistOptionLabel(l))}"></option>`).join("");
   let assign = document.getElementById("assign-options");
   if (!assign) {
@@ -566,13 +817,13 @@ async function decide(table, row, status) {
   Object.assign(row, { status, decided_by: S.who, decided_at: now() });
 }
 
-async function linkDonorToLobbyist(donorId, lobbyistId, status = "confirmed") {
+async function linkDonorToLobbyist(donorId, lobbyistId, status = "confirmed", note = "") {
   const sb = await getSupabase();
   const existing = S.dll.find(r => r.donor_id === donorId && r.lobbyist_id === lobbyistId);
   const row = {
     donor_id: donorId, lobbyist_id: lobbyistId,
     method: existing?.method || "manual", score: existing?.score ?? 1,
-    evidence: existing?.evidence || [{ type: "manual", by: S.who }],
+    evidence: withNote(existing || { evidence: [{ type: "manual", by: S.who }] }, note),
     status, decided_by: S.who, decided_at: now(), updated_at: now(),
   };
   const { error } = await sb.from("donor_lobbyist_links").upsert(row, { onConflict: "donor_id,lobbyist_id" });
@@ -580,17 +831,18 @@ async function linkDonorToLobbyist(donorId, lobbyistId, status = "confirmed") {
   if (existing) Object.assign(existing, row); else S.dll.push(row);
 }
 
-async function linkDonorToClient(donorId, clientName) {
+async function linkDonorToClient(donorId, clientName, note = "") {
   const sb = await getSupabase();
   const key = LOB.normOrg(clientName);
+  const existing = S.dcl.find(r => r.donor_id === donorId && r.client_key === key);
   const row = {
     donor_id: donorId, client_key: key, client_name: S.clientNames.get(key) || clientName,
-    method: "manual", score: 1, evidence: [{ type: "manual", by: S.who }],
+    method: "manual", score: 1,
+    evidence: withNote(existing || { evidence: [{ type: "manual", by: S.who }] }, note),
     status: "confirmed", decided_by: S.who, decided_at: now(), updated_at: now(),
   };
   const { error } = await sb.from("donor_client_links").upsert(row, { onConflict: "donor_id,client_key" });
   if (error) throw new Error(error.message);
-  const existing = S.dcl.find(r => r.donor_id === donorId && r.client_key === key);
   if (existing) Object.assign(existing, row); else S.dcl.push(row);
 }
 
@@ -666,6 +918,167 @@ async function setClientLead(lobbyistId, clientKey, on) {
   indexClients(all);
 }
 
+/** Append a note to a link's evidence, which is what the page renders back. */
+function withNote(row, note) {
+  const ev = [...(row.evidence || [])];
+  if (note) ev.push({ type: "review_note", note: `${note} — ${S.who}` });
+  return ev;
+}
+
+/**
+ * File a donor under one lobbyist or firm. The link is created if it does not
+ * exist, confirmed if it does, and every other direct link for the donor loses
+ * its primary flag — one donor, one primary.
+ */
+async function setDonorPrimary(donorId, lobbyistId, note = "filed under them by an admin") {
+  const sb = await getSupabase();
+  const existing = S.dll.find(r => r.donor_id === donorId && r.lobbyist_id === lobbyistId);
+  const row = {
+    donor_id: donorId, lobbyist_id: lobbyistId,
+    method: existing?.method || "manual", score: existing?.score ?? 1,
+    evidence: withNote(existing || { evidence: [{ type: "manual", by: S.who }] }, note),
+    status: "confirmed", is_primary: true,
+    decided_by: S.who, decided_at: now(), updated_at: now(),
+  };
+  const { error } = await sb.from("donor_lobbyist_links").upsert(row, { onConflict: "donor_id,lobbyist_id" });
+  if (error) throw new Error(error.message);
+  const others = S.dll.filter(r => r.donor_id === donorId && r.lobbyist_id !== lobbyistId && r.is_primary);
+  for (const o of others) {
+    const { error: e2 } = await sb.from("donor_lobbyist_links").update({ is_primary: false, updated_at: now() })
+      .eq("donor_id", donorId).eq("lobbyist_id", o.lobbyist_id);
+    if (e2) throw new Error(e2.message);
+    o.is_primary = false;
+  }
+  if (existing) Object.assign(existing, row); else S.dll.push(row);
+}
+
+async function clearDonorPrimary(donorId) {
+  const sb = await getSupabase();
+  const { error } = await sb.from("donor_lobbyist_links").update({ is_primary: false, updated_at: now() })
+    .eq("donor_id", donorId).eq("is_primary", true);
+  if (error) throw new Error(error.message);
+  for (const r of S.dll) if (r.donor_id === donorId) r.is_primary = false;
+}
+
+// ── Donor contacts ──────────────────────────────────────────────────────────
+async function clearContactPrimary(donorId) {
+  const sb = await getSupabase();
+  const { error } = await sb.from("donor_contacts").update({ is_primary: false, updated_at: now() })
+    .eq("donor_id", donorId).eq("is_primary", true);
+  if (error) throw new Error(error.message);
+  for (const c of S.contacts.get(donorId) || []) c.is_primary = false;
+}
+
+async function addDonorContact(donorId, fields) {
+  const sb = await getSupabase();
+  // The unique index allows one primary per donor, so clear the old one first.
+  if (fields.is_primary) await clearContactPrimary(donorId);
+  const row = {
+    donor_id: donorId, lobbyist_id: fields.lobbyist_id || null,
+    name: fields.name, title: fields.title || null,
+    email: (fields.email || "").toLowerCase() || null, phone: fields.phone || null,
+    is_primary: !!fields.is_primary,
+    sort_order: (S.contacts.get(donorId) || []).length,
+    created_by: S.who,
+  };
+  const { data, error } = await sb.from("donor_contacts").insert(row).select().single();
+  if (error) throw new Error(error.message);
+  if (!S.contacts.has(donorId)) S.contacts.set(donorId, []);
+  S.contacts.get(donorId).push(data);
+  indexContacts([...S.contacts.values()].flat());
+}
+
+async function setContactPrimary(contactId) {
+  const all = [...S.contacts.values()].flat();
+  const c = all.find(x => x.contact_id === contactId);
+  if (!c) return;
+  await clearContactPrimary(c.donor_id);
+  const sb = await getSupabase();
+  const { error } = await sb.from("donor_contacts").update({ is_primary: true, updated_at: now() })
+    .eq("contact_id", contactId);
+  if (error) throw new Error(error.message);
+  c.is_primary = true;
+  indexContacts(all);
+}
+
+async function removeDonorContact(contactId) {
+  const sb = await getSupabase();
+  const { error } = await sb.from("donor_contacts").delete().eq("contact_id", contactId);
+  if (error) throw new Error(error.message);
+  const all = [...S.contacts.values()].flat().filter(c => c.contact_id !== contactId);
+  indexContacts(all);
+}
+
+// ── Partner designations ────────────────────────────────────────────────────
+async function setPartner(lobbyistId, chamber, party, on) {
+  const sb = await getSupabase();
+  if (on) {
+    const { error } = await sb.from("lobbyist_partners")
+      .upsert({ lobbyist_id: lobbyistId, chamber, party, set_by: S.who, set_at: now() },
+              { onConflict: "lobbyist_id,chamber,party" });
+    if (error) throw new Error(error.message);
+    if (!S.partners.has(lobbyistId)) S.partners.set(lobbyistId, new Set());
+    S.partners.get(lobbyistId).add(`${chamber}|${party}`);
+  } else {
+    const { error } = await sb.from("lobbyist_partners").delete()
+      .eq("lobbyist_id", lobbyistId).eq("chamber", chamber).eq("party", party);
+    if (error) throw new Error(error.message);
+    S.partners.get(lobbyistId)?.delete(`${chamber}|${party}`);
+  }
+}
+
+// ── Editing a recorded decision ─────────────────────────────────────────────
+async function saveDecisionEdit(table, row, form) {
+  const f = Object.fromEntries(new FormData(form).entries());
+  const note = (f.note || "").trim();
+  const move = (f.move || "").trim();
+  const sb = await getSupabase();
+
+  if (move) {
+    // Reassignment: reject the old pair so the matcher leaves it alone, then
+    // record the new one as a confirmed link.
+    const why = note || (table === "dll" ? "reassigned by an admin" : "moved to another client");
+    const t = table === "dll" ? "donor_lobbyist_links" : "donor_client_links";
+    const q = sb.from(t).update({ status: "rejected", evidence: withNote(row, why),
+                                  is_primary: false, decided_by: S.who, decided_at: now(), updated_at: now() })
+      .eq("donor_id", row.donor_id);
+    const { error } = table === "dll" ? await q.eq("lobbyist_id", row.lobbyist_id) : await q.eq("client_key", row.client_key);
+    if (error) throw new Error(error.message);
+    Object.assign(row, { status: "rejected", is_primary: false, decided_by: S.who, decided_at: now(),
+                         evidence: withNote(row, why) });
+    if (table === "dll") {
+      const id = Number((move.match(/#(\d+)$/) || [])[1]);
+      if (!S.lobbyists.has(id)) throw new Error("Pick a lobbyist from the list.");
+      if (f.is_primary) await setDonorPrimary(row.donor_id, id, why);
+      else await linkDonorToLobbyist(row.donor_id, id, "confirmed", why);
+    } else {
+      await linkDonorToClient(row.donor_id, move, why);
+    }
+    return;
+  }
+
+  const t = table === "dll" ? "donor_lobbyist_links" : "donor_client_links";
+  const patch = { status: f.status, evidence: withNote(row, note),
+                  decided_by: S.who, decided_at: now(), updated_at: now() };
+  if (table === "dll") patch.is_primary = f.status === "rejected" ? false : !!f.is_primary;
+  const q = sb.from(t).update(patch).eq("donor_id", row.donor_id);
+  const { error } = table === "dll" ? await q.eq("lobbyist_id", row.lobbyist_id) : await q.eq("client_key", row.client_key);
+  if (error) throw new Error(error.message);
+  Object.assign(row, patch);
+  // Only one primary per donor.
+  if (table === "dll" && patch.is_primary) {
+    for (const r of S.dll) {
+      if (r.donor_id === row.donor_id && r.lobbyist_id !== row.lobbyist_id && r.is_primary) {
+        const { error: e2 } = await sb.from("donor_lobbyist_links")
+          .update({ is_primary: false, updated_at: now() })
+          .eq("donor_id", r.donor_id).eq("lobbyist_id", r.lobbyist_id);
+        if (e2) throw new Error(e2.message);
+        r.is_primary = false;
+      }
+    }
+  }
+}
+
 function splitList(s) {
   return String(s || "").split(";").map(x => x.trim()).filter(Boolean);
 }
@@ -692,6 +1105,7 @@ async function saveNewLobbyist(form) {
 
 async function saveLobbyistEdits(form) {
   const id = Number(form.dataset.lobbyist);
+  const l = S.lobbyists.get(id) || {};
   const f = Object.fromEntries(new FormData(form).entries());
   const patch = {};
   for (const k of ["name", "firm", "affiliation", "email", "phone", "phone_alt", "address", "city", "state", "zip", "notes"]) {
@@ -699,9 +1113,28 @@ async function saveLobbyistEdits(form) {
   }
   if (patch.email) patch.email = patch.email.toLowerCase();
   patch.aliases = splitList(f.aliases);
+  // Remember which fields were typed here. The weekly Capitol Club refresh
+  // rewrites a member's card, and would otherwise undo the correction.
+  const manual = new Set(l.manual_fields || []);
+  for (const k of CC_EDITABLE) if ((patch[k] || "") !== (l[k] || "")) manual.add(k);
+  patch.manual_fields = [...manual];
+  if (manual.has("name") && l.kind === "person") {
+    const parts = patch.name.split(/\s+/);
+    patch.first_name = parts[0];
+    patch.last_name = parts.length > 1 ? parts[parts.length - 1] : null;
+  }
   patch.updated_at = now();
   const sb = await getSupabase();
   const { data, error } = await sb.from("lobbyists").update(patch).eq("lobbyist_id", id).select().single();
+  if (error) throw new Error(error.message);
+  S.lobbyists.set(id, data);
+}
+
+/** Hand the listed fields back to the Capitol Club scrape. */
+async function revertLobbyistEdits(id) {
+  const sb = await getSupabase();
+  const { data, error } = await sb.from("lobbyists").update({ manual_fields: [], updated_at: now() })
+    .eq("lobbyist_id", id).select().single();
   if (error) throw new Error(error.message);
   S.lobbyists.set(id, data);
 }
@@ -773,11 +1206,31 @@ function openLobbyist(id, toggle = true) {
   document.querySelector(`tr[data-lobbyist="${id}"]`)?.scrollIntoView({ block: "center" });
 }
 
+function openDonor(id, toggle = true) {
+  if (!document.getElementById("tab-donors").classList.contains("active")) {
+    document.querySelector('[data-admin-tab="tab-donors"]').click();
+    toggle = false;
+  }
+  S.openDonor = toggle && S.openDonor === id ? null : id;
+  renderDonors().then(() => {
+    if (S.openDonor && !document.querySelector(`tr[data-donor-row="${CSS.escape(id)}"]`)) {
+      // Hidden by the current filters: search for it instead.
+      const d = S.pool.get(id);
+      if (d) document.getElementById("donor-search").value = d.display_name;
+      document.getElementById("donor-only-attributed").checked = false;
+      return renderDonors();
+    }
+  }).then(() => {
+    document.querySelector(`tr[data-donor-row="${CSS.escape(id)}"]`)?.scrollIntoView({ block: "center" });
+  });
+}
+
 function wireUi() {
   document.querySelectorAll(".admin-tab-btn").forEach(btn => btn.addEventListener("click", () => {
     document.querySelectorAll(".admin-tab-btn").forEach(b => b.classList.toggle("active", b === btn));
     document.querySelectorAll(".admin-tab").forEach(t => t.classList.toggle("active", t.id === btn.dataset.adminTab));
     if (btn.dataset.adminTab === "tab-unmatched") renderUnmatched();
+    if (btn.dataset.adminTab === "tab-donors") renderDonors();
   }));
 
   chipGroup("queue-kind", d => { S.queueKind = d.kind; S.queueShown = PAGE_SIZE; renderQueue(); });
@@ -789,12 +1242,29 @@ function wireUi() {
   document.getElementById("lob-show-off-cc").addEventListener("change", renderLobbyists);
   document.getElementById("unmatched-search").addEventListener("input", () => renderUnmatched());
   document.getElementById("decision-search").addEventListener("input", renderDecisions);
+  document.getElementById("donor-search").addEventListener("input", () => { S.donorShown = PAGE_SIZE; renderDonors(); });
+  document.getElementById("donor-only-attributed").addEventListener("change", () => { S.donorShown = PAGE_SIZE; renderDonors(); });
+
+  // Partner standing is a checkbox, so it saves on change rather than submit.
+  document.body.addEventListener("change", async (e) => {
+    const box = e.target.closest("[data-partner]");
+    if (!box) return;
+    await guarded(async () => {
+      await setPartner(Number(box.dataset.partner), box.dataset.chamber, box.dataset.party, box.checked);
+      renderAll();
+    });
+  });
 
   document.body.addEventListener("click", async (e) => {
     const t = e.target;
     if (t.closest("[data-open-lobbyist]")) {
       e.preventDefault();
       openLobbyist(Number(t.closest("[data-open-lobbyist]").dataset.openLobbyist));
+      return;
+    }
+    if (t.closest("[data-open-donor]")) {
+      e.preventDefault();
+      openDonor(t.closest("[data-open-donor]").dataset.openDonor);
       return;
     }
     if (t.dataset.act) {
@@ -822,6 +1292,31 @@ function wireUi() {
     if (t.id === "lob-more-btn") { S.lobShown += PAGE_SIZE; renderLobbyists(); return; }
     if (t.id === "unmatched-more-btn") { S.unmatchedShown += PAGE_SIZE; renderUnmatched(); return; }
     if (t.id === "decision-more-btn") { S.decisionShown += PAGE_SIZE; renderDecisions(); return; }
+    if (t.id === "donor-more-btn") { S.donorShown += PAGE_SIZE; renderDonors(); return; }
+    if (t.dataset.edit !== undefined) {
+      const { table, r } = document.getElementById("decision-tbody")._rows[Number(t.dataset.edit)];
+      const key = decisionKey(table, r);
+      S.editing = S.editing === key ? null : key;
+      renderDecisions();
+      return;
+    }
+    if (t.dataset.cancelEdit) { S.editing = null; renderDecisions(); return; }
+    if (t.dataset.revertEdits) {
+      await guarded(async () => { await revertLobbyistEdits(Number(t.dataset.revertEdits)); renderAll(); });
+      return;
+    }
+    if (t.dataset.clearPrimary) {
+      await guarded(async () => { await clearDonorPrimary(t.dataset.clearPrimary); renderAll(); });
+      return;
+    }
+    if (t.dataset.contactPrimary) {
+      await guarded(async () => { await setContactPrimary(Number(t.dataset.contactPrimary)); renderAll(); });
+      return;
+    }
+    if (t.dataset.contactRemove) {
+      await guarded(async () => { await removeDonorContact(Number(t.dataset.contactRemove)); renderAll(); });
+      return;
+    }
     if (t.id === "lob-add-btn") { document.getElementById("lob-add-form").hidden = false; return; }
     if (t.id === "lob-add-cancel") { document.getElementById("lob-add-form").hidden = true; return; }
     if (t.dataset.undo !== undefined) {
@@ -888,6 +1383,52 @@ function wireUi() {
         const firm = S.lobbyists.get(Number(form.dataset.addMember));
         const ids = firmMembers(firm).map(m => m.lobbyist_id);
         await saveFirmMembers(firm.lobbyist_id, firm.firm_primary_id || id, [...ids, id]);
+        renderAll();
+      });
+    } else if (form.classList.contains("lob-decision-edit")) {
+      const { table, r } = document.getElementById("decision-tbody")._rows[Number(form.dataset.decision)];
+      await guarded(async () => {
+        await saveDecisionEdit(table, r, form);
+        S.editing = null;
+        renderAll();
+      });
+    } else if (form.dataset.fileUnder) {
+      const v = form.target.value.trim();
+      if (!v) return;
+      await guarded(async () => {
+        const id = Number((v.match(/#(\d+)$/) || [])[1]);
+        if (!S.lobbyists.has(id)) throw new Error("Pick a lobbyist or firm from the list.");
+        await setDonorPrimary(form.dataset.fileUnder, id);
+        form.reset();
+        renderAll();
+      });
+    } else if (form.dataset.addContact) {
+      const f = Object.fromEntries(new FormData(form).entries());
+      await guarded(async () => {
+        const picked = Number((String(f.lobbyist || "").match(/#(\d+)$/) || [])[1]);
+        const l = S.lobbyists.get(picked);
+        const fields = {
+          lobbyist_id: l ? l.lobbyist_id : null,
+          name: (f.name || l?.name || "").trim(),
+          title: (f.title || l?.affiliation || "").trim(),
+          email: (f.email || l?.email || "").trim(),
+          phone: (f.phone || l?.phone || "").trim(),
+          is_primary: !!f.is_primary,
+        };
+        if (!fields.name) throw new Error("A contact needs a name.");
+        await addDonorContact(form.dataset.addContact, fields);
+        form.reset();
+        renderAll();
+      });
+    } else if (form.dataset.joinFirm) {
+      const v = form.firm.value.trim();
+      await guarded(async () => {
+        const firmId = Number((v.match(/#(\d+)$/) || [])[1]);
+        const firm = S.lobbyists.get(firmId);
+        if (!firm || firm.kind !== "firm") throw new Error("Pick a firm from the list.");
+        const person = Number(form.dataset.joinFirm);
+        const ids = firmMembers(firm).map(m => m.lobbyist_id);
+        await saveFirmMembers(firm.lobbyist_id, firm.firm_primary_id || person, [...ids, person]);
         renderAll();
       });
     } else if (form.dataset.addClient) {

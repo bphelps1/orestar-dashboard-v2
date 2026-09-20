@@ -205,6 +205,27 @@ def _split_name(name: str) -> tuple[str, str]:
     return parts[0], parts[-1]
 
 
+# The contact fields Capitol Club supplies, in the order the update below
+# passes them.
+CC_FIELDS = ["name", "first_name", "last_name", "affiliation", "email", "phone", "phone_alt",
+             "address", "city", "state", "zip", "category", "preferred_contact"]
+
+
+def _refresh_set_clause() -> str:
+    """SET clause that leaves fields an admin edited by hand alone.
+
+    A member's card is re-read every week, which used to overwrite a
+    correction made at /admin/lobbyists the moment it was saved. A field named
+    in lobbyists.manual_fields now keeps its stored value; clearing the edit
+    there hands the field back to the scrape. first_name/last_name follow
+    'name', since they are derived from it.
+    """
+    def guard(field: str) -> str:
+        owner = "name" if field in ("first_name", "last_name") else field
+        return f"{field} = case when '{owner}' = any(l.manual_fields) then l.{field} else v.{field} end"
+    return ", ".join(guard(f) for f in CC_FIELDS)
+
+
 def sync(data: dict) -> None:
     import supabase_sync as s
     from psycopg2.extras import execute_values
@@ -238,11 +259,8 @@ def sync(data: dict) -> None:
             inserts.append(vals)
 
     if updates:
-        execute_values(cur, """
-            update lobbyists l set name=v.name, first_name=v.first_name, last_name=v.last_name,
-                   affiliation=v.affiliation, email=v.email, phone=v.phone, phone_alt=v.phone_alt,
-                   address=v.address, city=v.city, state=v.state, zip=v.zip, category=v.category,
-                   preferred_contact=v.preferred_contact, cc_id=v.cc_id, on_capitol_club=true,
+        execute_values(cur, f"""
+            update lobbyists l set {_refresh_set_clause()}, cc_id=v.cc_id, on_capitol_club=true,
                    cc_last_seen=v.seen::date, updated_at=now()
             from (values %s) as v(lobbyist_id, name, first_name, last_name, affiliation, email, phone,
                                   phone_alt, address, city, state, zip, category, preferred_contact,
