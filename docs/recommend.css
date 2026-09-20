@@ -528,14 +528,27 @@
 .plan-members ul { list-style: none; margin: 4px 0 0; padding: 0; }
 .plan-members li { padding: 1px 0; }
 .plan-members li span { color: var(--color-text-light); }
+.sc-small { font-size: 1rem; }
 .plan-count { font-size: 0.8rem; font-weight: 400; color: var(--color-text-muted); white-space: nowrap; }
 .plan-firm {
   font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
   background: var(--color-accent-light); color: var(--color-accent); border-radius: 8px; padding: 1px 6px;
 }
-.plan-table td:first-child { min-width: 240px; }
-.plan-table tr.plan-donor td:first-child { padding-left: 28px; }
+.plan-table td:nth-child(2) { min-width: 240px; }
+.plan-table tr.plan-donor td:nth-child(2) { padding-left: 28px; }
 .plan-also { font-size: 0.75rem; color: var(--color-text-muted); }
+.plan-donor-contact { font-size: 0.75rem; color: var(--color-text-muted); margin-top: 2px; overflow-wrap: anywhere; }
+.plan-tier-cell { width: 74px; white-space: nowrap; }
+.plan-why { font-size: 0.75rem; font-weight: 400; color: var(--color-text-muted); max-width: 320px; }
+.plan-tier {
+  display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; border-radius: 8px; padding: 2px 7px; white-space: nowrap; cursor: help;
+}
+.plan-tier.is-partner { background: #fde68a; color: #78350f; }
+.plan-tier.is-t1 { background: #dcfce7; color: #166534; }
+.plan-tier.is-t2 { background: var(--color-accent-light); color: var(--color-accent-dark); }
+.plan-tier.is-t3 { background: var(--color-surface-alt); color: var(--color-text-muted); }
+.plan-tier.is-t4 { background: transparent; color: var(--color-text-light); }
 .plan-attr { font-size: 0.78rem; color: var(--color-text-muted); min-width: 180px; max-width: 320px; }
 .plan-type {
   font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;

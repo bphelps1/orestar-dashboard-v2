@@ -55,6 +55,7 @@
   <div class="admin-tabs">
     <button class="admin-tab-btn active" data-admin-tab="tab-queue">Review queue <span class="tab-count" id="count-queue"></span></button>
     <button class="admin-tab-btn" data-admin-tab="tab-lobbyists">Lobbyists <span class="tab-count" id="count-lobbyists"></span></button>
+    <button class="admin-tab-btn" data-admin-tab="tab-donors">Donors <span class="tab-count" id="count-donors"></span></button>
     <button class="admin-tab-btn" data-admin-tab="tab-unmatched">Unmatched donors</button>
     <button class="admin-tab-btn" data-admin-tab="tab-decisions">Decisions <span class="tab-count" id="count-decisions"></span></button>
   </div>
@@ -135,6 +136,34 @@
     <div class="lob-more" id="lob-more"></div>
   </section>
 
+  <!-- ── Donors ───────────────────────────────────────────────────────── -->
+  <section id="tab-donors" class="admin-tab">
+    <p class="section-desc">
+      One entry per donor: the lobbyist or firm it is filed under in a plan, and the people to call.
+      A donor's contacts are its own — a government-affairs director who is not on Capitol Club belongs
+      here, not in the lobbyist list.
+    </p>
+    <div class="lob-filters">
+      <input type="search" id="donor-search" class="table-search" placeholder="Search donors…" />
+      <label class="lob-check"><input type="checkbox" id="donor-only-attributed" checked /> Only donors with an attribution</label>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table" id="donor-table">
+        <thead>
+          <tr>
+            <th>Donor</th>
+            <th>Filed under</th>
+            <th>Primary contact</th>
+            <th class="num">Given since 2021</th>
+            <th class="num">Contacts</th>
+          </tr>
+        </thead>
+        <tbody id="donor-tbody"></tbody>
+      </table>
+    </div>
+    <div class="lob-more" id="donor-more"></div>
+  </section>
+
   <!-- ── Unmatched donors ─────────────────────────────────────────────── -->
   <section id="tab-unmatched" class="admin-tab">
     <p class="section-desc">
@@ -171,8 +200,9 @@
 
   <!-- ── Decisions ────────────────────────────────────────────────────── -->
   <section id="tab-decisions" class="admin-tab">
-    <p class="section-desc">Confirmed and rejected attributions. Undo returns a pair to the review queue
-      (a manual link is removed instead).</p>
+    <p class="section-desc">Confirmed and rejected attributions. <strong>Edit</strong> changes a decision in
+      place — flip it, move the donor to a different lobbyist or client, mark it the donor's primary, or
+      leave a note. Undo returns a pair to the review queue (a manual link is removed instead).</p>
     <div class="lob-filters">
       <div class="lob-chip-group" id="decision-status">
         <button class="lob-chip active" data-status="all">All</button>
@@ -184,7 +214,7 @@
     <div class="table-wrapper">
       <table class="data-table">
         <thead>
-          <tr><th>Donor</th><th>Attributed to</th><th>How</th><th>Decision</th><th>By</th><th></th></tr>
+          <tr><th>Donor</th><th>Attributed to</th><th>How</th><th>Decision</th><th>By</th><th>Change</th></tr>
         </thead>
         <tbody id="decision-tbody"></tbody>
       </table>

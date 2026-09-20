@@ -101,7 +101,9 @@
         <h3>Lobbyist Plan</h3>
         <p class="section-desc">Every donor target and new prospect, grouped under the lobbyist who handles
           that donor — the call list, one lobbyist at a time. A donor shows under one lobbyist (the tracker's
-          “Lobbyist 1” or the strongest match); others are listed beside it. Attributions are reviewed at
+          “Lobbyist 1” or the strongest match); others are listed beside it. Lobbyists are ordered
+          Partner → Tier 1 → Tier 4 by the size of their book here and how much their donors give to
+          candidates like this one. Partners and attributions are set at
           <a href="/admin/lobbyists">/admin/lobbyists</a>.</p>
         <div class="export-btns">
           <button class="btn-small" id="export-lobbyist-csv">CSV</button>
@@ -120,6 +122,7 @@
         <table id="plan-table" class="data-table plan-table">
           <thead>
             <tr>
+              <th>Tier</th>
               <th>Lobbyist / Donor</th>
               <th>Type</th>
               <th class="num">Target</th>

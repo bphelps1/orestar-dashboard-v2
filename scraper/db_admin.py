@@ -31,14 +31,21 @@ MIGRATIONS = [
     "014_donor_leaderboard.sql",
     "015_donor_date_index.sql",
     "016_lobbyists.sql",
+    "017_plan_designations.sql",
 ]
 
 
-def apply():
+def apply(only: str | None = None):
+    """Apply every migration, or just the one named (they are all re-runnable)."""
+    names = MIGRATIONS
+    if only:
+        if only not in MIGRATIONS:
+            raise SystemExit(f"unknown migration {only!r}; known: {', '.join(MIGRATIONS)}")
+        names = [only]
     conn = s._connect()
     conn.autocommit = True
     cur = conn.cursor()
-    for name in MIGRATIONS:
+    for name in names:
         path = MIGRATIONS_DIR / name
         sql = path.read_text()
         print(f"→ applying {name} …", flush=True)
@@ -140,4 +147,7 @@ def seed_aggregates():
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "verify"
-    {"apply": apply, "verify": verify, "seed-aggregates": seed_aggregates}.get(cmd, verify)()
+    if cmd == "apply":
+        apply(sys.argv[2] if len(sys.argv) > 2 else None)
+    else:
+        {"verify": verify, "seed-aggregates": seed_aggregates}.get(cmd, verify)()

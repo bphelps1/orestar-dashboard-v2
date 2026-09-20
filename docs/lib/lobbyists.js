@@ -2,8 +2,8 @@
  * lobbyists.js — shared reads for lobbyist ↔ donor attribution.
  *
  * Used by /admin/lobbyists (review) and /recommend (the By Lobbyist plan).
- * Tables are defined in supabase/migrations/016_lobbyists.sql; everything is
- * readable only when signed in.
+ * Tables are defined in supabase/migrations/016_lobbyists.sql and 017_plan_designations.sql;
+ * everything is readable only when signed in.
  *
  * Requires lib/supabase.js (getSupabase) to be loaded first.
  */
@@ -64,12 +64,72 @@ const LOB = (() => {
     return fetchAll(() => sb.from("lobbyist_clients").select("*").order("lobbyist_id"));
   }
 
+  /** Partner designations (017): Map<lobbyist_id, Set<"house|D">>. */
+  async function loadPartners() {
+    const sb = await getSupabase();
+    const rows = await fetchAll(() => sb.from("lobbyist_partners").select("*").order("lobbyist_id"));
+    const out = new Map();
+    for (const r of rows) {
+      if (!out.has(r.lobbyist_id)) out.set(r.lobbyist_id, new Set());
+      out.get(r.lobbyist_id).add(`${r.chamber}|${r.party}`);
+    }
+    return out;
+  }
+
+  /** The people to call for each donor: Map<donor_id, [contact]>, primary first. */
+  async function loadDonorContacts(donorIds) {
+    const rows = await fetchIn("donor_contacts", "*", "donor_id", donorIds);
+    const out = new Map();
+    for (const r of rows) {
+      if (!out.has(r.donor_id)) out.set(r.donor_id, []);
+      out.get(r.donor_id).push(r);
+    }
+    for (const list of out.values()) {
+      list.sort((a, b) => (b.is_primary - a.is_primary) || (a.sort_order - b.sort_order)
+        || a.name.localeCompare(b.name));
+    }
+    return out;
+  }
+
   /**
-   * Attribution for a set of donor labels (as shown on the Recommend page).
+   * Everything the plan needs for a set of donor labels (as shown on the
+   * Recommend page):
+   *   byLabel   Map<labelKey, [{lobbyist, status, methods, client_names, …}]>
+   *             strongest first; rejected pairs never appear (the view drops them)
+   *   donorIds  Map<labelKey, [donor_id]> — the pool records behind the label
+   *   contacts  Map<labelKey, [donor_contacts row]> — primary first
+   */
+  async function planAttribution(labels, lobbyistsById) {
+    const { byLabel, donorIds } = await _attribution(labels, lobbyistsById);
+    const contactsByDonor = await loadDonorContacts([...new Set([...donorIds.values()].flat())]);
+    const contacts = new Map();
+    for (const [label, ids] of donorIds) {
+      const seen = new Set();
+      const list = [];
+      for (const id of ids) {
+        for (const c of contactsByDonor.get(id) || []) {
+          if (seen.has(c.contact_id)) continue;
+          seen.add(c.contact_id);
+          list.push(c);
+        }
+      }
+      list.sort((a, b) => (b.is_primary - a.is_primary) || (a.sort_order - b.sort_order));
+      if (list.length) contacts.set(label, list);
+    }
+    return { byLabel, donorIds, contacts };
+  }
+
+  /**
+   * Attribution for a set of donor labels.
    * Returns Map<labelKey, [{lobbyist, status, methods, client_names, donor_id}]>,
    * strongest first. Rejected pairs never appear (the view drops them).
    */
   async function attributionForLabels(labels, lobbyistsById) {
+    return (await _attribution(labels, lobbyistsById)).byLabel;
+  }
+
+  /** attributionForLabels, also handing back the pool ids behind each label. */
+  async function _attribution(labels, lobbyistsById) {
     const keys = [...new Set(labels.map(labelKey))];
     // names is a text[]; match with the array-overlap operator in chunks.
     const sb = await getSupabase();
@@ -84,6 +144,13 @@ const LOB = (() => {
     for (const r of poolRows) {
       const hits = (r.names || []).filter(n => wanted.has(n));
       if (hits.length) donorToLabels.set(r.donor_id, hits);
+    }
+    const donorIds = new Map();
+    for (const [donorId, hits] of donorToLabels) {
+      for (const label of hits) {
+        if (!donorIds.has(label)) donorIds.set(label, []);
+        donorIds.get(label).push(donorId);
+      }
     }
     const attr = await fetchIn("donor_lobbyists", "*", "donor_id", [...donorToLabels.keys()]);
     const out = new Map();
@@ -112,7 +179,7 @@ const LOB = (() => {
         || (y.score - x.score)
         || x.lobbyist.name.localeCompare(y.lobbyist.name));
     }
-    return out;
+    return { byLabel: out, donorIds };
   }
 
   /** Human description of how a pair was attributed. */
@@ -135,5 +202,6 @@ const LOB = (() => {
   }
 
   return { fetchAll, fetchIn, normOrg, labelKey, pgArray, loadLobbyists, loadClients,
-           attributionForLabels, describeMethod };
+           loadPartners, loadDonorContacts, planAttribution, attributionForLabels,
+           describeMethod };
 })();

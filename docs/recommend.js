@@ -244,6 +244,7 @@ async function runRecommendations() {
 
   const cycle = parseInt(document.getElementById("cycle-select").value);
   const years = cycleYears(cycle).map(String);
+  window._targetFiler = filer;   // chamber/party for partner designations
 
   document.getElementById("run-btn").disabled = true;
   showStatus("Finding comparable fundraisers…", "loading");
@@ -272,8 +273,11 @@ async function runRecommendations() {
     const { prospects: recommendations, notRecommended: prospectNotRec } = scoreDonors(targetProfile, comparables, compProfiles, years, cycle, targetSeat);
     const allNotRecommended = [...repeatNotRec, ...prospectNotRec];
 
-    // 6. Display results
-    displayResults(recommendations, repeatTargets, targetProfile, comparables, cycle, allNotRecommended);
+    // 6. Display results, with what seats of this closeness actually raise
+    window._compCycles = buildCompCycleIndex(comparables, compProfiles);
+    const seatContext = seatPeerContext(comparables, compProfiles, cycle, targetSeat, targetProfile);
+    displayResults(recommendations, repeatTargets, targetProfile, comparables, cycle, allNotRecommended,
+                   targetSeat, seatContext);
 
   } catch (err) {
     showStatus(`Error: ${err.message}`, "error");
@@ -324,18 +328,51 @@ function isOfficeComparable(targetOffice, fOffice) {
 // poor template for a competitive one. Margins come from race_margins
 // (general elections only — primaries are too variable to describe a seat).
 //
+// Competitiveness is used as a BENCHMARK, never as a multiplier. The engine
+// does not scale a base ask up because a seat is close; it asks what this
+// donor actually gave to candidates in seats of the same closeness, and uses
+// that. The bands below only label a seat and steer which committees count as
+// comparable — no number is derived from them.
+//
 // Only the CURRENT district era is used. Oregon redraws maps two years after
 // each census (2012, 2022), so a pre-2022 margin describes a different
 // electorate under the same district number.
 
 const MARGIN_BANDS = [
-  { band: "competitive", max: 10,       mult: 1.25, label: "competitive (<10 pt margin)" },
-  { band: "lean",        max: 20,       mult: 1.05, label: "lean (10–20 pt margin)" },
-  { band: "safe",        max: Infinity, mult: 0.85, label: "safe (>20 pt margin)" },
+  { band: "competitive", max: 10,       label: "competitive (<10 pt margin)" },
+  { band: "lean",        max: 20,       label: "lean (10–20 pt margin)" },
+  { band: "safe",        max: Infinity, label: "safe (>20 pt margin)" },
 ];
-const UNOPPOSED = { band: "unopposed", mult: 0.75, label: "unopposed last cycle" };
+const UNOPPOSED = { band: "unopposed", label: "unopposed last cycle" };
 
-let raceMarginIndex = null;   // "Office|District" -> {margin_pts, band, mult, label, year}
+// A gift counts as a peer benchmark when the seat it was given in finished
+// within this many points of the target's margin. The windows widen until
+// enough gifts qualify; below MIN_PEER_GIFTS the donor's whole history is
+// used instead and the fallback is stated in the explanation.
+const PEER_WINDOWS = [5, 10, 20];
+const MIN_PEER_GIFTS = 3;
+
+/**
+ * The subset of a donor's comparable gifts made in seats about as contested
+ * as the target's, using the narrowest window that holds enough of them.
+ * Returns null when the target seat has no margin on record, or when even the
+ * widest window is too thin to say anything.
+ */
+function peerMarginGifts(gifts, targetMargin) {
+  if (targetMargin == null) return null;
+  for (const window of PEER_WINDOWS) {
+    const peers = gifts.filter(g => g.marginPts != null && Math.abs(g.marginPts - targetMargin) <= window);
+    if (peers.length >= MIN_PEER_GIFTS) return { gifts: peers, window };
+  }
+  return null;
+}
+
+/** "Friends of X (0.8 pt margin): $2,500" — a gift behind a benchmarked ask. */
+function peerGiftLabel(g) {
+  return `${g.filer} (${g.marginPts != null ? `${g.marginPts.toFixed(1)} pt margin` : "no margin"}): ${fmt$(g.amount)}`;
+}
+
+let raceMarginIndex = null;   // "Office|District" -> {margin_pts, band, label, year}
 
 function bandFor(marginPts, unopposed) {
   if (unopposed) return UNOPPOSED;
@@ -446,8 +483,8 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     // Seat competitiveness: prefer comparables from similarly-contested seats.
     // Without this, a safe-seat donor history can set the template for a swing
     // seat (and vice versa), which is exactly what skews the suggested ask.
+    const fSeat = seatCompetitiveness(f);
     if (targetSeat) {
-      const fSeat = seatCompetitiveness(f);
       if (fSeat) {
         if (fSeat.band === targetSeat.band) similarity += 12;
         else if ((fSeat.band === "competitive" && targetSeat.band === "safe") ||
@@ -466,13 +503,55 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     }
 
     if (similarity > 20) {
-      scored.push({ ...f, similarity, officeType: fOffice, party: fParty, chamber: fChamber });
+      scored.push({ ...f, similarity, officeType: fOffice, party: fParty, chamber: fChamber, seat: fSeat });
     }
   }
 
   // Sort by similarity descending, take top 50
   scored.sort((a, b) => b.similarity - a.similarity);
   return scored.slice(0, 50);
+}
+
+/**
+ * What committees in seats of the same closeness actually raise.
+ *
+ * The engine's answer to "is this ask realistic for a seat this contested?"
+ * is measured, not assumed: take the comparables whose last general finished
+ * within a few points of the target's, and report what they raised this
+ * cycle. Shown on the results page and in the export so a target can be read
+ * against its peers rather than against a multiplier.
+ */
+function seatPeerContext(comparables, compProfiles, cycle, targetSeat, targetProfile) {
+  if (!targetSeat || targetSeat.margin_pts == null) return null;
+  const { start, end } = cycleDateRange(cycle);
+  const raised = profile => (profile?.timeline || [])
+    .filter(t => t.month >= start && t.month <= end)
+    .reduce((s, t) => s + (t.contributions || 0), 0);
+  const all = comparables
+    .map((c, i) => ({ name: c.name, seat: c.seat, total: raised(compProfiles[i]),
+                      leadership: (c.leadership_tier || 0) > 0 }))
+    .filter(c => c.seat && c.seat.margin_pts != null);
+  // Leadership raises on a different scale from the back bench, so a leader's
+  // seat is only comparable to another leader's. Fall back to every seat when
+  // that leaves too few.
+  const isLeader = (targetProfile?._leadershipTier || 0) > 0;
+  const sameRole = all.filter(c => c.leadership === isLeader);
+  const withSeats = sameRole.length >= 3 ? sameRole : all;
+  for (const window of PEER_WINDOWS) {
+    const peers = withSeats.filter(c => Math.abs(c.seat.margin_pts - targetSeat.margin_pts) <= window);
+    if (peers.length < 3) continue;
+    const totals = peers.map(p => p.total).sort((a, b) => a - b);
+    return {
+      window, n: peers.length,
+      median: percentile(totals, 0.5),
+      p75: percentile(totals, 0.75),
+      max: totals[totals.length - 1],
+      raised: raised(targetProfile),
+      leadershipOnly: withSeats === sameRole && isLeader,
+      peers: peers.sort((a, b) => b.total - a.total),
+    };
+  }
+  return null;
 }
 
 // ── Metadata helpers: use scraped ORESTAR data, fall back to name heuristics ─
@@ -564,6 +643,36 @@ function detectOfficeFromName(name) {
  * Get all years a donor gave to any comparable filer (across ALL years, not just cycle).
  * Returns array of year numbers, e.g. [2020, 2022, 2024].
  */
+/** Oregon cycles run odd→even, named for the even year: 2025 and 2026 → 2026. */
+function yearToCycle(yr) { return yr % 2 === 0 ? yr : yr + 1; }
+
+/**
+ * Every donor's giving to every comparable, by cycle:
+ *   Map<donor name (lower), Map<comparable name, {cycle: amount}>>
+ *
+ * The scoring functions only look at the cycle being planned; the export needs
+ * the earlier ones too, because "gave Julie Fahey $17,500 last cycle" is the
+ * argument for this cycle's ask. Built once per run.
+ */
+function buildCompCycleIndex(comparables, compProfiles) {
+  const idx = new Map();
+  compProfiles.forEach((profile, i) => {
+    const filer = comparables[i].name;
+    for (const [yrStr, donors] of Object.entries(profile?.top_donors_by_year || {})) {
+      const cy = yearToCycle(parseInt(yrStr));
+      for (const d of donors) {
+        const key = d.name.toLowerCase();
+        if (!idx.has(key)) idx.set(key, new Map());
+        const perFiler = idx.get(key);
+        if (!perFiler.has(filer)) perFiler.set(filer, {});
+        const byCycle = perFiler.get(filer);
+        byCycle[cy] = (byCycle[cy] || 0) + d.total;
+      }
+    }
+  });
+  return idx;
+}
+
 function _getAllYearGifts(donorName, compProfiles, comparables) {
   const key = donorName.toLowerCase();
   const years = [];
@@ -586,9 +695,6 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
   const byYear = targetProfile.top_donors_by_year || {};
   const allYears = Object.keys(byYear).map(Number).sort((a, b) => a - b);
   const cycleStart = cycle - 1;
-
-  // Group years into 2-year election cycles
-  function yearToCycle(yr) { return yr % 2 === 0 ? yr : yr + 1; }
 
   // Build per-donor cycle history: donor → { cycles: {cycle: amount}, totalGifts }
   const donorHistory = new Map();
@@ -630,7 +736,9 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     for (const [key, cyMap] of compDonorCycles) {
       const maxCy = Math.max(...Object.values(cyMap));
       if (!compDonorDetails.has(key)) compDonorDetails.set(key, []);
-      compDonorDetails.get(key).push({ filer: comp.name, amount: maxCy, isLeadership: compIsLeadership, leadershipTier: compTier });
+      compDonorDetails.get(key).push({ filer: comp.name, amount: maxCy, isLeadership: compIsLeadership,
+                                       leadershipTier: compTier, marginPts: comp.seat?.margin_pts ?? null,
+                                       cycles: cyMap });
     }
   }
 
@@ -704,13 +812,21 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // A small gap (1.5x) means the comp amount is realistic for this donor;
     // a huge gap (10x+) means the relationship isn't there and we should
     // stay close to historical giving.
+    //
+    // The comparison set is the donor's giving in seats about as contested as
+    // this one (peerMarginGifts) whenever enough of it exists: what a donor
+    // gives a candidate in a 3-point race is the evidence for what they would
+    // give this candidate in a 3-point race. Everything they gave is the
+    // fallback, and the explanation says which was used.
+    const peer = peerMarginGifts(compGifts, targetSeat?.margin_pts ?? null);
+    const refGifts = peer ? peer.gifts : compGifts;
     // Discount single-filer outliers: if the max is >1.5x the second-highest,
     // it's an outlier — use the second-highest as the reference instead.
-    const sortedAmts = compGifts.map(g => g.amount).sort((a, b) => b - a);
+    const sortedAmts = refGifts.map(g => g.amount).sort((a, b) => b - a);
     const compRef = (sortedAmts.length >= 2 && sortedAmts[0] > sortedAmts[1] * 1.5)
       ? sortedAmts[1]
       : (sortedAmts[0] || 0);
-    const refGift = compGifts.find(g => g.amount === compRef);
+    const refGift = refGifts.find(g => g.amount === compRef);
     const maxFromNonLeadership = refGift && !refGift.isLeadership;
     const hasUplift = compRef > target;
     let compWeight = 0;
@@ -759,9 +875,17 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       factors.push(`Base target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""})`);
     }
 
+    // Say which giving the benchmark came from before quoting a number from it.
+    if (targetSeat && targetSeat.margin_pts != null && compGifts.length) {
+      factors.push(peer
+        ? `Benchmark: ${peer.gifts.length} gift${peer.gifts.length === 1 ? "" : "s"} to seats within `
+          + `${peer.window} pts of this one (${targetSeat.margin_pts.toFixed(1)} pt margin, ${targetSeat.year})`
+        : `Benchmark: all comparable giving — fewer than ${MIN_PEER_GIFTS} gifts to seats of similar closeness`);
+    }
+
     // Show comparable uplift details
     if (hasUplift) {
-      const upliftGifts = compGifts
+      const upliftGifts = refGifts
         .filter(g => g.amount > lastCycleAmt * 1.05)
         .sort((a, b) => b.amount - a.amount);
       const pct = Math.round(compWeight * 100);
@@ -770,11 +894,12 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       factors.push(`Comparable uplift (${pct}% weight, ref: ${fmt$(compRef)}${nlTag}${outlierNote}):`);
       upliftGifts.forEach(g => {
         const tag = g.isLeadership ? "" : " ★";
-        factors.push(`  • ${g.filer}: ${fmt$(g.amount)}${tag}`);
+        const seat = g.marginPts != null ? ` [${g.marginPts.toFixed(1)} pt seat]` : "";
+        factors.push(`  • ${g.filer}: ${fmt$(g.amount)}${seat}${tag}`);
       });
-    } else if (compGifts.length > 0) {
+    } else if (refGifts.length > 0) {
       // Show top comparable gifts even without uplift for context
-      const topGifts = [...compGifts].sort((a, b) => b.amount - a.amount).slice(0, 3);
+      const topGifts = [...refGifts].sort((a, b) => b.amount - a.amount).slice(0, 3);
       factors.push(`Top comparable gifts: ${topGifts.map(g => `${g.filer} (${fmt$(g.amount)})`).join(", ")}`);
     }
 
@@ -796,6 +921,9 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       remaining,
       consistency,
       history: historyParts,
+      cycles: donor.cycles,          // {cycle: amount} to THIS committee
+      comp_gifts: compGifts,         // gifts to comparables, with seat margins
+      benchmark: peer ? { window: peer.window, n: peer.gifts.length } : null,
       factors,
     });
   }
@@ -836,6 +964,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
         amount: d.total,
         similarity: comp.similarity,
         isLeadership: (comp.leadership_tier || 0) > 0,
+        marginPts: comp.seat?.margin_pts ?? null,
       });
       entry.totalToComps += d.total;
       entry.distinctComps = entry.compGifts.length;
@@ -896,23 +1025,22 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       continue;
     }
 
-    // Compute target ask from comparable gifts
+    // Compute the target ask from comparable gifts.
+    //
+    // Which gifts count is decided by the seat, not by a multiplier: when this
+    // donor has given to enough candidates in seats about as close as this one,
+    // only those gifts set the ask. That IS the competitiveness adjustment —
+    // the number comes from giving in comparable races rather than from
+    // scaling a safe-seat number up.
     const compAmounts = donor.compGifts.map(g => g.amount).sort((a, b) => a - b);
-    const median = percentile(compAmounts, 0.5);
-    const p75 = percentile(compAmounts, 0.75);
+    const peer = peerMarginGifts(donor.compGifts, targetSeat?.margin_pts ?? null);
+    const askAmounts = (peer ? peer.gifts.map(g => g.amount) : compAmounts).sort((a, b) => a - b);
+    const median = percentile(askAmounts, 0.5);
+    const p75 = percentile(askAmounts, 0.75);
 
     // Target = upper-median (between median and 75th) capped by donor's own max
     const maxGift = Math.max(...compAmounts);
     let targetAsk = Math.min(Math.round(((median + p75) / 2) * 100) / 100, maxGift);
-
-    // Scale by how contested the seat is: closer races draw larger gifts, so a
-    // safe-seat baseline understates a swing seat (and vice versa). Bounded
-    // 0.75×–1.25× so it tilts the ask without inventing a number, and the
-    // reason is surfaced in the explanation below rather than left implicit.
-    const seat = targetSeat;
-    if (seat) {
-      targetAsk = Math.min(Math.round(targetAsk * seat.mult * 100) / 100, maxGift);
-    }
 
     const remainingAsk = Math.max(0, targetAsk - alreadyGiven);
 
@@ -924,14 +1052,16 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     let score = 0;
     const factors = [];
 
-    // Say so when the seat moved the ask, so a scaled number is legible
-    // rather than looking arbitrary.
-    if (seat && seat.mult !== 1) {
-      const dir = seat.mult > 1 ? "raised" : "lowered";
-      factors.push(
-        `Ask ${dir} ${Math.round(Math.abs(seat.mult - 1) * 100)}% — seat is ${seat.label}`
-        + (seat.year ? ` (${seat.year})` : "")
-      );
+    // Show what the ask was measured against, so the number is traceable to
+    // real gifts rather than to a rule.
+    if (peer) {
+      factors.push(`Ask set by ${peer.gifts.length} gifts to seats within ${peer.window} pts of this one`
+        + ` (${targetSeat.margin_pts.toFixed(1)} pt margin, ${targetSeat.year}) — median ${fmt$(median)}`);
+      [...peer.gifts].sort((a, b) => b.amount - a.amount).slice(0, 4)
+        .forEach(g => factors.push(`  • ${peerGiftLabel(g)}`));
+    } else if (targetSeat && targetSeat.margin_pts != null) {
+      factors.push(`Ask set by all comparable giving — under ${MIN_PEER_GIFTS} gifts to seats within`
+        + ` ${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this ${targetSeat.label} seat`);
     }
 
     // Factor 1: Number of distinct comparable filers supported (0-35 pts)
@@ -1031,6 +1161,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       total_to_comps: donor.totalToComps,
       leadership_comps: donor.leadershipComps,
       comp_gifts: donor.compGifts,
+      benchmark: peer ? { window: peer.window, n: peer.gifts.length } : null,
       why_summary: whySummary,
       factors,
     });
@@ -1085,7 +1216,8 @@ function buildWhySummary(donor, alreadyGiven, targetAsk, topComps) {
 }
 
 // ── Step 6: Display results ───────────────────────────────────────────────
-function displayResults(recommendations, repeatTargets, targetProfile, comparables, cycle, allNotRecommended) {
+function displayResults(recommendations, repeatTargets, targetProfile, comparables, cycle, allNotRecommended,
+                        targetSeat, seatContext) {
   hideStatus();
 
   const section = document.getElementById("results-section");
@@ -1110,6 +1242,7 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     <div class="summary-card"><span class="sc-label">New Prospect Target <span class="sc-help" title="Sum of recommended ask amounts for new donors identified from comparable filer giving patterns.">?</span></span><br><span class="sc-value">${fmt$(newRemaining)}</span></div>
     <div class="summary-card"><span class="sc-label">Comparable Filers <span class="sc-help" title="Number of similar candidates used as benchmarks for donor targeting and prospect identification.">?</span></span><br><span class="sc-value">${fmtNum(comparables.length)}</span></div>
     <div class="summary-card"><span class="sc-label">Total Fundraising Target <span class="sc-help" title="Combined target from existing donor asks plus new prospect asks. Represents the total recommended fundraising goal.">?</span></span><br><span class="sc-value">${fmt$(repeatRemaining + newRemaining)}</span></div>
+    ${seatBenchmarkCard(targetSeat, seatContext, cycleContributions)}
   `;
 
   // Update tab badges with counts
@@ -1133,6 +1266,8 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
   window._targetProfile = targetProfile;
   window._comparables = comparables;
   window._cycle = cycle;
+  window._targetSeat = targetSeat || null;
+  window._seatContext = seatContext || null;
   window._allNotRecommended = allNotRecommended || [];
 
   // Render repeat donors section
@@ -1198,6 +1333,84 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     const scope = id.includes("lobbyist") ? "lobbyist" : id.includes("repeat") ? "repeat" : id.includes("full") ? "full" : "new";
     clone.addEventListener("click", () => exportData(fmt, scope));
   }
+}
+
+/** "Similar-margin seats" card: what peers of this seat raised, and where
+ *  this committee sits against them. Empty when the seat has no margin on
+ *  record or too few peers to quote. */
+function seatBenchmarkCard(targetSeat, ctx, cycleContributions) {
+  if (!targetSeat) return "";
+  if (!ctx) {
+    return `<div class="summary-card sc-muted"><span class="sc-label">Seat</span><br>
+      <span class="sc-value sc-small">${esc(targetSeat.label)}</span>
+      <div class="sc-sub">${targetSeat.year || ""} general — too few comparable seats to benchmark</div></div>`;
+  }
+  const pct = ctx.median > 0 ? Math.round((cycleContributions / ctx.median) * 100) : null;
+  const standing = pct == null ? ""
+    : pct >= 100 ? `${pct}% of that median` : `${pct}% of that median — ${fmt$(ctx.median - cycleContributions)} behind`;
+  return `<div class="summary-card"><span class="sc-label">Similar-margin seats
+      <span class="sc-help" title="Comparable committees whose last general finished within ${ctx.window} points of this seat's ${targetSeat.margin_pts.toFixed(1)}-point margin, and what they raised this cycle. Targets are benchmarked against giving in seats like these rather than scaled by a multiplier.">?</span></span><br>
+    <span class="sc-value">${fmt$(ctx.median)}</span>
+    <div class="sc-sub">${esc(targetSeat.label)} · median of ${ctx.n}
+      ${ctx.leadershipOnly ? "leadership " : ""}seats within ${ctx.window} pts · ${standing}</div></div>`;
+}
+
+// ── Lobbyist tiers ─────────────────────────────────────────────────────────
+//
+// The fundraising sheets rank lobbyists before they are called: the 2024 lobby
+// list is worked Partner → Tier 1 → Tier 2 → Tier 3. A tier is a claim about
+// likelihood to give, and it rests on two observable things:
+//
+//   volume   — how many donors in this plan they carry, and how much those
+//              donors are worth;
+//   fit      — whether their donors give to candidates like this one at all
+//              (the comparables are already filtered to the target's party and
+//              office, so "gave to 9 comparables" means nine like-members).
+//
+// PARTNER is not computed. It is a standing relationship with a caucus, set by
+// an admin per chamber and party at /admin/lobbyists (lobbyist_partners).
+const TIER_RULES = [
+  { tier: 1, min: 70, label: "Tier 1" },
+  { tier: 2, min: 45, label: "Tier 2" },
+  { tier: 3, min: 20, label: "Tier 3" },
+  { tier: 4, min: -Infinity, label: "Tier 4" },
+];
+
+/**
+ * Score and tier one lobbyist group.
+ *   rows        the plan rows filed under them
+ *   isPartner   designated a partner of this chamber+party
+ * Returns { tier, label, score, donors, likeComps, likeTotal, toCandidate, why }.
+ */
+function lobbyistTier(rows, isPartner) {
+  const donors = rows.length;
+  const likeFilers = new Set();
+  let likeTotal = 0, toCandidate = 0, lifetime = 0;
+  for (const r of rows) {
+    for (const g of r.comp_gifts || []) {
+      likeFilers.add(g.filer);
+      likeTotal += g.amount || 0;
+    }
+    toCandidate += r.given || 0;
+    lifetime += Object.values(r.cycles || {}).reduce((s, v) => s + v, 0);
+  }
+  const bookPts = Math.min(30, 6 * donors);
+  const fitPts = Math.min(30, 2 * likeFilers.size);
+  const sizePts = Math.min(20, likeTotal / 5000);
+  const relationshipPts = (lifetime > 0 ? 15 : 0) + (toCandidate > 0 ? 5 : 0);
+  const score = Math.round(bookPts + fitPts + sizePts + relationshipPts);
+  const rule = TIER_RULES.find(t => score >= t.min);
+  const why = [
+    `${donors} donor${donors === 1 ? "" : "s"} in this plan`,
+    `${likeFilers.size} like candidate${likeFilers.size === 1 ? "" : "s"} supported (${fmt$(likeTotal)})`,
+    lifetime > 0 ? `${fmt$(lifetime)} to this committee to date` : "no prior gift to this committee",
+  ];
+  return {
+    tier: isPartner ? 0 : rule.tier,
+    label: isPartner ? "PARTNER" : rule.label,
+    score, donors, likeComps: likeFilers.size, likeTotal, toCandidate, lifetime,
+    why: why.join(" · "),
+  };
 }
 
 function renderRepeatDonors(repeatTargets) {
@@ -1438,11 +1651,26 @@ function toggleDetail(idx, btn) {
 // donor_lobbyists view (supabase/migrations/016_lobbyists.sql), reviewed at
 // /admin/lobbyists.
 let lobbyistsById = null;
+let partnersById = null;      // lobbyist_id → Set("house|D")
 let planControlsWired = false;
+
+/** Which caucus this plan is for: "house|D" for a House Democrat. */
+function planPartnerKey() {
+  const f = window._targetFiler;
+  if (!f) return null;
+  const chamber = getChamber(f), party = getParty(f);
+  return chamber && party ? `${chamber}|${party}` : null;
+}
+
+function isPartner(lobbyistId) {
+  const key = planPartnerKey();
+  return !!(key && partnersById?.get(lobbyistId)?.has(key));
+}
 
 async function loadLobbyistPlan() {
   const status = document.getElementById("plan-status");
   window._lobbyAttr = null;
+  window._donorContacts = new Map();
   wirePlanControls();
   status.textContent = "Looking up lobbyists…";
   renderLobbyistPlan();
@@ -1452,11 +1680,13 @@ async function loadLobbyistPlan() {
     if (!lobbyistsById) {
       lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, l]));
     }
+    if (!partnersById) partnersById = await LOB.loadPartners();
     const names = [...(window._repeatTargets || []), ...(window._recommendations || [])].map(r => r.donor);
-    const attr = await LOB.attributionForLabels(names, lobbyistsById);
+    const { byLabel, contacts } = await LOB.planAttribution(names, lobbyistsById);
     // A newer run may have started while this one was loading.
     if (window._cycle !== runCycle || window._targetProfile !== runFiler) return;
-    window._lobbyAttr = attr;
+    window._lobbyAttr = byLabel;
+    window._donorContacts = contacts;
     status.textContent = "";
   } catch (e) {
     console.warn("Lobbyist attribution unavailable:", e);
@@ -1513,10 +1743,12 @@ function planGroups() {
   const donorRows = [
     ...(window._repeatTargets || []).map(r => ({
       donor: r.donor, type: "Donor Target", target: r.target, given: r.current_cycle_amt,
-      remaining: r.remaining, last_cycle: r.last_cycle_amt, comp_max: r.comp_max || 0 })),
+      remaining: r.remaining, last_cycle: r.last_cycle_amt, comp_max: r.comp_max || 0,
+      cycles: r.cycles || {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
     ...(window._recommendations || []).map(r => ({
       donor: r.donor, type: "New Prospect", target: r.target_ask, given: r.already_given,
-      remaining: r.remaining_ask, last_cycle: null, comp_max: r.comp_max })),
+      remaining: r.remaining_ask, last_cycle: null, comp_max: r.comp_max,
+      cycles: {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
   ];
   const groups = new Map();
   const none = { lobbyist: null, rows: [] };
@@ -1527,6 +1759,7 @@ function planGroups() {
     const firm = list[0] ? firmContacts(list[0].lobbyist) : { primary: null, others: [] };
     const atFirm = new Set([firm.primary, ...firm.others].filter(Boolean).map(m => m.lobbyist_id));
     const entry = { ...row, attribution: list[0] || null,
+                    contacts: window._donorContacts?.get(LOB.labelKey(row.donor)) || [],
                     also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
     if (!list.length) { none.rows.push(entry); continue; }
     const id = list[0].lobbyist.lobbyist_id;
@@ -1550,8 +1783,13 @@ function planGroups() {
     g.target = g.rows.reduce((s, r) => s + r.target, 0);
     g.given = g.rows.reduce((s, r) => s + r.given, 0);
     g.remaining = g.rows.reduce((s, r) => s + r.remaining, 0);
+    g.partner = g.lobbyist ? isPartner(g.lobbyist.lobbyist_id) : false;
+    g.tier = lobbyistTier(g.rows, g.partner);
   }
-  out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (b.remaining - a.remaining));
+  // Partners first, then tier, then the size of the ask — the order the lobby
+  // list is worked. Donors with no lobbyist sit at the bottom.
+  out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (a.tier.tier - b.tier.tier)
+    || (b.remaining - a.remaining));
   return out;
 }
 
@@ -1593,18 +1831,34 @@ function lobbyistHeader(l) {
   return `<div class="plan-lobbyist">${esc(l.name)} <span class="plan-firm">firm</span></div>${lead}${more}`;
 }
 
+/** The tier chip in front of a lobbyist: PARTNER, Tier 1 … Tier 4. */
+function tierChip(t) {
+  if (!t) return "";
+  const cls = t.tier === 0 ? "is-partner" : `is-t${t.tier}`;
+  return `<span class="plan-tier ${cls}" title="${esc(t.why)}">${esc(t.label)}</span>`;
+}
+
+function contactsCell(r) {
+  if (!r.contacts?.length) return "";
+  const line = c => [c.name + (c.title ? ` (${c.title})` : ""), c.email, c.phone].filter(Boolean).join(" · ");
+  const [first, ...rest] = r.contacts;
+  const more = rest.length
+    ? `<div class="plan-also">also: ${esc(rest.map(c => c.name).join(", "))}</div>` : "";
+  return `<div class="plan-donor-contact">${first.is_primary ? "★ " : ""}${esc(line(first))}</div>${more}`;
+}
+
 function renderLobbyistPlan() {
   const tbody = document.getElementById("plan-tbody");
   if (!tbody) return;
   if (!window._lobbyAttr) {
-    tbody.innerHTML = '<tr><td colspan="8" class="plan-empty">Loading lobbyist attribution…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="plan-empty">Loading lobbyist attribution…</td></tr>';
     return;
   }
   const groups = planGroups();
   const withLobbyist = groups.filter(g => g.lobbyist).length;
   document.querySelectorAll(".tab-btn[data-tab='tab-lobbyist-plan'] .tab-badge").forEach(el => el.textContent = withLobbyist);
   if (!groups.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="plan-empty">No donors match.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="plan-empty">No donors match.</td></tr>';
     return;
   }
   tbody.innerHTML = groups.map(g => {
@@ -1614,15 +1868,18 @@ function renderLobbyistPlan() {
       : `<div class="plan-lobbyist plan-none">No lobbyist on file</div>
          <div class="plan-contact">Assign these at <a href="/admin/lobbyists">/admin/lobbyists</a></div>`;
     const header = `<tr class="plan-group">
+      <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
       <td>${head}</td>
       <td class="plan-count">${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}</td>
       <td class="num">${fmt$(g.target)}</td>
       <td class="num">${fmt$(g.given)}</td>
       <td class="num">${fmt$(g.remaining)}</td>
-      <td></td><td></td><td></td>
+      <td></td><td></td>
+      <td class="plan-why">${l ? esc(g.tier.why) : ""}</td>
     </tr>`;
     const rows = g.rows.map(r => `<tr class="plan-donor">
-      <td>${esc(r.donor)}${r.also.length ? `<div class="plan-also">also: ${esc(r.also.map(a => a.lobbyist.name).join(", "))}</div>` : ""}</td>
+      <td></td>
+      <td>${esc(r.donor)}${contactsCell(r)}${r.also.length ? `<div class="plan-also">also: ${esc(r.also.map(a => a.lobbyist.name).join(", "))}</div>` : ""}</td>
       <td><span class="plan-type ${r.type === "Donor Target" ? "is-target" : "is-prospect"}">${r.type === "Donor Target" ? "Target" : "Prospect"}</span></td>
       <td class="num"><strong>${fmt$(r.target)}</strong></td>
       <td class="num">${fmt$(r.given)}</td>
@@ -1637,40 +1894,254 @@ function renderLobbyistPlan() {
   }).join("");
 }
 
-/** Rows in the Fundraising Tracker PLAN layout: a lobbyist row carrying the
- *  subtotals, then one row per donor with the lobbyist repeated in column A. */
+// ── Lobbyist plan export ───────────────────────────────────────────────────
+// The workbook is the lobby list, not a pivot source. Sheet 1 is one entry per
+// lobbyist — tier, who to call, what to ask — with their donors beneath, the
+// candidate's own giving history beside it, and the same donors' giving to
+// comparable candidates beside that, which is the evidence for the ask. The
+// flat table people want for a pivot is still there, on the Donors sheet.
+
+/** Contact details for a lobbyist row: the firm's primary leads. */
+function planContact(l) {
+  if (!l) return { name: "", email: "", phone: "", others: "" };
+  if (l.kind === "firm") {
+    const { primary, others } = firmContacts(l);
+    return {
+      name: primary ? primary.name : l.name,
+      email: l.email || primary?.email || "",
+      phone: l.phone || primary?.phone || "",
+      others: others.map(m => [m.name, m.email, m.phone].filter(Boolean).join(" · ")).join("; "),
+    };
+  }
+  return { name: l.name, email: l.email || "", phone: l.phone || "", others: "" };
+}
+
+/** The donor's own primary contact, when an admin has recorded one. */
+function donorContact(r) {
+  const c = (r.contacts || [])[0];
+  return c ? { name: c.name + (c.title ? ` (${c.title})` : ""), email: c.email || "", phone: c.phone || "" }
+           : { name: "", email: "", phone: "" };
+}
+
+// Sentinel for "the candidate this plan is for", used where a column holds a
+// filer name. No committee can be named this.
+const PLAN_SELF = "__plan_self__";
+
+/** What this donor gave `filer` in `cy`, from the all-years comparable index. */
+function givenInCycle(donorName, filerName, cy, row) {
+  if (filerName === PLAN_SELF) return (row?.cycles || {})[cy] || 0;
+  const m = window._compCycles?.get(donorName.toLowerCase())?.get(filerName);
+  return m ? (m[cy] || 0) : 0;
+}
+
+/**
+ * Which cycles and which comparable candidates get columns: the three most
+ * recent cycles, and the comparables this plan's donors actually gave the most
+ * to in the earlier ones — the tracker names five, so do we.
+ */
+function planCycleColumns(groups, cycle) {
+  const cycles = [cycle, cycle - 2, cycle - 4];
+  const totals = new Map();
+  for (const g of groups) {
+    for (const r of g.rows) {
+      const perFiler = window._compCycles?.get(r.donor.toLowerCase());
+      if (!perFiler) continue;
+      for (const [filer, byCycle] of perFiler) {
+        const sum = cycles.slice(1).reduce((s, c) => s + (byCycle[c] || 0), 0);
+        if (sum) totals.set(filer, (totals.get(filer) || 0) + sum);
+      }
+    }
+  }
+  const comps = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
+  return { cycles, comps };
+}
+
+/** Sheet 1: the plan itself, as an array of arrays with a banded header. */
+function planSheetAoa(groups, cycle) {
+  const self = window._targetProfile?.name || "This committee";
+  const { cycles, comps } = planCycleColumns(groups, cycle);
+
+  // Column layout: the fixed block, then one band per cycle.
+  const fixed = ["Lobbyist", "Lobbyist / Firm", "Donor", "Tier", "Contact", "Email", "Phone",
+                 "Attribution / why this tier"];
+  const bands = [];
+  let width = fixed.length + 1;                       // +1 spacer
+  bands.push({ cycle: cycles[0], start: width, cols: [{ filer: PLAN_SELF, kind: "Target" },
+                                                      { filer: PLAN_SELF, kind: "Actual" }] });
+  width += 2;
+  for (const c of cycles.slice(1)) {
+    width += 1;                                       // spacer
+    const cols = [{ filer: PLAN_SELF, kind: "Actual" },
+                  ...comps.map(f => ({ filer: f, kind: "Actual" }))];
+    bands.push({ cycle: c, start: width, cols });
+    width += cols.length;
+  }
+  const blank = () => new Array(width).fill("");
+  const label = f => (f === PLAN_SELF ? self : f);
+
+  const seat = window._targetSeat, ctx = window._seatContext;
+  const seatLine = !seat ? "No general-election margin on record for this seat."
+    : `Seat: ${seat.label}${seat.margin_pts != null ? ` — ${seat.margin_pts.toFixed(1)} pt margin` : ""} (${seat.year} general)`
+      + (ctx ? ` · ${ctx.n} comparable seats within ${ctx.window} pts raised a median of ${fmt$(ctx.median)} this cycle`
+             : " · too few comparable seats to benchmark");
+
+  const rows = [];
+  const title = blank();
+  title[0] = `${self} — fundraising plan, ${cycle - 1}–${cycle}`;
+  rows.push(title);
+  const sub = blank(); sub[0] = seatLine; rows.push(sub);
+  const method = blank();
+  method[0] = "Targets come from what each donor gave candidates in seats about as contested as this one; "
+    + "the columns to the right are that giving.";
+  rows.push(method);
+  rows.push(blank());
+
+  // Banded header: cycle / candidate / Target|Actual
+  const rCycle = blank(), rName = blank(), rKind = blank();
+  for (const b of bands) {
+    rCycle[b.start] = `${b.cycle - 1}–${b.cycle}`;
+    b.cols.forEach((c, i) => { rName[b.start + i] = label(c.filer); rKind[b.start + i] = c.kind; });
+  }
+  rCycle[1] = "Lobbyist / Firm"; rCycle[2] = "Donor"; rCycle[3] = "Tier";
+  rCycle[4] = "Contact"; rCycle[5] = "Email"; rCycle[6] = "Phone";
+  rCycle[7] = "Attribution / why this tier";
+  rows.push(rCycle, rName, rKind);
+
+  const totalsRow = blank();
+  totalsRow[1] = "TOTAL";
+  const totals = new Array(width).fill(0);
+
+  const body = [];
+  for (const g of groups) {
+    const l = g.lobbyist;
+    const name = l ? l.name : "(no lobbyist on file)";
+    const contact = planContact(l);
+    const lead = blank();
+    lead[1] = name;
+    lead[3] = l ? g.tier.label : "";
+    lead[4] = contact.name; lead[5] = contact.email; lead[6] = contact.phone;
+    lead[7] = l ? g.tier.why : "";
+    body.push(lead);
+    const groupSums = new Array(width).fill(0);
+    for (const r of g.rows) {
+      const row = blank();
+      row[0] = name;
+      row[2] = r.donor;
+      row[3] = r.type === "Donor Target" ? "Target" : "Prospect";
+      const dc = donorContact(r);
+      row[4] = dc.name; row[5] = dc.email; row[6] = dc.phone;
+      row[7] = attributionText(r.attribution);
+      for (const b of bands) {
+        b.cols.forEach((c, i) => {
+          const at = b.start + i;
+          const v = c.kind === "Target" ? r.target
+            : b.cycle === cycle && c.filer === PLAN_SELF ? r.given
+            : givenInCycle(r.donor, c.filer, b.cycle, r);
+          if (!v) return;
+          row[at] = Math.round(v);
+          groupSums[at] += v;
+          totals[at] += v;
+        });
+      }
+      body.push(row);
+    }
+    for (let i = 0; i < width; i++) if (groupSums[i]) lead[i] = Math.round(groupSums[i]);
+  }
+  for (let i = 0; i < width; i++) if (totals[i]) totalsRow[i] = Math.round(totals[i]);
+  rows.push(totalsRow, ...body);
+
+  const merges = bands.filter(b => b.cols.length > 1).map(b => ({
+    s: { r: 4, c: b.start }, e: { r: 4, c: b.start + b.cols.length - 1 },
+  }));
+  const cols = new Array(width).fill(null).map((_, i) =>
+    ({ wch: i === 0 ? 24 : i === 1 ? 30 : i === 2 ? 38 : i === 3 ? 10 : i === 7 ? 46 : i < 7 ? 26 : 13 }));
+  return { rows, merges, cols };
+}
+
+/** Sheet 2: one line per lobbyist, in the shape of the 2024 lobby list. */
+function lobbyistSheetRows(groups, cycle) {
+  return groups.filter(g => g.lobbyist).map(g => {
+    const l = g.lobbyist, c = planContact(l);
+    const clients = [...new Set(g.rows.flatMap(r => r.attribution?.client_names || []))].join("; ");
+    return {
+      "Tier": g.tier.label,
+      "Lobbyist / Firm": l.name,
+      "Firm / Title": l.kind === "firm" ? "firm" : (l.affiliation || l.firm || ""),
+      "Contact": c.name,
+      "Email": c.email,
+      "Phone": c.phone,
+      "Other contacts": c.others,
+      "Donors in plan": g.rows.length,
+      "Suggested ask": Math.round(g.target),
+      [`Given ${cycle - 1}–${cycle}`]: Math.round(g.given),
+      "Remaining": Math.round(g.remaining),
+      "Given to this committee to date": Math.round(g.tier.lifetime),
+      "Like candidates supported": g.tier.likeComps,
+      "Given to like candidates": Math.round(g.tier.likeTotal),
+      "Clients": clients,
+      "Why this tier": g.tier.why,
+    };
+  });
+}
+
+/** Sheet 3 (and the CSV): the flat table, one row per donor. */
 function lobbyistPlanExportRows() {
   const out = [];
   for (const g of planGroups()) {
     const l = g.lobbyist;
     const name = l ? l.name : "(no lobbyist on file)";
-    let contact = { "Contact": "", "Email": "", "Phone": "", "Firm / Title": "", "Other Firm Contacts": "" };
-    if (l && l.kind === "firm") {
-      const { primary, others } = firmContacts(l);
-      contact = {
-        "Contact": primary ? primary.name : "",
-        "Email": l.email || primary?.email || "",
-        "Phone": l.phone || primary?.phone || "",
-        "Firm / Title": "",
-        "Other Firm Contacts": others.map(m => [m.name, m.email, m.phone].filter(Boolean).join(" · ")).join("; "),
-      };
-    } else if (l) {
-      contact = { "Contact": l.name, "Email": l.email || "", "Phone": l.phone || "",
-                  "Firm / Title": l.affiliation || l.firm || "", "Other Firm Contacts": "" };
-    }
-    out.push({ "Lobbyist": name, "Donor": "", "Type": `${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}`,
-               "Target": Math.round(g.target), "Given This Cycle": Math.round(g.given),
-               "Remaining": Math.round(g.remaining), "Last Cycle": "", "Comparable Max": "",
-               "Attribution": "", ...contact, "Also Lobbied By": "" });
+    const c = planContact(l);
     for (const r of g.rows) {
-      out.push({ "Lobbyist": name, "Donor": r.donor, "Type": r.type,
-                 "Target": Math.round(r.target), "Given This Cycle": Math.round(r.given),
-                 "Remaining": Math.round(r.remaining), "Last Cycle": r.last_cycle ?? "",
-                 "Comparable Max": r.comp_max || "", "Attribution": attributionText(r.attribution),
-                 ...contact, "Also Lobbied By": r.also.map(a => a.lobbyist.name).join("; ") });
+      const dc = donorContact(r);
+      out.push({
+        "Tier": l ? g.tier.label : "",
+        "Lobbyist": name,
+        "Contact": c.name, "Email": c.email, "Phone": c.phone, "Other Firm Contacts": c.others,
+        "Donor": r.donor,
+        "Donor Contact": dc.name, "Donor Contact Email": dc.email, "Donor Contact Phone": dc.phone,
+        "Type": r.type,
+        "Target": Math.round(r.target),
+        "Given This Cycle": Math.round(r.given),
+        "Remaining": Math.round(r.remaining),
+        "Last Cycle": r.last_cycle ?? "",
+        "Comparable Max": r.comp_max || "",
+        "Benchmark": r.benchmark ? `${r.benchmark.n} gifts to seats within ${r.benchmark.window} pts` : "all comparable giving",
+        "Attribution": attributionText(r.attribution),
+        "Also Lobbied By": r.also.map(a => a.lobbyist.name).join("; "),
+      });
     }
   }
   return out;
+}
+
+/** Sheet 4: how every number on the other sheets was arrived at. */
+function methodSheetRows(groups, cycle) {
+  const seat = window._targetSeat, ctx = window._seatContext;
+  const rows = [
+    { Item: "Committee", Value: window._targetProfile?.name || "", Detail: `${cycle - 1}–${cycle} cycle` },
+    { Item: "Seat", Value: seat ? seat.label : "no margin on record",
+      Detail: seat && seat.margin_pts != null ? `${seat.margin_pts.toFixed(1)} pt margin, ${seat.year} general` : "" },
+  ];
+  if (ctx) {
+    rows.push({ Item: "Similar-margin seats", Value: fmt$(ctx.median),
+      Detail: `median raised this cycle by ${ctx.n} comparable committees within ${ctx.window} pts of this margin` });
+    rows.push({ Item: "This committee", Value: fmt$(ctx.raised),
+      Detail: ctx.median ? `${Math.round((ctx.raised / ctx.median) * 100)}% of that median` : "" });
+    for (const p of ctx.peers.slice(0, 10)) {
+      rows.push({ Item: "  peer", Value: p.name, Detail: `${p.seat.margin_pts.toFixed(1)} pt margin · ${fmt$(p.total)} this cycle` });
+    }
+  }
+  rows.push({ Item: "Ask", Value: "benchmarked, not scaled",
+    Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
+      + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
+      + `Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
+  for (const t of TIER_RULES) {
+    rows.push({ Item: t.label, Value: `score ≥ ${t.min === -Infinity ? "0" : t.min}`,
+      Detail: "6 × donors in plan (max 30) + 2 × like candidates supported (max 30) + giving to them ÷ 5,000 (max 20) + 15 if they have given here before + 5 if they have given this cycle" });
+  }
+  rows.push({ Item: "PARTNER", Value: "set by an admin",
+    Detail: "A standing relationship with this chamber and party, designated at /admin/lobbyists. Never computed." });
+  return rows;
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
@@ -1771,11 +2242,32 @@ function exportData(format, scope = "new") {
         XLSX.utils.book_append_sheet(wb, ws2, "New Prospects");
       }
     } else if (scope === "lobbyist") {
-      const ws = XLSX.utils.json_to_sheet(exportRows);
-      ws["!cols"] = [{ wch: 28 }, { wch: 44 }, { wch: 13 }, { wch: 11 }, { wch: 14 }, { wch: 11 },
-                     { wch: 11 }, { wch: 14 }, { wch: 30 }, { wch: 24 }, { wch: 30 }, { wch: 15 },
-                     { wch: 28 }, { wch: 60 }, { wch: 30 }];
-      XLSX.utils.book_append_sheet(wb, ws, "Lobbyist Plan");
+      // The lobby list, not a pivot source: the plan first, then a line per
+      // lobbyist, then the flat table, then how the numbers were reached.
+      const groups = planGroups();
+      const { rows, merges, cols } = planSheetAoa(groups, cycle);
+      const plan = XLSX.utils.aoa_to_sheet(rows);
+      plan["!merges"] = merges;
+      plan["!cols"] = cols;
+      XLSX.utils.book_append_sheet(wb, plan, "Plan");
+
+      const lobRows = lobbyistSheetRows(groups, cycle);
+      if (lobRows.length) {
+        const ws = XLSX.utils.json_to_sheet(lobRows);
+        ws["!cols"] = [{ wch: 9 }, { wch: 30 }, { wch: 24 }, { wch: 24 }, { wch: 30 }, { wch: 16 },
+                       { wch: 44 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 12 }, { wch: 16 },
+                       { wch: 12 }, { wch: 14 }, { wch: 60 }, { wch: 60 }];
+        XLSX.utils.book_append_sheet(wb, ws, "Lobbyists");
+      }
+      const flat = XLSX.utils.json_to_sheet(exportRows);
+      flat["!cols"] = [{ wch: 9 }, { wch: 28 }, { wch: 24 }, { wch: 30 }, { wch: 16 }, { wch: 40 },
+                       { wch: 44 }, { wch: 24 }, { wch: 30 }, { wch: 16 }, { wch: 13 }, { wch: 11 },
+                       { wch: 14 }, { wch: 11 }, { wch: 11 }, { wch: 14 }, { wch: 34 }, { wch: 60 }, { wch: 30 }];
+      XLSX.utils.book_append_sheet(wb, flat, "Donors");
+
+      const method = XLSX.utils.json_to_sheet(methodSheetRows(groups, cycle));
+      method["!cols"] = [{ wch: 26 }, { wch: 34 }, { wch: 100 }];
+      XLSX.utils.book_append_sheet(wb, method, "Method");
     } else {
       const ws = XLSX.utils.json_to_sheet(exportRows);
       XLSX.utils.book_append_sheet(wb, ws, scope === "repeat" ? "Donor Targets" : "New Prospects");
