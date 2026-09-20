@@ -504,6 +504,7 @@ def test_retry_step_passes_resolved_not_auto_state(tmp_path) -> None:
             "steps.resolve.outputs.is_auto": "true",
             "steps.resolve.outputs.identity_resume": "true",
             "inputs.reset_auto": "false",
+            "inputs.resume_progress": "false",
             "steps.resolve.outputs.verification_ids": "21544",
             "github.run_id": "123456",
             "github.run_attempt": "1",
@@ -539,6 +540,7 @@ def test_resolve_unpacks_handoff_without_changing_base_chain(tmp_path) -> None:
             "steps.startup_handoff.outputs.parent_run": "123456",
             "steps.startup_handoff.outputs.identity_resume || 'false'": "true",
             "inputs.reset_auto": "false",
+            "inputs.resume_progress": "false",
         },
     )
 

@@ -48,6 +48,14 @@ on:
         required: false
         default: "false"
         type: boolean
+      resume_progress:
+        description: >
+          Continue an interrupted identity chain: keep the windows already
+          recorded for these filer IDs instead of starting them over. A chained
+          run resumes on its own; this is for restarting a chain that stopped.
+        required: false
+        default: "false"
+        type: boolean
       verification_filer_ids:
         description: "Internal: immutable original filer set for final identity verification"
         required: false
@@ -72,7 +80,11 @@ concurrency:
   # A startup-retry child must be able to start while its failed parent is
   # finishing; the shared pending slot could otherwise evict it. The child
   # still waits behind every older ORESTAR run in await-orestar below.
-  group: ${{ startsWith(inputs.end_date, 'startup:') && format('orestar-scrape-retry-{0}', inputs.end_date) || 'orestar-scrape' }}
+  # Per run, not one shared lane. GitHub keeps only ONE pending run per group,
+  # so while this workflow sat in 'orestar-scrape' a replacement queued after a
+  # coordination timeout could evict another backfill waiting in the same lane.
+  # await-orestar is what actually serializes ORESTAR access.
+  group: ${{ startsWith(inputs.end_date, 'startup:') && format('orestar-scrape-retry-{0}', inputs.end_date) || format('orestar-scrape-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
@@ -137,9 +149,46 @@ jobs:
       # missed when this check was introduced, which also meant the other four
       # never waited for IT.
       - name: Wait for other ORESTAR jobs
+        id: orestar_wait
+        continue-on-error: true
         uses: ./.github/actions/await-orestar
         with:
           fail-on-timeout: "true"
+
+      # This workflow used to fail here and take its chain with it. On
+      # 2026-09-19 run 9 of a 181-filer identity chain waited out the window,
+      # refused to overlap, and nothing replaced it: 134 committees were never
+      # reached, and the restart could not resume. Every other ORESTAR workflow
+      # queues a replacement instead, and so does this one now.
+      #
+      # Inputs pass through verbatim, chain_index included, so the replacement
+      # is the same request: a chained run keeps resuming, and a first run still
+      # starts fresh. A startup-retry child is the exception — elect_retry
+      # coalesces those by run title, so a replacement carrying the same handoff
+      # would be dropped as a duplicate rather than run.
+      - name: Requeue after coordination timeout
+        if: steps.orestar_wait.outcome == 'failure' && !startsWith(inputs.end_date, 'startup:')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash scripts/dispatch_retry.sh backfill.yml --ref "${{ github.ref_name }}" \
+            -f filer_ids="${{ inputs.filer_ids }}" \
+            -f start_year="${{ inputs.start_year }}" \
+            -f end_year="${{ inputs.end_year }}" \
+            -f end_date="${{ inputs.end_date }}" \
+            -f date_field="${{ inputs.date_field }}" \
+            -f identity_remediation="${{ inputs.identity_remediation }}" \
+            -f resume_auto="${{ inputs.resume_auto }}" \
+            -f resume_progress="${{ inputs.resume_progress }}" \
+            -f verification_filer_ids="${{ inputs.verification_filer_ids }}" \
+            -f reset_auto="${{ inputs.reset_auto }}" \
+            -f chain_index="${{ inputs.chain_index || '1' }}"
+
+      - name: Refuse uncoordinated backfill
+        if: steps.orestar_wait.outcome == 'failure'
+        run: |
+          echo "::error::ORESTAR remained busy; queued a replacement backfill instead of overlapping it."
+          exit 1
 
       - name: Validate identity-backfill startup retry handoff
         id: startup_handoff
@@ -358,6 +407,14 @@ jobs:
             echo "is_auto=$IS_AUTO" >> "$GITHUB_OUTPUT"
             if [ -z "$STARTUP_PARENT" ] && [ "$IDENTITY_MODE" = "true" ] && \
                [ "$CHAIN" -gt 1 ] 2>/dev/null; then
+              IDENTITY_RESUME=true
+            fi
+            # A chain that stopped (a timeout, a cancelled run, an exhausted
+            # runner) restarts at chain 1, which would otherwise clear the
+            # progress of every filer it had already finished and fetch them
+            # all again — 47 committees' worth on 2026-09-19.
+            if [ -z "$STARTUP_PARENT" ] && [ "$IDENTITY_MODE" = "true" ] && \
+               [ "${{ inputs.resume_progress }}" = "true" ]; then
               IDENTITY_RESUME=true
             fi
           fi
