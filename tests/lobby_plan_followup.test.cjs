@@ -67,3 +67,32 @@ test('repeat asks round before computing remaining amounts and export uses that 
  const donor=sheet.rows.find((row,i)=>sheet.roles[i]==='donor');
  assert.equal(donor[sheet.moneyFrom+1],5250);
 });
+
+test('lobbyist target keeps last-cycle client floor, including omitted clients, without inflating donor asks',()=>{
+ const {c,get}=harness();
+ vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Lobbyist',kind:'person'}]]);
+ window._lobbyAttr=new Map(['a','b','c'].map(key=>[key,[{lobbyist:lobbyistsById.get(1),status:'confirmed',is_primary:true,methods:[],client_names:[]}]]));`,c);
+ c.window._cycle=2026;c.window._recommendations=[];
+ c.window._targetProfile={name:'Jason for Bend',top_donors_by_year:{2024:[{donor_id:'a',name:'Client A',total:2000},{donor_id:'b',name:'Client B',total:3000}],2026:[{donor_id:'c',name:'Client C',total:1200}]}};
+ c.window._repeatTargets=[{donor:'Client A',donor_id:'a',donor_key:'a',target:2000,current_cycle_amt:0,remaining:2000,cycles:{2024:2000}}];
+ let groups=c.planGroups(),g=groups[0];
+ assert.equal(g.last_cycle,5000);assert.equal(g.target,5000);assert.equal(g.additional_ask,3000);assert.equal(g.given,1200);assert.equal(g.remaining,3800);
+ assert.equal(c.window._repeatTargets[0].target,2000);assert.equal(g.rows.find(r=>r.donor_key==='b').target,0);
+ c.renderLobbyistPlan();assert.match(get('plan-tbody').innerHTML,/client allocation remains open/);
+ const sheet=c.planSheetAoa(groups,2026),askColumn=sheet.rows[6].indexOf('Ask');
+ assert.equal(sheet.rows.find(r=>r[1]==='Everyone')[askColumn],5000);
+ assert.equal(sheet.rows.find(r=>r[1]==='Lobbyist')[askColumn],5000);
+ assert.equal(sheet.rows.find(r=>String(r[2]).startsWith('Additional lobbyist ask'))[askColumn],3000);
+ const flat=c.lobbyistPlanExportRows();assert.equal(flat.reduce((s,r)=>s+r.Target,0),5000);assert.equal(flat[0]['Lobbyist Remaining'],3800);
+ assert.equal(c.lobbyistSheetRows(groups,2026)[0]['Suggested ask'],5000);
+ get('plan-search').value='Client A';assert.equal(c.planGroups()[0].target,5000);assert.equal(c.planGroups()[0].rows.length,3);
+});
+
+test('lobbyist floor rounds upward, keeps higher asks, and credits excess current giving across clients',()=>{
+ const {c}=harness();vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Lead',kind:'person'}]]);window._lobbyAttr=new Map([['a',[{lobbyist:lobbyistsById.get(1),status:'confirmed',methods:[]}]]]);`,c);
+ c.window._cycle=2026;c.window._recommendations=[];
+ c.window._repeatTargets=[{donor:'Client',donor_key:'a',target:2000,current_cycle_amt:6000,remaining:0,cycles:{2024:5100}}];
+ let g=c.planGroups()[0];assert.equal(g.target,5250);assert.equal(g.remaining,0);
+ c.window._repeatTargets[0].target=7500;g=c.planGroups()[0];assert.equal(g.target,7500);assert.equal(g.additional_ask,0);assert.equal(g.remaining,1500);
+ c.window._lobbyAttr=new Map();g=c.planGroups()[0];assert.equal(g.target,7500);assert.equal(g.additional_ask,0);
+});
