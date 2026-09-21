@@ -182,7 +182,7 @@ marked **?** and can be hidden with *Include unreviewed matches*.
 
 Contact details are each lobbyist's **email and primary phone**. A donor filed
 under a **firm** (Thorn Run, Oxley & Associates) shows the firm's primary
-contact first and its other members in a collapsed list. A donor can also carry
+contact first and its other members in an expanded list. A donor can also carry
 **its own contacts** — a government-affairs director who is on nobody's Capitol
 Club card — added at `/admin/lobbyists`; the primary one sits under the donor's
 name, the rest follow as "also".
@@ -253,8 +253,8 @@ Display labels normalize whitespace, all-upper/all-lower labels, common
 acronyms, and Cooperative's casing without using spelling changes as identity
 merges.
 
-Lobbyist Plan groups start collapsed with an accessible expand button. The
-Excel Call list starts expanded, retaining outline controls for collapsing.
+Lobbyist Plan groups start expanded with an accessible collapse button. The
+Excel Call list starts collapsed, retaining outline controls for expanding.
 
 ### The Excel export
 
