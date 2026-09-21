@@ -647,6 +647,20 @@ function detectOfficeFromName(name) {
 function yearToCycle(yr) { return yr % 2 === 0 ? yr : yr + 1; }
 
 /**
+ * A donor's identity, not its spelling.
+ *
+ * ORESTAR records the same organization under many labels — "FamilyCare",
+ * "FamilyCare, Inc", "Familycare, Inc." — and the donor resolver (plus any
+ * merge an admin records at /admin/donors) collapses them into one donor_id
+ * that every aggregate carries as donor_key. Keying on the label instead
+ * splits one donor into several and loses whatever the admin merged, so
+ * everything here keys on donor_key and only shows the name.
+ */
+function donorKey(d) {
+  return d.donor_key || d.donor_id || `name:${String(d.name || "").trim().toLowerCase()}`;
+}
+
+/**
  * Every donor's giving to every comparable, by cycle:
  *   Map<donor name (lower), Map<comparable name, {cycle: amount}>>
  *
@@ -661,7 +675,7 @@ function buildCompCycleIndex(comparables, compProfiles) {
     for (const [yrStr, donors] of Object.entries(profile?.top_donors_by_year || {})) {
       const cy = yearToCycle(parseInt(yrStr));
       for (const d of donors) {
-        const key = d.name.toLowerCase();
+        const key = donorKey(d);
         if (!idx.has(key)) idx.set(key, new Map());
         const perFiler = idx.get(key);
         if (!perFiler.has(filer)) perFiler.set(filer, {});
@@ -673,13 +687,12 @@ function buildCompCycleIndex(comparables, compProfiles) {
   return idx;
 }
 
-function _getAllYearGifts(donorName, compProfiles, comparables) {
-  const key = donorName.toLowerCase();
+function _getAllYearGifts(key, compProfiles, comparables) {
   const years = [];
   for (const profile of compProfiles) {
     const byYear = profile.top_donors_by_year || {};
     for (const [yr, donors] of Object.entries(byYear)) {
-      if (donors.some(d => d.name.toLowerCase() === key)) {
+      if (donors.some(d => donorKey(d) === key)) {
         years.push(parseInt(yr));
       }
     }
@@ -702,9 +715,9 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const yr = parseInt(yrStr);
     const cy = yearToCycle(yr);
     for (const d of donors) {
-      const key = d.name.toLowerCase();
+      const key = donorKey(d);
       if (!donorHistory.has(key)) {
-        donorHistory.set(key, { name: d.name, cycles: {}, totalGifts: 0 });
+        donorHistory.set(key, { name: d.name, donor_id: d.donor_id || null, cycles: {}, totalGifts: 0 });
       }
       const entry = donorHistory.get(key);
       entry.cycles[cy] = (entry.cycles[cy] || 0) + d.total;
@@ -724,7 +737,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       const yr = parseInt(yrStr);
       const cy = yearToCycle(yr);
       for (const d of donors) {
-        const key = d.name.toLowerCase();
+        const key = donorKey(d);
         if (!compDonorCycles.has(key)) compDonorCycles.set(key, {});
         const cyMap = compDonorCycles.get(key);
         cyMap[cy] = (cyMap[cy] || 0) + d.total;
@@ -912,6 +925,8 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
 
     results.push({
       donor: donor.name,
+      donor_id: donor.donor_id || null,
+      donor_key: key,
       prev_cycles: prevCycles.length,
       last_cycle_amt: lastCycleAmt,
       avg_prev: Math.round(avgPrev * 100) / 100,
@@ -948,10 +963,11 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     const donors = mergeDonorsByYear(profile.top_donors_by_year || {}, years);
 
     donors.forEach(d => {
-      const key = d.name.toLowerCase();
+      const key = donorKey(d);
       if (!donorMap.has(key)) {
         donorMap.set(key, {
           name: d.name,
+          donor_id: d.donor_id || null,
           compGifts: [],
           totalToComps: 0,
           distinctComps: 0,
@@ -974,12 +990,12 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
 
   // Get what each donor already gave to the target filer this cycle
   const targetDonors = mergeDonorsByYear(targetProfile.top_donors_by_year || {}, years);
-  const targetDonorMap = new Map(targetDonors.map(d => [d.name.toLowerCase(), d.total]));
+  const targetDonorMap = new Map(targetDonors.map(d => [donorKey(d), d.total]));
 
   // Build set of ALL donors who have ever given to this filer (any year)
   const allTargetDonors = new Set();
   for (const donors of Object.values(targetProfile.top_donors_by_year || {})) {
-    for (const d of donors) allTargetDonors.add(d.name.toLowerCase());
+    for (const d of donors) allTargetDonors.add(donorKey(d));
   }
 
   // Build set of candidate committee names for exclusion (not PACs or other types)
@@ -1010,7 +1026,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     const alreadyGiven = targetDonorMap.get(key) || 0;
 
     // ── EXCLUSION: donors who gave to only 1 person or donated ≤2 times ──
-    const allYearGifts = _getAllYearGifts(donor.name, compProfiles, comparables);
+    const allYearGifts = _getAllYearGifts(key, compProfiles, comparables);
     const distinctYears = new Set(allYearGifts).size;
     const totalDonationInstances = allYearGifts.length; // times across all years × filers
 
@@ -1150,6 +1166,8 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
 
     results.push({
       donor: donor.name,
+      donor_id: donor.donor_id || null,
+      donor_key: key,
       score,
       already_given: alreadyGiven,
       target_ask: targetAsk,
@@ -1174,16 +1192,16 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
 
 function mergeDonorsByYear(byYear, years) {
   const totalMap = new Map();
-  const nameMap = new Map();
+  const seen = new Map();
   years.forEach(yr => {
     (byYear[yr] || []).forEach(d => {
-      const key = d.name.toLowerCase();
+      const key = donorKey(d);
       totalMap.set(key, (totalMap.get(key) || 0) + d.total);
-      if (!nameMap.has(key)) nameMap.set(key, d.name);
+      if (!seen.has(key)) seen.set(key, d);
     });
   });
   return [...totalMap.entries()]
-    .map(([key, total]) => ({ name: nameMap.get(key), total: Math.round(total * 100) / 100 }))
+    .map(([key, total]) => ({ ...seen.get(key), donor_key: key, total: Math.round(total * 100) / 100 }))
     .sort((a, b) => b.total - a.total);
 }
 
@@ -1446,7 +1464,7 @@ function renderRepeatDonors(repeatTargets) {
     <tr class="repeat-row" data-idx="${i}">
       <td>${i + 1}</td>
       <td>${esc(r.donor)}</td>
-      <td>${lobbyistCell(r.donor)}</td>
+      <td>${lobbyistCell(r)}</td>
       <td class="num">${r.prev_cycles}</td>
       <td class="num">${fmt$(r.last_cycle_amt)}</td>
       <td class="num"><strong>${fmt$(r.target)}</strong></td>
@@ -1577,7 +1595,7 @@ function renderRecTable(rows) {
     <tr class="rec-row" data-idx="${i}">
       <td>${i + 1}</td>
       <td>${esc(r.donor)}</td>
-      <td>${lobbyistCell(r.donor)}</td>
+      <td>${lobbyistCell(r)}</td>
       <td class="num">
         <div class="score-bar">
           <div class="score-bar-track"><div class="score-bar-fill" style="width:${r.score}%"></div></div>
@@ -1671,6 +1689,7 @@ async function loadLobbyistPlan() {
   const status = document.getElementById("plan-status");
   window._lobbyAttr = null;
   window._donorContacts = new Map();
+  window._donorTypes = new Map();
   wirePlanControls();
   status.textContent = "Looking up lobbyists…";
   renderLobbyistPlan();
@@ -1681,12 +1700,14 @@ async function loadLobbyistPlan() {
       lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, l]));
     }
     if (!partnersById) partnersById = await LOB.loadPartners();
-    const names = [...(window._repeatTargets || []), ...(window._recommendations || [])].map(r => r.donor);
-    const { byLabel, contacts } = await LOB.planAttribution(names, lobbyistsById);
+    const rows = [...(window._repeatTargets || []), ...(window._recommendations || [])]
+      .map(r => ({ name: r.donor, donor_id: r.donor_id, key: r.donor_key }));
+    const { byKey, contacts, bookTypes } = await LOB.planAttribution(rows, lobbyistsById);
     // A newer run may have started while this one was loading.
     if (window._cycle !== runCycle || window._targetProfile !== runFiler) return;
-    window._lobbyAttr = byLabel;
+    window._lobbyAttr = byKey;
     window._donorContacts = contacts;
+    window._donorTypes = bookTypes;
     status.textContent = "";
   } catch (e) {
     console.warn("Lobbyist attribution unavailable:", e);
@@ -1710,20 +1731,20 @@ function wirePlanControls() {
   });
 }
 
-/** Lobbyists for a donor label, primary first; unreviewed ones only if shown. */
-function lobbyistsFor(donorName) {
-  const list = window._lobbyAttr?.get(LOB.labelKey(donorName)) || [];
+/** Lobbyists for a donor row, primary first; unreviewed ones only if shown. */
+function lobbyistsFor(row) {
+  const list = window._lobbyAttr?.get(row.donor_key ?? row.key) || [];
   const includeSuggested = document.getElementById("plan-include-suggested")?.checked ?? true;
   return includeSuggested ? list : list.filter(a => a.status === "confirmed");
 }
 
-function lobbyistNames(donorName) {
-  return lobbyistsFor(donorName).map(a => a.lobbyist.name + (a.status === "confirmed" ? "" : " (unreviewed)")).join("; ");
+function lobbyistNames(row) {
+  return lobbyistsFor(row).map(a => a.lobbyist.name + (a.status === "confirmed" ? "" : " (unreviewed)")).join("; ");
 }
 
-function lobbyistCell(donorName) {
+function lobbyistCell(row) {
   if (!window._lobbyAttr) return '<span class="lob-pending">…</span>';
-  const list = lobbyistsFor(donorName);
+  const list = lobbyistsFor(row);
   if (!list.length) return '<span class="lob-none">—</span>';
   const [p, ...rest] = list;
   const unreviewed = p.status === "confirmed" ? "" : ' <span class="lob-unreviewed" title="Suggested match, not yet reviewed">?</span>';
@@ -1739,27 +1760,42 @@ function attributionText(a) {
   return `${a.status === "confirmed" ? "Confirmed" : "Unreviewed"}: ${[...new Set(how)].join("; ")}${client}`;
 }
 
+// ORESTAR files every contributor under a category. A lobbyist plan is a call
+// list for organizations, so the people — including a candidate's own family —
+// are dropped from it rather than filtered by name. They are still in Donor
+// Targets and New Donor Prospects, which is where an individual belongs.
+const PERSON_BOOK_TYPES = new Set([
+  "Individual", "Candidate & Immediate Family", "Candidate's Immediate Family",
+]);
+
+function isOrganization(row) {
+  const type = window._donorTypes?.get(row.donor_key);
+  return !PERSON_BOOK_TYPES.has(type);
+}
+
 function planGroups() {
   const donorRows = [
     ...(window._repeatTargets || []).map(r => ({
-      donor: r.donor, type: "Donor Target", target: r.target, given: r.current_cycle_amt,
+      donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
+      type: "Donor Target", target: r.target, given: r.current_cycle_amt,
       remaining: r.remaining, last_cycle: r.last_cycle_amt, comp_max: r.comp_max || 0,
       cycles: r.cycles || {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
     ...(window._recommendations || []).map(r => ({
-      donor: r.donor, type: "New Prospect", target: r.target_ask, given: r.already_given,
+      donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
+      type: "New Prospect", target: r.target_ask, given: r.already_given,
       remaining: r.remaining_ask, last_cycle: null, comp_max: r.comp_max,
       cycles: {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
   ];
   const groups = new Map();
   const none = { lobbyist: null, rows: [] };
-  for (const row of donorRows) {
-    const list = lobbyistsFor(row.donor);
+  for (const row of donorRows.filter(isOrganization)) {
+    const list = lobbyistsFor(row);
     // People reachable through the firm the donor is filed under are already
     // on its row; "also" is for anyone else.
     const firm = list[0] ? firmContacts(list[0].lobbyist) : { primary: null, others: [] };
     const atFirm = new Set([firm.primary, ...firm.others].filter(Boolean).map(m => m.lobbyist_id));
     const entry = { ...row, attribution: list[0] || null,
-                    contacts: window._donorContacts?.get(LOB.labelKey(row.donor)) || [],
+                    contacts: window._donorContacts?.get(row.donor_key) || [],
                     also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
     if (!list.length) { none.rows.push(entry); continue; }
     const id = list[0].lobbyist.lobbyist_id;
@@ -1928,9 +1964,9 @@ function donorContact(r) {
 const PLAN_SELF = "__plan_self__";
 
 /** What this donor gave `filer` in `cy`, from the all-years comparable index. */
-function givenInCycle(donorName, filerName, cy, row) {
+function givenInCycle(key, filerName, cy, row) {
   if (filerName === PLAN_SELF) return (row?.cycles || {})[cy] || 0;
-  const m = window._compCycles?.get(donorName.toLowerCase())?.get(filerName);
+  const m = window._compCycles?.get(key)?.get(filerName);
   return m ? (m[cy] || 0) : 0;
 }
 
@@ -1944,7 +1980,7 @@ function planCycleColumns(groups, cycle) {
   const totals = new Map();
   for (const g of groups) {
     for (const r of g.rows) {
-      const perFiler = window._compCycles?.get(r.donor.toLowerCase());
+      const perFiler = window._compCycles?.get(r.donor_key);
       if (!perFiler) continue;
       for (const [filer, byCycle] of perFiler) {
         const sum = cycles.slice(1).reduce((s, c) => s + (byCycle[c] || 0), 0);
@@ -1956,106 +1992,148 @@ function planCycleColumns(groups, cycle) {
   return { cycles, comps };
 }
 
-/** Sheet 1: the plan itself, as an array of arrays with a banded header. */
+/**
+ * The call list, as rows plus a role for each one so the writer can style it.
+ *
+ * Column layout, left to right: who to call, then one band per cycle. The
+ * current cycle carries the ask and what has come in; the two before it carry
+ * what these same donors gave this candidate and the handful of comparable
+ * candidates they gave most to — the evidence for the ask, sitting next to it.
+ */
 function planSheetAoa(groups, cycle) {
   const self = window._targetProfile?.name || "This committee";
   const { cycles, comps } = planCycleColumns(groups, cycle);
 
-  // Column layout: the fixed block, then one band per cycle.
-  const fixed = ["Lobbyist", "Lobbyist / Firm", "Donor", "Tier", "Contact", "Email", "Phone",
-                 "Attribution / why this tier"];
+  const fixed = ["Lobbyist", "Lobbyist or firm", "Donor", "Tier", "Who to call", "Email", "Phone",
+                 "Why them"];
   const bands = [];
   let width = fixed.length + 1;                       // +1 spacer
-  bands.push({ cycle: cycles[0], start: width, cols: [{ filer: PLAN_SELF, kind: "Target" },
-                                                      { filer: PLAN_SELF, kind: "Actual" }] });
+  bands.push({ cycle: cycles[0], start: width, current: true,
+               cols: [{ filer: PLAN_SELF, kind: "Ask" }, { filer: PLAN_SELF, kind: "Given" }] });
   width += 2;
   for (const c of cycles.slice(1)) {
     width += 1;                                       // spacer
-    const cols = [{ filer: PLAN_SELF, kind: "Actual" },
-                  ...comps.map(f => ({ filer: f, kind: "Actual" }))];
+    const cols = [{ filer: PLAN_SELF, kind: "Gave" },
+                  ...comps.map(f => ({ filer: f, kind: "Gave" }))];
     bands.push({ cycle: c, start: width, cols });
     width += cols.length;
   }
   const blank = () => new Array(width).fill("");
   const label = f => (f === PLAN_SELF ? self : f);
+  const rows = [], roles = [];
+  const push = (row, role) => { rows.push(row); roles.push(role); };
 
   const seat = window._targetSeat, ctx = window._seatContext;
-  const seatLine = !seat ? "No general-election margin on record for this seat."
-    : `Seat: ${seat.label}${seat.margin_pts != null ? ` — ${seat.margin_pts.toFixed(1)} pt margin` : ""} (${seat.year} general)`
-      + (ctx ? ` · ${ctx.n} comparable seats within ${ctx.window} pts raised a median of ${fmt$(ctx.median)} this cycle`
-             : " · too few comparable seats to benchmark");
-
-  const rows = [];
   const title = blank();
-  title[0] = `${self} — fundraising plan, ${cycle - 1}–${cycle}`;
-  rows.push(title);
-  const sub = blank(); sub[0] = seatLine; rows.push(sub);
+  title[0] = `${self} — who to ask, and for how much (${cycle - 1}–${cycle})`;
+  push(title, "title");
+  const sub = blank();
+  sub[0] = seat
+    ? `This seat was ${seat.label.replace(/ \(.*\)/, "")} in ${seat.year}`
+      + (seat.margin_pts != null ? ` — decided by ${seat.margin_pts.toFixed(1)} points` : "")
+      + (ctx ? `. Committees in seats that close raised a median of ${fmt$(ctx.median)} this cycle.` : ".")
+    : "No general-election margin on record for this seat.";
+  push(sub, "note");
   const method = blank();
-  method[0] = "Targets come from what each donor gave candidates in seats about as contested as this one; "
-    + "the columns to the right are that giving.";
-  rows.push(method);
-  rows.push(blank());
+  method[0] = "Each ask is what that donor has given candidates in seats about as close as this one. "
+    + "The columns on the right show that giving.";
+  push(method, "note");
+  push(blank(), "blank");
 
-  // Banded header: cycle / candidate / Target|Actual
   const rCycle = blank(), rName = blank(), rKind = blank();
   for (const b of bands) {
-    rCycle[b.start] = `${b.cycle - 1}–${b.cycle}`;
+    rCycle[b.start] = b.current ? `This cycle (${b.cycle - 1}–${b.cycle})` : `${b.cycle - 1}–${b.cycle}`;
     b.cols.forEach((c, i) => { rName[b.start + i] = label(c.filer); rKind[b.start + i] = c.kind; });
   }
-  rCycle[1] = "Lobbyist / Firm"; rCycle[2] = "Donor"; rCycle[3] = "Tier";
-  rCycle[4] = "Contact"; rCycle[5] = "Email"; rCycle[6] = "Phone";
-  rCycle[7] = "Attribution / why this tier";
-  rows.push(rCycle, rName, rKind);
+  fixed.slice(1).forEach((h, i) => { rCycle[i + 1] = h; });
+  push(rCycle, "head-band");
+  push(rName, "head-name");
+  push(rKind, "head-kind");
 
   const totalsRow = blank();
-  totalsRow[1] = "TOTAL";
+  totalsRow[1] = "Everyone";
   const totals = new Array(width).fill(0);
+  const body = [], bodyRoles = [];
 
-  const body = [];
   for (const g of groups) {
     const l = g.lobbyist;
-    const name = l ? l.name : "(no lobbyist on file)";
+    const name = l ? l.name : "(nobody on file — assign these at /admin/lobbyists)";
     const contact = planContact(l);
     const lead = blank();
     lead[1] = name;
     lead[3] = l ? g.tier.label : "";
     lead[4] = contact.name; lead[5] = contact.email; lead[6] = contact.phone;
     lead[7] = l ? g.tier.why : "";
-    body.push(lead);
+    body.push(lead); bodyRoles.push(l && g.partner ? "lobbyist-partner" : "lobbyist");
     const groupSums = new Array(width).fill(0);
     for (const r of g.rows) {
       const row = blank();
       row[0] = name;
       row[2] = r.donor;
-      row[3] = r.type === "Donor Target" ? "Target" : "Prospect";
+      row[3] = r.type === "Donor Target" ? "Gave before" : "New prospect";
       const dc = donorContact(r);
       row[4] = dc.name; row[5] = dc.email; row[6] = dc.phone;
-      row[7] = attributionText(r.attribution);
+      row[7] = plainAttribution(r.attribution);
       for (const b of bands) {
         b.cols.forEach((c, i) => {
           const at = b.start + i;
-          const v = c.kind === "Target" ? r.target
-            : b.cycle === cycle && c.filer === PLAN_SELF ? r.given
-            : givenInCycle(r.donor, c.filer, b.cycle, r);
+          const v = c.kind === "Ask" ? r.target
+            : b.current && c.filer === PLAN_SELF ? r.given
+            : givenInCycle(r.donor_key, c.filer, b.cycle, r);
           if (!v) return;
           row[at] = Math.round(v);
           groupSums[at] += v;
           totals[at] += v;
         });
       }
-      body.push(row);
+      body.push(row); bodyRoles.push("donor");
     }
     for (let i = 0; i < width; i++) if (groupSums[i]) lead[i] = Math.round(groupSums[i]);
   }
   for (let i = 0; i < width; i++) if (totals[i]) totalsRow[i] = Math.round(totals[i]);
-  rows.push(totalsRow, ...body);
+  push(totalsRow, "total");
+  body.forEach((row, i) => push(row, bodyRoles[i]));
 
   const merges = bands.filter(b => b.cols.length > 1).map(b => ({
     s: { r: 4, c: b.start }, e: { r: 4, c: b.start + b.cols.length - 1 },
   }));
   const cols = new Array(width).fill(null).map((_, i) =>
-    ({ wch: i === 0 ? 24 : i === 1 ? 30 : i === 2 ? 38 : i === 3 ? 10 : i === 7 ? 46 : i < 7 ? 26 : 13 }));
-  return { rows, merges, cols };
+    ({ wch: i === 0 ? 24 : i === 1 ? 30 : i === 2 ? 38 : i === 3 ? 13 : i === 7 ? 46 : i < 7 ? 26 : 13 }));
+  return { rows, roles, merges, cols, moneyFrom: fixed.length, headerRows: 7 };
+}
+
+// The same evidence the review page shows, in words a first-time reader can
+// follow. A method means different things on the two link tables — a
+// "name_exact" on a client link is the donor's name matching the client's,
+// while on a direct link it is the lobbyist named on the committee's filing —
+// so the two are worded separately.
+const WHY_DIRECT = {
+  email_exact: "listed as the committee's contact",
+  name_exact: "named on the committee's filing",
+  email_domain: "shares the committee's email domain",
+  director: "a director of the committee works for their client",
+  tracker: "from the fundraising tracker",
+  sheet_2024: "from the 2024 lobby list",
+  manual: "added by an admin",
+  reviewed: "confirmed by an admin",
+};
+const WHY_CLIENT = {
+  name_exact: "donor name matches a client of theirs",
+  name_fuzzy: "donor name resembles a client of theirs",
+  committee_contact: "a director of the committee works for that client",
+  manual: "added by an admin",
+  reviewed: "confirmed by an admin",
+};
+
+/** The "why them" line, in words a first-time reader can follow. */
+function plainAttribution(a) {
+  if (!a) return "";
+  const client = a.client_names?.length ? `Lobbies for ${a.client_names.join(", ")}` : "";
+  const reasons = [...new Set((a.methods || []).map(m => m.startsWith("client:")
+    ? (WHY_CLIENT[m.slice(7)] || m.slice(7))
+    : (WHY_DIRECT[m] || m)))];
+  const parts = [client, reasons.join("; ")].filter(Boolean);
+  return (a.status === "confirmed" ? "" : "Not yet reviewed — ") + parts.join(" · ");
 }
 
 /** Sheet 2: one line per lobbyist, in the shape of the 2024 lobby list. */
@@ -2144,6 +2222,221 @@ function methodSheetRows(groups, cycle) {
   return rows;
 }
 
+// ── The lobbyist plan workbook ─────────────────────────────────────────────
+// Built with ExcelJS rather than the SheetJS build the other exports use,
+// because this one is opened by people who did not make it: it needs frozen
+// headers, bold titles, shaded tier rows and currency formatting, none of
+// which the community SheetJS build can write. Loaded only when asked for.
+
+const EXCELJS_SRC = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+
+async function loadExcelJs() {
+  if (window.ExcelJS) return window.ExcelJS;
+  await new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = EXCELJS_SRC;
+    el.onload = resolve;
+    el.onerror = () => reject(new Error("could not load the spreadsheet formatter"));
+    document.head.appendChild(el);
+  });
+  return window.ExcelJS;
+}
+
+const INK = {
+  head: "FF1F3864",        // header band
+  headText: "FFFFFFFF",
+  partner: "FFFDE68A",
+  tier1: "FFDCFCE7",
+  lobbyist: "FFEFF3FA",
+  total: "FFD9E2F3",
+  rule: "FFBFBFBF",
+  muted: "FF595959",
+};
+const MONEY = '"$"#,##0';
+
+function styleHeaderCell(cell, { center = false } = {}) {
+  cell.font = { bold: true, color: { argb: INK.headText }, size: 11 };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.head } };
+  cell.alignment = { vertical: "middle", horizontal: center ? "center" : "left", wrapText: true };
+}
+
+function tierFill(label) {
+  if (label === "PARTNER") return INK.partner;
+  if (label === "Tier 1") return INK.tier1;
+  return null;
+}
+
+/** Sheet 1 of the workbook: the call list, styled. */
+function writeCallList(wb, groups, cycle) {
+  const { rows, roles, merges, cols, moneyFrom, headerRows } = planSheetAoa(groups, cycle);
+  const ws = wb.addWorksheet("Call list", {
+    views: [{ state: "frozen", xSplit: 3, ySplit: headerRows }],
+    properties: { defaultRowHeight: 16 },
+  });
+  rows.forEach(r => ws.addRow(r));
+  ws.columns.forEach((col, i) => { col.width = cols[i]?.wch || 12; });
+  for (const m of merges) ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1);
+
+  rows.forEach((_, i) => {
+    const row = ws.getRow(i + 1);
+    const role = roles[i];
+    if (role === "title") {
+      row.font = { bold: true, size: 14 };
+      row.height = 22;
+    } else if (role === "note") {
+      row.font = { italic: true, size: 10, color: { argb: INK.muted } };
+    } else if (role.startsWith("head")) {
+      row.height = role === "head-name" ? 28 : 18;
+      row.eachCell({ includeEmpty: true }, (cell, c) => styleHeaderCell(cell, { center: c > moneyFrom }));
+    } else if (role === "total") {
+      row.font = { bold: true };
+      row.eachCell({ includeEmpty: true }, cell => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.total } };
+      });
+    } else if (role === "lobbyist" || role === "lobbyist-partner") {
+      row.font = { bold: true };
+      const tier = String(row.getCell(4).value || "");
+      const fill = tierFill(tier) || INK.lobbyist;
+      row.eachCell({ includeEmpty: true }, cell => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+        cell.border = { top: { style: "thin", color: { argb: INK.rule } } };
+      });
+    } else if (role === "donor") {
+      row.outlineLevel = 1;
+      row.getCell(3).alignment = { indent: 1 };
+    }
+    if (role === "donor" || role === "lobbyist" || role === "lobbyist-partner" || role === "total") {
+      for (let c = moneyFrom + 1; c <= rows[0].length; c++) row.getCell(c).numFmt = MONEY;
+      row.getCell(8).alignment = { wrapText: true, vertical: "top" };
+    }
+  });
+  // The "Lobbyist" repeat in column A is there for filtering and sorting, not
+  // for reading; it would otherwise be the first thing the eye lands on.
+  ws.getColumn(1).hidden = true;
+  ws.getColumn(1).width = 24;
+  return ws;
+}
+
+/** A plain table sheet: bold frozen header, filter, currency where asked. */
+function writeTable(wb, name, rows, { money = [], widths = {}, note = "" } = {}) {
+  const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: note ? 3 : 1 }] });
+  const headers = Object.keys(rows[0] || {});
+  if (note) {
+    ws.addRow([note]).font = { italic: true, size: 10, color: { argb: INK.muted } };
+    ws.addRow([]);
+  }
+  const head = ws.addRow(headers);
+  head.height = 26;
+  head.eachCell(cell => styleHeaderCell(cell));
+  for (const r of rows) ws.addRow(headers.map(h => r[h]));
+  ws.columns.forEach((col, i) => {
+    const h = headers[i];
+    col.width = widths[h] || Math.min(42, Math.max(12, String(h).length + 4));
+    if (money.includes(h)) col.numFmt = MONEY;
+  });
+  ws.autoFilter = {
+    from: { row: head.number, column: 1 },
+    to: { row: head.number + rows.length, column: headers.length },
+  };
+  return ws;
+}
+
+/** Sheet 0: what this is, for someone opening it cold. */
+function writeCover(wb, groups, cycle) {
+  const ws = wb.addWorksheet("Start here", { views: [{ showGridLines: false }] });
+  const self = window._targetProfile?.name || "This committee";
+  const seat = window._targetSeat, ctx = window._seatContext;
+  const withLob = groups.filter(g => g.lobbyist);
+  const donors = groups.reduce((n, g) => n + g.rows.length, 0);
+  const ask = groups.reduce((n, g) => n + g.remaining, 0);
+
+  const title = ws.addRow([`${self} — lobbyist call plan`]);
+  title.font = { bold: true, size: 18 };
+  title.height = 26;
+  ws.addRow([`${cycle - 1}–${cycle} election cycle · prepared ${new Date().toLocaleDateString("en-US",
+    { year: "numeric", month: "long", day: "numeric" })}`]).font = { size: 11, color: { argb: INK.muted } };
+  ws.addRow([]);
+
+  const facts = [
+    ["Lobbyists to call", withLob.length],
+    ["Donors covered", donors],
+    ["Still to ask", ask],
+    ["Seat", seat ? `${seat.label.replace(/ \(.*\)/, "")}${seat.margin_pts != null
+      ? `, decided by ${seat.margin_pts.toFixed(1)} points in ${seat.year}` : ""}` : "no margin on record"],
+  ];
+  if (ctx) facts.push(["What seats this close raise", ctx.median]);
+  for (const [k, v] of facts) {
+    const row = ws.addRow([k, v]);
+    row.getCell(1).font = { bold: true };
+    if (typeof v === "number" && (k === "Still to ask" || k.startsWith("What seats"))) {
+      row.getCell(2).numFmt = MONEY;
+    }
+  }
+  ws.addRow([]);
+
+  const heading = t => { const r = ws.addRow([t]); r.font = { bold: true, size: 12 }; r.height = 20; };
+  const para = t => { const r = ws.addRow([t]); r.font = { size: 11 }; r.alignment = { wrapText: true }; r.height = 30; };
+
+  heading("What's in this file");
+  for (const [sheet, what] of [
+    ["Call list", "Every lobbyist to call, in the order to call them, with their donors underneath and what to ask each one for."],
+    ["Lobbyists", "The same lobbyists, one line each — sort or filter this one."],
+    ["Donors", "One line per donor, for anyone who wants to pivot the numbers."],
+    ["How these numbers were set", "Where each figure came from."],
+  ]) {
+    const row = ws.addRow([sheet, what]);
+    row.getCell(1).font = { bold: true };
+    row.getCell(2).alignment = { wrapText: true };
+    row.height = 28;
+  }
+  ws.addRow([]);
+
+  heading("How to read the call list");
+  para("Lobbyists are listed best-prospect first: PARTNER, then Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
+  para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in. The columns further right show what those same donors gave this candidate and a few comparable candidates in past cycles — that is the case for the ask.");
+  para("Individual people are not in this plan. It lists organizations, PACs and businesses only, using ORESTAR's own category for each contributor.");
+
+  ws.getColumn(1).width = 34;
+  ws.getColumn(2).width = 96;
+  return ws;
+}
+
+async function exportLobbyistWorkbook(groups, cycle, filename) {
+  const ExcelJSLib = await loadExcelJs();
+  const wb = new ExcelJSLib.Workbook();
+  wb.creator = "Oregon Campaign Finance";
+  wb.created = new Date();
+
+  writeCover(wb, groups, cycle);
+  writeCallList(wb, groups, cycle);
+
+  const lobRows = lobbyistSheetRows(groups, cycle);
+  if (lobRows.length) {
+    writeTable(wb, "Lobbyists", lobRows, {
+      money: ["Suggested ask", `Given ${cycle - 1}–${cycle}`, "Remaining",
+              "Given to this committee to date", "Given to like candidates"],
+      widths: { "Lobbyist / Firm": 30, "Firm / Title": 24, Contact: 24, Email: 30,
+                "Other contacts": 44, Clients: 60, "Why this tier": 60 },
+      note: "One line per lobbyist. Sort by tier or by what is still to ask.",
+    });
+  }
+  const flat = lobbyistPlanExportRows();
+  if (flat.length) {
+    writeTable(wb, "Donors", flat, {
+      money: ["Target", "Given This Cycle", "Remaining", "Last Cycle", "Comparable Max"],
+      widths: { Lobbyist: 28, Donor: 38, Attribution: 60, Email: 30, "Other Firm Contacts": 40 },
+      note: "One line per donor — the sheet to pivot.",
+    });
+  }
+  writeTable(wb, "How these numbers were set", methodSheetRows(groups, cycle),
+             { widths: { Item: 26, Value: 34, Detail: 110 } });
+
+  const buf = await wb.xlsx.writeBuffer();
+  downloadFile(new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  }), filename);
+}
+
 // ── Export ─────────────────────────────────────────────────────────────────
 function exportData(format, scope = "new") {
   const recs = window._recommendations || [];
@@ -2155,7 +2448,7 @@ function exportData(format, scope = "new") {
   const repeatRows = repeats.map(r => ({
     "Type": "Donor Target",
     "Donor Name": r.donor,
-    "Lobbyist": lobbyistNames(r.donor),
+    "Lobbyist": lobbyistNames(r),
     "Filer": target ? target.name : "",
     "Cycle": cycleLabel,
     "Score": "",
@@ -2173,7 +2466,7 @@ function exportData(format, scope = "new") {
   const newRows = recs.map(r => ({
     "Type": "New Prospect",
     "Donor Name": r.donor,
-    "Lobbyist": lobbyistNames(r.donor),
+    "Lobbyist": lobbyistNames(r),
     "Filer": target ? target.name : "",
     "Cycle": cycleLabel,
     "Score": r.score,
@@ -2242,32 +2535,16 @@ function exportData(format, scope = "new") {
         XLSX.utils.book_append_sheet(wb, ws2, "New Prospects");
       }
     } else if (scope === "lobbyist") {
-      // The lobby list, not a pivot source: the plan first, then a line per
-      // lobbyist, then the flat table, then how the numbers were reached.
-      const groups = planGroups();
-      const { rows, merges, cols } = planSheetAoa(groups, cycle);
-      const plan = XLSX.utils.aoa_to_sheet(rows);
-      plan["!merges"] = merges;
-      plan["!cols"] = cols;
-      XLSX.utils.book_append_sheet(wb, plan, "Plan");
-
-      const lobRows = lobbyistSheetRows(groups, cycle);
-      if (lobRows.length) {
-        const ws = XLSX.utils.json_to_sheet(lobRows);
-        ws["!cols"] = [{ wch: 9 }, { wch: 30 }, { wch: 24 }, { wch: 24 }, { wch: 30 }, { wch: 16 },
-                       { wch: 44 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 12 }, { wch: 16 },
-                       { wch: 12 }, { wch: 14 }, { wch: 60 }, { wch: 60 }];
-        XLSX.utils.book_append_sheet(wb, ws, "Lobbyists");
-      }
-      const flat = XLSX.utils.json_to_sheet(exportRows);
-      flat["!cols"] = [{ wch: 9 }, { wch: 28 }, { wch: 24 }, { wch: 30 }, { wch: 16 }, { wch: 40 },
-                       { wch: 44 }, { wch: 24 }, { wch: 30 }, { wch: 16 }, { wch: 13 }, { wch: 11 },
-                       { wch: 14 }, { wch: 11 }, { wch: 11 }, { wch: 14 }, { wch: 34 }, { wch: 60 }, { wch: 30 }];
-      XLSX.utils.book_append_sheet(wb, flat, "Donors");
-
-      const method = XLSX.utils.json_to_sheet(methodSheetRows(groups, cycle));
-      method["!cols"] = [{ wch: 26 }, { wch: 34 }, { wch: 100 }];
-      XLSX.utils.book_append_sheet(wb, method, "Method");
+      // A formatted workbook of its own (see writeCallList): frozen headers,
+      // tier shading, currency. Asynchronous because the formatter loads on
+      // demand; failures fall back to telling the user rather than a silent
+      // empty download.
+      exportLobbyistWorkbook(planGroups(), cycle, `${fileLabel}_${target.slug}_${cycle}.xlsx`)
+        .catch(err => {
+          console.error(err);
+          alert(`Could not build the Excel file: ${err.message}. The CSV button still works.`);
+        });
+      return;
     } else {
       const ws = XLSX.utils.json_to_sheet(exportRows);
       XLSX.utils.book_append_sheet(wb, ws, scope === "repeat" ? "Donor Targets" : "New Prospects");
@@ -2277,7 +2554,7 @@ function exportData(format, scope = "new") {
 }
 
 function downloadFile(content, filename, mime) {
-  const blob = new Blob([content], { type: mime });
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

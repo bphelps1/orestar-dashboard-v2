@@ -79,14 +79,21 @@ with t as (
   from transactions
   where tran_date >= '{POOL_SINCE}'
     and sub_type in ('Cash Contribution', 'In-Kind Contribution')
-    and coalesce(book_type, '') not in ('Individual', 'Candidate & Immediate Family')
+    and coalesce(book_type, '') not in ('Individual', 'Candidate & Immediate Family',
+                                        'Candidate''s Immediate Family')
     and donor_id is not null
     and not (contributor_payee ilike 'miscellaneous %%')
 )
 insert into lobby_donor_pool (donor_id, display_name, book_type, committee_id, names, address,
                               city, state, total_since_2021, gifts, recipients, last_date, refreshed_at)
 select d.donor_id, d.display_name, d.book_type, nullif(d.committee_id, ''),
-       array_agg(distinct t.label), mode() within group (order by t.addr_line1),
+       -- Both spellings of the donor: the raw transaction labels AND the
+       -- resolved display name. A committee files as "Oregon Health Care
+       -- Association PAC (275)" but the dashboard shows it without the
+       -- ORESTAR id, so a pool holding only raw labels could not be found
+       -- from a plan — it hid 253 attributed donors.
+       array_agg(distinct t.label) || array[lower(d.display_name)],
+       mode() within group (order by t.addr_line1),
        d.city, d.state, sum(t.amount), count(*), count(distinct t.filer_id), max(t.tran_date), now()
 from t join donors d using (donor_id)
 group by d.donor_id, d.display_name, d.book_type, d.committee_id, d.city, d.state

@@ -191,16 +191,50 @@ set by hand per **chamber and party** — a firm can be a partner of the House
 Democrats and nothing to the Senate Republicans — and it applies only when the
 plan is for that chamber and party.
 
+### Who is in the plan
+
+Only organizations. ORESTAR files every contributor under a category
+(`book_type`), and the plan drops **Individual**, **Candidate & Immediate
+Family** and **Candidate's Immediate Family** rather than guessing from the
+shape of a name. Individual donors stay in *Donor Targets* and *New Donor
+Prospects*, which is where a person belongs. A donor whose category cannot be
+found is kept: dropping a real PAC is worse than listing one person.
+
+### One donor, however it is spelled
+
+Everything here keys on the **donor's identity** (`donor_key`, the resolver's
+id), never on the label. ORESTAR records the same company under many spellings
+— "FamilyCare", "FamilyCare, Inc", "Familycare, Inc." — and a merge recorded at
+`/admin/donors` collapses them into one identity. Keying on the label split one
+donor into several and quietly ignored those merges.
+
+The attribution lookup matches on the same id. It used to match the donor's
+name against the variants stored in `lobby_donor_pool`, which held only the raw
+transaction labels: a committee files as "Oregon Health Care Association PAC
+(275)" while the dashboard shows it without the ORESTAR id, so **253 attributed
+donors — $62.9M of giving, including most of the large PACs — showed "no
+lobbyist on file"** despite being attributed and confirmed. The pool now stores
+the resolved name alongside the raw labels, and the plan asks by id first.
+
 ### The Excel export
 
-**Lobbyist Plan Excel** writes four sheets:
+**Lobbyist Plan Excel** is written with ExcelJS rather than the SheetJS build
+the other exports use, because this one is opened by people who did not make
+it: it needs frozen headers, shaded tiers and currency formatting, none of
+which the community SheetJS build can write. The formatter loads only when the
+button is pressed.
 
 | Sheet | What it is |
 |---|---|
-| **Plan** | The lobby list itself. One entry per lobbyist — tier, who to call, their donors beneath — with banded columns to the right: this cycle's *Target* and *Actual* for this candidate, then what the same donors gave this candidate **and the five comparable candidates they gave most to** in each of the two previous cycles. That is the argument for the ask, next to the ask. |
-| **Lobbyists** | One line per lobbyist in the shape of the 2024 lobby list: tier, firm, contact, other contacts, donors, suggested ask, giving to this committee to date, like-candidate giving, clients, and why that tier. |
+| **Start here** | What the file is, the headline numbers, and how to read the call list — for someone opening it cold. |
+| **Call list** | One block per lobbyist in call order, their donors collapsible underneath (Excel's outline arrows), with the ask and what has come in this cycle, then what those same donors gave this candidate **and the five comparable candidates they gave most to** in each of the two previous cycles. Headers frozen, partners and Tier 1 shaded, money formatted as money. |
+| **Lobbyists** | One line per lobbyist, filterable: tier, firm, contact, donors, suggested ask, giving to this committee to date, like-candidate giving, clients, and why that tier. |
 | **Donors** | The flat table, one row per donor — the sheet to pivot. |
-| **Method** | How every number was reached: the seat, its margin, the peer seats and what they raised, the ask rule and the tier rule. |
+| **How these numbers were set** | The seat, its margin, the peer seats and what they raised, the ask rule and the tier rule. |
+
+Column headings are plain English — *Ask*, *Given*, *Who to call*, *Why them* —
+and the "why" is spelled out ("Lobbies for Oregon Health Care Association ·
+donor name matches a client of theirs") rather than left as a method name.
 
 Who leads is seeded from the fundraising sheets and editable at
 `/admin/lobbyists`:
@@ -282,6 +316,13 @@ lobbyist claims the client, since the list is dated).
 The weekly *Lobbyist Attribution* workflow re-reads Capitol Club, re-reads the
 contacts of up to 400 committees whose data is over 30 days old, and refreshes
 suggestions. A confirmed or rejected row is never changed by a re-run.
+
+Every workflow that runs `scraper/process.py` must follow it with
+`scraper/refresh_donor_aggregates.py`: process.py rebuilds each committee's
+donor table from the raw transaction labels, and the re-key step puts the
+resolved identities — and the merges recorded at `/admin/donors` — back. The
+account-balance sweep was missing that step, so a merge survived only until the
+next sweep finished.
 
 ## What it deliberately does not do
 
