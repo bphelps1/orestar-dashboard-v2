@@ -282,7 +282,7 @@ async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
         const prior = earliest.get(pair);
         if (!prior || r.first_date < prior.first_date || (r.first_date === prior.first_date && Number(r.amount) < prior.amount)) {
           earliest.set(pair, { key, first_date: r.first_date, amount: Number(r.amount),
-            filer: comp.name, marginPts: comp.seat?.margin_pts ?? null });
+            filer: comp.name, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null });
         }
       }
     }
@@ -346,6 +346,14 @@ async function runRecommendations() {
     const compProfiles = await Promise.all(
       comparables.map(c => loadFilerProfile(c.slug))
     );
+
+    // Closed status lives in the detail cache, not every filer-index version.
+    for (let i = comparables.length - 1; i >= 0; i--) {
+      if (compProfiles[i]?.closed) {
+        comparables.splice(i, 1);
+        compProfiles.splice(i, 1);
+      }
+    }
 
     // Cached profiles may be rebuilt from raw labels between resolver runs.
     // Repair missing identities from the same scoped donor query as Donor Lookup
@@ -454,18 +462,45 @@ const MIN_PEER_GIFTS = 3;
  * Returns null when the target seat has no margin on record, or when even the
  * widest window is too thin to say anything.
  */
-function peerMarginGifts(gifts, targetMargin) {
-  if (targetMargin == null) return null;
+function peerMarginGifts(gifts, targetSeat) {
+  // Numeric input is retained for callers with an actual contested margin.
+  const seat = typeof targetSeat === "number" ? { margin_pts: targetSeat } : targetSeat;
+  if (!seat) return null;
+  if (seat.band === "unopposed") {
+    const peers = gifts.filter(g => g.seatBand === "unopposed");
+    return peers.length >= MIN_PEER_GIFTS ? { gifts: peers, window: null, kind: "unopposed" } : null;
+  }
+  if (seat.margin_pts == null) return null;
   for (const window of PEER_WINDOWS) {
-    const peers = gifts.filter(g => g.marginPts != null && Math.abs(g.marginPts - targetMargin) <= window);
-    if (peers.length >= MIN_PEER_GIFTS) return { gifts: peers, window };
+    const peers = gifts.filter(g => g.seatBand !== "unopposed" && g.marginPts != null
+      && Math.abs(g.marginPts - seat.margin_pts) <= window);
+    if (peers.length >= MIN_PEER_GIFTS) return { gifts: peers, window, kind: "margin" };
   }
   return null;
 }
 
-/** "Friends of X (0.8 pt margin): $2,500" — a gift behind a benchmarked ask. */
+function seatDescription(seat) {
+  return seat?.band === "unopposed" ? "unopposed" : seat?.margin_pts != null
+    ? `${seat.margin_pts.toFixed(1)} pt margin` : "no margin";
+}
+
+function peerDescription(peer) {
+  return peer.kind === "unopposed" ? "unopposed seats" : `seats within ${peer.window} pts of this one`;
+}
+
 function peerGiftLabel(g) {
-  return `${g.filer} (${g.marginPts != null ? `${g.marginPts.toFixed(1)} pt margin` : "no margin"}): ${fmt$(g.amount)}`;
+  return `${g.filer} (${seatDescription({ band: g.seatBand, margin_pts: g.marginPts })}): ${fmt$(g.amount)}`;
+}
+
+/** Only known, recent candidate elections can establish candidate comparability.
+ * Senate and statewide executive candidates have four-year terms. Other offices use the previous cycle.
+ * Missing election metadata is not evidence of a current candidacy.
+ */
+function eligibleComparable(filer, cycle) {
+  if (filer.closed || filer.committee_type !== "Candidate Committee") return false;
+  const year = Number(String(filer.election || "").match(/\b(?:19|20)\d{2}\b/)?.[0]);
+  const lookback = ["state_senate", "governor", "sos", "ag", "treasurer"].includes(getOffice(filer)) ? 4 : 2;
+  return year >= cycle - lookback && year <= cycle;
 }
 
 let raceMarginIndex = null;   // "Office|District" -> {margin_pts, band, label, year}
@@ -527,7 +562,7 @@ async function findComparables(targetProfile, targetFiler, cycle) {
   const scored = [];
 
   for (const f of filerIndex) {
-    if (f.slug === targetFiler.slug) continue;
+    if (f.slug === targetFiler.slug || !eligibleComparable(f, cycle)) continue;
 
     // Must have some fundraising activity
     if (f.total_in < 100) continue;
@@ -633,12 +668,13 @@ function seatPeerContext(comparables, compProfiles, cycle, targetSeat, targetPro
   const isLeader = (targetProfile?._leadershipTier || 0) > 0;
   const sameRole = all.filter(c => c.leadership === isLeader);
   const withSeats = sameRole.length >= 3 ? sameRole : all;
-  for (const window of PEER_WINDOWS) {
-    const peers = withSeats.filter(c => Math.abs(c.seat.margin_pts - targetSeat.margin_pts) <= window);
-    if (peers.length < 3) continue;
+  const selection = peerMarginGifts(withSeats.map(c => ({ ...c,
+    seatBand: c.seat.band, marginPts: c.seat.margin_pts })), targetSeat);
+  if (selection) {
+    const peers = selection.gifts;
     const totals = peers.map(p => p.total).sort((a, b) => a - b);
     return {
-      window, n: peers.length,
+      window: selection.window, kind: selection.kind, n: peers.length,
       median: percentile(totals, 0.5),
       p75: percentile(totals, 0.75),
       max: totals[totals.length - 1],
@@ -784,7 +820,7 @@ function donorDisplayName(name) {
 function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
   const actual = window._firstGifts?.get(key);
   if (actual?.length) {
-    const peers = peerMarginGifts(actual, seat?.margin_pts ?? null);
+    const peers = peerMarginGifts(actual, seat);
     const sample = peers?.gifts || actual;
     return { amount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length, actual: true };
   }
@@ -796,12 +832,12 @@ function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
       const amount = (profile.top_donors_by_year[year] || []).filter(d => donorKey(d) === key)
         .reduce((sum, d) => sum + Number(d.total || 0), 0);
       if (amount > 0) {
-        gifts.push({ amount, filer: comparables[i].name, marginPts: comparables[i].seat?.margin_pts ?? null, year });
+        gifts.push({ amount, filer: comparables[i].name, seatBand: comparables[i].seat?.band, marginPts: comparables[i].seat?.margin_pts ?? null, year });
         break;
       }
     }
   });
-  const peer = peerMarginGifts(gifts, seat?.margin_pts ?? null);
+  const peer = peerMarginGifts(gifts, seat);
   const sample = peer?.gifts || gifts;
   return { amount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length };
 }
@@ -902,7 +938,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       const maxCy = Math.max(...Object.values(cyMap));
       if (!compDonorDetails.has(key)) compDonorDetails.set(key, []);
       compDonorDetails.get(key).push({ filer: comp.name, amount: maxCy, isLeadership: compIsLeadership,
-                                       leadershipTier: compTier, marginPts: comp.seat?.margin_pts ?? null,
+                                       leadershipTier: compTier, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
                                        cycles: cyMap });
     }
   }
@@ -983,7 +1019,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // gives a candidate in a 3-point race is the evidence for what they would
     // give this candidate in a 3-point race. Everything they gave is the
     // fallback, and the explanation says which was used.
-    const peer = peerMarginGifts(compGifts, targetSeat?.margin_pts ?? null);
+    const peer = peerMarginGifts(compGifts, targetSeat);
     const refGifts = peer ? peer.gifts : compGifts;
     // Discount single-filer outliers: if the max is >1.5x the second-highest,
     // it's an outlier — use the second-highest as the reference instead.
@@ -1044,8 +1080,8 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // Say which giving the benchmark came from before quoting a number from it.
     if (targetSeat && targetSeat.margin_pts != null && compGifts.length) {
       factors.push(peer
-        ? `Benchmark: ${peer.gifts.length} gift${peer.gifts.length === 1 ? "" : "s"} to seats within `
-          + `${peer.window} pts of this one (${targetSeat.margin_pts.toFixed(1)} pt margin, ${targetSeat.year})`
+        ? `Benchmark: ${peer.gifts.length} gift${peer.gifts.length === 1 ? "" : "s"} to ${peerDescription(peer)}`
+          + ` (${seatDescription(targetSeat)}, ${targetSeat.year})`
         : `Benchmark: all comparable giving — fewer than ${MIN_PEER_GIFTS} gifts to seats of similar closeness`);
     }
 
@@ -1060,7 +1096,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       factors.push(`Comparable uplift (${pct}% weight, ref: ${fmt$(compRef)}${nlTag}${outlierNote}):`);
       upliftGifts.forEach(g => {
         const tag = g.isLeadership ? "" : " ★";
-        const seat = g.marginPts != null ? ` [${g.marginPts.toFixed(1)} pt seat]` : "";
+        const seat = g.seatBand === "unopposed" ? " [unopposed seat]" : g.marginPts != null ? ` [${g.marginPts.toFixed(1)} pt seat]` : "";
         factors.push(`  • ${g.filer}: ${fmt$(g.amount)}${seat}${tag}`);
       });
     } else if (refGifts.length > 0) {
@@ -1092,7 +1128,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       history: historyParts,
       cycles: donor.cycles,          // {cycle: amount} to THIS committee
       comp_gifts: compGifts,         // gifts to comparables, with seat margins
-      benchmark: peer ? { window: peer.window, n: peer.gifts.length } : null,
+      benchmark: peer ? { kind: peer.kind, window: peer.window, n: peer.gifts.length } : null,
       factors,
     });
   }
@@ -1134,7 +1170,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
         amount: d.total,
         similarity: comp.similarity,
         isLeadership: (comp.leadership_tier || 0) > 0,
-        marginPts: comp.seat?.margin_pts ?? null,
+        seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
       });
       entry.totalToComps += d.total;
       entry.distinctComps = entry.compGifts.length;
@@ -1203,7 +1239,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     // the number comes from giving in comparable races rather than from
     // scaling a safe-seat number up.
     const compAmounts = donor.compGifts.map(g => g.amount).sort((a, b) => a - b);
-    const peer = peerMarginGifts(donor.compGifts, targetSeat?.margin_pts ?? null);
+    const peer = peerMarginGifts(donor.compGifts, targetSeat);
     const askAmounts = (peer ? peer.gifts.map(g => g.amount) : compAmounts).sort((a, b) => a - b);
     const median = percentile(askAmounts, 0.5);
     const p75 = percentile(askAmounts, 0.75);
@@ -1235,13 +1271,13 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     // Show what the ask was measured against, so the number is traceable to
     // real gifts rather than to a rule.
     if (peer) {
-      factors.push(`Ask set by ${peer.gifts.length} gifts to seats within ${peer.window} pts of this one`
-        + ` (${targetSeat.margin_pts.toFixed(1)} pt margin, ${targetSeat.year}) — median ${fmt$(median)}`);
+      factors.push(`Ask set by ${peer.gifts.length} gifts to ${peerDescription(peer)}`
+        + ` (${seatDescription(targetSeat)}, ${targetSeat.year}) — median ${fmt$(median)}`);
       [...peer.gifts].sort((a, b) => b.amount - a.amount).slice(0, 4)
         .forEach(g => factors.push(`  • ${peerGiftLabel(g)}`));
     } else if (targetSeat && targetSeat.margin_pts != null) {
-      factors.push(`Ask set by all comparable giving — under ${MIN_PEER_GIFTS} gifts to seats within`
-        + ` ${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this ${targetSeat.label} seat`);
+      factors.push(`Ask set by all comparable giving — under ${MIN_PEER_GIFTS} gifts to `
+        + (targetSeat.band === "unopposed" ? "unopposed seats" : `seats within ${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one`));
     }
 
     // Factor 1: Number of distinct comparable filers supported (0-35 pts)
@@ -1344,7 +1380,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       total_to_comps: donor.totalToComps,
       leadership_comps: donor.leadershipComps,
       comp_gifts: donor.compGifts,
-      benchmark: peer ? { window: peer.window, n: peer.gifts.length } : null,
+      benchmark: peer ? { kind: peer.kind, window: peer.window, n: peer.gifts.length } : null,
       why_summary: whySummary,
       factors,
     });
@@ -1531,11 +1567,11 @@ function seatBenchmarkCard(targetSeat, ctx, cycleContributions) {
   const pct = ctx.median > 0 ? Math.round((cycleContributions / ctx.median) * 100) : null;
   const standing = pct == null ? ""
     : pct >= 100 ? `${pct}% of that median` : `${pct}% of that median — ${fmt$(ctx.median - cycleContributions)} behind`;
-  return `<div class="summary-card"><span class="sc-label">Similar-margin seats
-      <span class="sc-help" title="Comparable committees whose last general finished within ${ctx.window} points of this seat's ${targetSeat.margin_pts.toFixed(1)}-point margin, and what they raised this cycle. Targets are benchmarked against giving in seats like these rather than scaled by a multiplier.">?</span></span><br>
+  return `<div class="summary-card"><span class="sc-label">${ctx.kind === "unopposed" ? "Unopposed-seat peers" : "Similar-margin seats"}
+      <span class="sc-help" title="Comparable committees in ${peerDescription(ctx)}, and what they raised this cycle. Targets are benchmarked against giving in seats like these rather than scaled by a multiplier.">?</span></span><br>
     <span class="sc-value">${fmt$(ctx.median)}</span>
     <div class="sc-sub">${esc(targetSeat.label)} · median of ${ctx.n}
-      ${ctx.leadershipOnly ? "leadership " : ""}seats within ${ctx.window} pts · ${standing}</div></div>`;
+      ${ctx.leadershipOnly ? "leadership " : ""}${peerDescription(ctx)} · ${standing}</div></div>`;
 }
 
 // ── Lobbyist tiers ─────────────────────────────────────────────────────────
@@ -2228,8 +2264,8 @@ function planSheetAoa(groups, cycle) {
   const sub = blank();
   sub[0] = seat
     ? `This seat was ${seat.label.replace(/ \(.*\)/, "")} in ${seat.year}`
-      + (seat.margin_pts != null ? ` — decided by ${seat.margin_pts.toFixed(1)} points` : "")
-      + (ctx ? `. Committees in seats that close raised a median of ${fmt$(ctx.median)} this cycle.` : ".")
+      + (seat.band !== "unopposed" && seat.margin_pts != null ? ` — decided by ${seat.margin_pts.toFixed(1)} points` : "")
+      + (ctx ? `. Comparable committees raised a median of ${fmt$(ctx.median)} this cycle.` : ".")
     : "No general-election margin on record for this seat.";
   push(sub, "note");
   const method = blank();
@@ -2399,21 +2435,21 @@ function methodSheetRows(groups, cycle) {
   const rows = [
     { Item: "Committee", Value: window._targetProfile?.name || "", Detail: `${cycle - 1}–${cycle} cycle` },
     { Item: "Seat", Value: seat ? seat.label : "no margin on record",
-      Detail: seat && seat.margin_pts != null ? `${seat.margin_pts.toFixed(1)} pt margin, ${seat.year} general` : "" },
+      Detail: seat && seat.margin_pts != null ? `${seatDescription(seat)}, ${seat.year} general` : "" },
   ];
   if (ctx) {
-    rows.push({ Item: "Similar-margin seats", Value: fmt$(ctx.median),
-      Detail: `median raised this cycle by ${ctx.n} comparable committees within ${ctx.window} pts of this margin` });
+    rows.push({ Item: ctx.kind === "unopposed" ? "Unopposed-seat peers" : "Similar-margin seats", Value: fmt$(ctx.median),
+      Detail: `median raised this cycle by ${ctx.n} comparable committees in ${peerDescription(ctx)}` });
     rows.push({ Item: "This committee", Value: fmt$(ctx.raised),
       Detail: ctx.median ? `${Math.round((ctx.raised / ctx.median) * 100)}% of that median` : "" });
     for (const p of ctx.peers.slice(0, 10)) {
-      rows.push({ Item: "  peer", Value: p.name, Detail: `${p.seat.margin_pts.toFixed(1)} pt margin · ${fmt$(p.total)} this cycle` });
+      rows.push({ Item: "  peer", Value: p.name, Detail: `${seatDescription(p.seat)} · ${fmt$(p.total)} this cycle` });
     }
   }
   rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
-      + `Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
+      + `Unopposed seats are matched only to other unopposed seats, never numeric margins. Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",
     Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark before rounding to the nearest $250. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
   for (const t of TIER_RULES) {
@@ -2565,10 +2601,10 @@ function writeCover(wb, groups, cycle) {
     ["Lobbyists to call", withLob.length],
     ["Donors covered", donors],
     ["Still to ask", ask],
-    ["Seat", seat ? `${seat.label.replace(/ \(.*\)/, "")}${seat.margin_pts != null
+    ["Seat", seat ? `${seat.label.replace(/ \(.*\)/, "")}${seat.band !== "unopposed" && seat.margin_pts != null
       ? `, decided by ${seat.margin_pts.toFixed(1)} points in ${seat.year}` : ""}` : "no margin on record"],
   ];
-  if (ctx) facts.push(["What seats this close raise", ctx.median]);
+  if (ctx) facts.push([ctx.kind === "unopposed" ? "What unopposed-seat peers raise" : "What seats this close raise", ctx.median]);
   for (const [k, v] of facts) {
     const row = ws.addRow([k, v]);
     row.getCell(1).font = { bold: true };

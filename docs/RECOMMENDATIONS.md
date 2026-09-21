@@ -29,7 +29,9 @@ The Donor Targets export includes both groups as well.
 
 ## Step 2 — Comparable committees
 
-Every other committee is scored for similarity. Anything scoring **≤ 20 is
+Only candidate committees with a known election in the selected cycle or previous cycle are scored. Senate and statewide executive committees get a four-year lookback. Future elections, missing election metadata, noncandidate committees, and closed committees are excluded. Closed flags from detail profiles are checked before any scoring or export.
+
+Every eligible committee is scored for similarity. Anything scoring **≤ 20 is
 discarded**; the top **50** survive.
 
 | Signal | Weight |
@@ -124,8 +126,11 @@ coefficient said so.
 - With fewer than 3 qualifying gifts even at ±20, the donor's whole comparable
   history is used and the row says so: *"Ask set by all comparable giving —
   under 3 gifts to seats within 20 pts of this safe (>20 pt margin) seat."*
-- Unopposed seats are not a special case. They sit near a 100-point margin and
-  find each other naturally.
+- Unopposed seats form a separate category, never a numeric 100-point margin.
+  They benchmark against at least three gifts to other unopposed seats; contested
+  seats exclude unopposed seats from every margin window. When that sample is too
+  small, the explicitly labeled all-comparable fallback still applies. The app
+  and workbook label these comparisons as unopposed-seat peers.
 - The gifts behind an ask are listed in the donor's "why", each with the margin
   of the seat it was given in, so the figure can be traced to real
   contributions.
