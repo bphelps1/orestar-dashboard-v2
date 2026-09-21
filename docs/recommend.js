@@ -352,8 +352,10 @@ async function runRecommendations() {
     // before scoring, classifying repeat donors, or building export history.
     await loadRecommendationIdentities([targetProfile, ...compProfiles], [filer, ...comparables]);
 
+    showStatus("Combining donor identities…", "loading");
     await loadPlanningKeys([targetProfile, ...compProfiles]);
 
+    showStatus("Checking first-time giving…", "loading");
     await loadFirstGifts([targetProfile, ...compProfiles], comparables, compProfiles, cycle);
 
     // 4. Build repeat donor targets (existing donors to THIS filer)

@@ -30,7 +30,7 @@ def test_immediate_merges_across_reads_and_undo():
                       'donor_client_links','donor_contacts','transactions','filer_detail','lobbyists','lobbyist_clients','donor_review_decisions']:
             q.execute(f'create table {schema}.{table} (like public.{table} including all)')
         normalize = (ROOT/'supabase/migrations/014_donor_leaderboard.sql').read_text().split('create or replace view')[0]
-        migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text() + '\n' + (ROOT/'supabase/migrations/022_donor_display_aliases.sql').read_text() + '\n' + (ROOT/'supabase/migrations/024_donor_profile_lookup_performance.sql').read_text()
+        migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text() + '\n' + (ROOT/'supabase/migrations/022_donor_display_aliases.sql').read_text() + '\n' + (ROOT/'supabase/migrations/024_donor_profile_lookup_performance.sql').read_text() + '\n' + (ROOT/'supabase/migrations/025_recommendation_first_gift_performance.sql').read_text()
         # All tables/functions/views/policies and grants stay in this schema.
         sql = (normalize + migration).replace('public.', schema + '.').replace('search_path = public', 'search_path = '+schema).replace('search_path=public', 'search_path='+schema)
         q.execute(sql)
@@ -61,6 +61,10 @@ def test_immediate_merges_across_reads_and_undo():
         assert q.fetchone()[0]==600
         q.execute("select * from recommendation_first_gifts(array['a'],array['f'],date '2026-12-31')")
         first=q.fetchone(); assert first[0]=='a' and first[3]==200
+        q.execute("select * from recommendation_first_gifts(array['b','a','b'],array['f'],date '2026-12-31')")
+        assert q.fetchall()==[first]
+        q.execute("select * from recommendation_first_gifts(array[]::text[],array['f'],date '2026-12-31')")
+        assert q.fetchall()==[]
         q.execute("select * from donor_merge_filers")
         assert q.fetchall()==[('f',)]
         # No rewrite or full resolver was necessary; raw IDs are untouched.

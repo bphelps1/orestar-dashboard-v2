@@ -3,7 +3,8 @@
  */
 "use strict";
 const ID = (() => {
-  let mapping, labels, filers;
+  let mapping, labels;
+  const filerChecks = new Map();
   const labelKey = name => String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
   async function readAll(table) {
     const sb = await getSupabase();
@@ -24,11 +25,19 @@ const ID = (() => {
   }
   async function hasMerges() { return (await loadMap()).size > 0; }
   async function affectsFilers(ids) {
-    if (!await hasMerges()) return false;
-    if (!filers) filers = readAll('donor_merge_filers').then(rows => new Set(rows.map(r => String(r.filer_id))))
-      .catch(error => { filers = null; throw error; });
-    const affected = await filers;
-    return ids.some(id => affected.has(String(id)));
+    const scope = [...new Set(ids.filter(id => id != null && String(id).trim()).map(String))].sort();
+    if (!scope.length || !await hasMerges()) return false;
+    const key = JSON.stringify(scope);
+    if (!filerChecks.has(key)) filerChecks.set(key, (async () => {
+      const sb = await getSupabase();
+      // Ask only about this committee scope. Paging the statewide distinct
+      // view repeats its full transaction scan for every 1,000-row page.
+      const { data, error } = await sb.from('donor_merge_filers').select('filer_id')
+        .in('filer_id', scope).limit(1);
+      if (error) throw new Error(`Could not check saved donor merges: ${error.message}`);
+      return data.length > 0;
+    })().catch(error => { filerChecks.delete(key); throw error; }));
+    return filerChecks.get(key);
   }
   async function members(id) {
     const map = await loadMap();
