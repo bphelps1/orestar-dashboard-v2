@@ -38,6 +38,7 @@ MIGRATIONS = [
     "022_donor_display_aliases.sql",
     "023_lobbyist_client_editor.sql",
     "024_donor_profile_lookup_performance.sql",
+    "025_recommendation_first_gift_performance.sql",
 ]
 
 

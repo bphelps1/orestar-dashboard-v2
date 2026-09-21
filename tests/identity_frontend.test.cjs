@@ -14,7 +14,7 @@ function identityHarness(overrides = {}) {
   donor_merge_filers: [{filer_id:'1'}], ...overrides,
  };
  const reads=[];
- const ctx=vm.createContext({getSupabase:async()=>({from:table=>({select(){return this;},order(){return this;},async range(start,end){reads.push(table);return {data:tables[table].slice(start,end+1)};}})})});
+ const ctx=vm.createContext({getSupabase:async()=>({from:table=>({select(){return this;},order(){return this;},in(col,values){this.col=col;this.values=values;return this;},async limit(n){reads.push({table,scope:this.values,limit:n});return {data:tables[table].filter(r=>this.values.includes(r[this.col])).slice(0,n)};},async range(start,end){reads.push(table);return {data:tables[table].slice(start,end+1)};}})})});
  vm.runInContext(read('docs/lib/identity.js')+'\nthis.identity=ID;',ctx);
  return {ctx,id:ctx.identity,reads};
 }
@@ -84,4 +84,13 @@ test('label attribution follows an old pool ID to the canonical merged ID',async
  vm.runInContext(read('docs/lib/lobbyists.js')+'\nthis.lob=LOB;',ctx);
  const result=await ctx.lob.attributionForLabels(['Old Acme'],new Map([[7,{lobbyist_id:7,name:'Lobbyist'}]]));
  assert.equal(result.get('old acme')[0].donor_id,'a');
+});
+
+test('merge detection reads only the requested scope and shares concurrent checks',async()=>{
+ const {id,reads}=identityHarness({donor_merge_filers:Array.from({length:7000},(_,i)=>({filer_id:String(i)}))});
+ assert.deepEqual(await Promise.all([id.affectsFilers(['18661','1']),id.affectsFilers(['1','18661'])]),[true,true]);
+ assert.equal(reads.filter(r=>r==='donor_merge_filers').length,0);
+ const scoped=reads.filter(r=>r.table==='donor_merge_filers');
+ assert.equal(scoped.length,1);assert.deepEqual(plain(scoped[0].scope),['1','18661']);assert.equal(scoped[0].limit,1);
+ assert.equal(await id.affectsFilers([]),false);
 });
