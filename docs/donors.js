@@ -186,9 +186,10 @@ function renderChart(byYear) {
 
 function renderRecipients(rows) {
   $("dn-recipients").querySelector("tbody").innerHTML = rows.map(r => {
+    const label = r.filer?.trim() || (r.filer_id ? `Committee ${r.filer_id}` : "Committee name unavailable");
     const name = r.slug
-      ? `<a href="/" data-open-filer="${esc(r.slug)}">${esc(r.filer)}</a>`
-      : esc(r.filer);
+      ? `<a href="/" data-open-filer="${esc(r.slug)}">${esc(label)}</a>`
+      : esc(label);
     return `<tr><td>${name}</td><td class="num">${fmtN(r.n)}</td><td class="num">${fmt$(r.total)}</td></tr>`;
   }).join("") || '<tr><td colspan="3">No contributions.</td></tr>';
   $("dn-recipients").querySelectorAll("[data-open-filer]").forEach(a =>
