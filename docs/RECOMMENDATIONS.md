@@ -261,6 +261,23 @@ merges.
 Lobbyist Plan groups start expanded with an accessible collapse button. The
 Excel Call list starts collapsed, retaining outline controls for expanding.
 
+### Lobbyist-level targets
+
+A lobbyist or firm target is the greater of its summed client asks and the
+previous cycle's giving to this candidate from its currently attributed clients.
+Clients omitted by individual recommendation thresholds still count toward this
+floor and current-cycle credit. Historical client rows do not create new
+individual donor recommendations. This describes the current client book, not
+verified historical representation.
+
+The floor rounds upward to a $250 increment when nearest-$250 rounding would
+fall below actual prior giving. Remaining is `max(0, lobbyist target - current
+client giving)`, so one client's contribution can satisfy the overall lobbyist
+goal. Any amount above summed donor asks stays unallocated at the lobbyist level;
+the Call List and flat export include a clearly labeled additional lobbyist ask
+so target totals reconcile. Searching a client retains the whole matching group
+and its budget. Unattributed donors retain their individual asks.
+
 ### The Excel export
 
 **Lobbyist Plan Excel** is written with ExcelJS rather than the SheetJS build

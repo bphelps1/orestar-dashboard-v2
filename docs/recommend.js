@@ -1910,7 +1910,7 @@ async function loadLobbyistPlan() {
       lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, { ...l, name: String(l.name || "").trim().replace(/\s+/g, " ") }]));
     }
     if (!partnersById) partnersById = await LOB.loadPartners();
-    const rows = [...(window._repeatTargets || []), ...(window._recommendations || [])]
+    const rows = planDonorRows()
       .flatMap(r => [...(window._planIdentityIds?.get(r.donor_key) || [r.donor_id])].map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
     const { byKey, contacts, bookTypes, rejected } = await LOB.planAttribution(rows, lobbyistsById);
     // A newer run may have started while this one was loading.
@@ -1988,7 +1988,7 @@ function isOrganization(row) {
  * unambiguous recorded membership can promote a person to a firm. */
 function owningFirm(lobbyist) { return LOB.owningFirm(lobbyist, lobbyistsById); }
 
-function planGroups() {
+function planDonorRows() {
   const donorRows = [
     ...(window._repeatTargets || []).map(r => ({
       donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
@@ -2001,6 +2001,30 @@ function planGroups() {
       remaining: r.remaining_ask, last_cycle: 0, comp_max: r.comp_max, comp_max_filers: r.comp_max_filers || [],
       factors: r.factors || [], cycles: {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
   ];
+  // Clients omitted from individual recommendations still contributed to the book.
+  const cycle = window._cycle;
+  const byYear = window._targetProfile?.top_donors_by_year || {};
+  const seen = new Set(donorRows.map(r => r.donor_key));
+  const prior = mergeDonorsByYear(byYear, [cycle - 3, cycle - 2]);
+  const current = mergeDonorsByYear(byYear, [cycle - 1, cycle]);
+  const priorByKey = new Map(prior.map(d => [d.donor_key, d.total]));
+  const currentByKey = new Map(current.map(d => [d.donor_key, d.total]));
+  for (const d of [...prior, ...current]) {
+    if (seen.has(d.donor_key) || isDonorExcluded(d.name)) continue;
+    if ((filerIndex || []).some(f => f.committee_type === "Candidate Committee"
+      && f.name.toLowerCase() === d.name.replace(/\s*\(\d+\)\s*$/, "").toLowerCase())) continue;
+    seen.add(d.donor_key);
+    const last = priorByKey.get(d.donor_key) || 0, given = currentByKey.get(d.donor_key) || 0;
+    donorRows.push({ donor: donorDisplayName(d.name), donor_id: d.donor_id, donor_key: d.donor_key,
+      type: "Client history", target: 0, given, remaining: 0, last_cycle: last,
+      cycles: { [cycle - 2]: last, [cycle]: given }, factors: [], comp_gifts: [],
+      comp_max: 0, comp_max_filers: [], history_only: true });
+  }
+  return donorRows;
+}
+
+function planGroups() {
+  const donorRows = planDonorRows();
   const groups = new Map();
   const none = { lobbyist: null, rows: [] };
   for (const row of donorRows.filter(isOrganization)) {
@@ -2016,7 +2040,7 @@ function planGroups() {
     const entry = { ...row, attribution: list[0] || null,
                     contacts: window._donorContacts?.get(row.donor_key) || [],
                     also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
-    if (!list.length) { none.rows.push(entry); continue; }
+    if (!list.length) { if (!row.history_only) none.rows.push(entry); continue; }
     const id = groupLobbyist.lobbyist_id;
     if (!groups.has(id)) groups.set(id, { lobbyist: groupLobbyist, rows: [] });
     groups.get(id).rows.push(entry);
@@ -2030,15 +2054,20 @@ function planGroups() {
       const members = l ? [firmContacts(l).primary, ...firmContacts(l).others].filter(Boolean) : [];
       const lobHit = l && [l.name, l.firm, l.affiliation, l.email, ...members.map(m => m.name)]
         .join(" ").toLowerCase().includes(q);
-      return lobHit ? g : { ...g, rows: g.rows.filter(r => r.donor.toLowerCase().includes(q)) };
+      return lobHit || g.rows.some(r => r.donor.toLowerCase().includes(q)) ? g : { ...g, rows: [] };
     }).filter(g => g.rows.length);
   }
   for (const g of out) {
     g.rows.sort((a, b) => b.remaining - a.remaining || b.target - a.target);
     g.last_cycle = g.rows.reduce((s, r) => s + Number(r.last_cycle || 0), 0);
-    g.target = g.rows.reduce((s, r) => s + r.target, 0);
+    g.donor_target = g.rows.reduce((s, r) => s + r.target, 0);
+    // A hard historical floor must round up if nearest-$250 would undershoot.
+    g.target = g.lobbyist ? Math.max(g.donor_target, Math.ceil(g.last_cycle / 250) * 250) : g.donor_target;
+    g.additional_ask = g.target - g.donor_target;
     g.given = g.rows.reduce((s, r) => s + r.given, 0);
-    g.remaining = g.rows.reduce((s, r) => s + r.remaining, 0);
+    g.remaining = g.lobbyist ? Math.max(0, g.target - g.given) : g.rows.reduce((s, r) => s + r.remaining, 0);
+    g.target_reason = g.lobbyist ? `Lobbyist target: at least last cycle’s ${fmt$(g.last_cycle)} across currently attributed clients.`
+      + (g.additional_ask ? ` Includes ${fmt$(g.additional_ask)} beyond individual client asks; client allocation remains open.` : "") : "";
     g.partner = g.lobbyist ? isPartner(g.lobbyist.lobbyist_id) : false;
     g.tier = lobbyistTier(g.rows, g.partner);
   }
@@ -2139,12 +2168,12 @@ function renderLobbyistPlan() {
       <td class="num">${fmt$(g.given)}</td>
       <td class="num">${fmt$(g.remaining)}</td>
       <td class="num">${fmt$(g.last_cycle)}</td><td></td>
-      <td class="plan-why">${l ? esc(g.tier.why) : ""}</td>
+      <td class="plan-why">${l ? esc(g.tier.why) : ""}<div>${esc(g.target_reason || "")}</div></td>
     </tr>`;
     const rows = g.rows.map(r => `<tr class="plan-donor" data-group="${groupIndex}">
       <td></td>
       <td>${esc(r.donor)}${contactsCell(r)}${r.also.length ? `<div class="plan-also">also: ${esc(r.also.map(a => a.lobbyist.name).join(", "))}</div>` : ""}</td>
-      <td><span class="plan-type ${r.type === "Donor Target" ? "is-target" : "is-prospect"}">${r.type === "Donor Target" ? "Target" : "Prospect"}</span></td>
+      <td><span class="plan-type ${r.type === "Donor Target" ? "is-target" : "is-prospect"}">${r.type === "Donor Target" ? "Target" : r.type === "Client history" ? "History" : "Prospect"}</span></td>
       <td class="num"><strong>${fmt$(r.target)}</strong></td>
       <td class="num">${fmt$(r.given)}</td>
       <td class="num">${fmt$(r.remaining)}</td>
@@ -2226,6 +2255,14 @@ function planCycleColumns(groups, cycle) {
   return { cycles, comps };
 }
 
+/** The unallocated balance belongs to the lobbyist, not a particular donor. */
+function planExportRows(g) {
+  if (!g.additional_ask) return g.rows;
+  return [...g.rows, { donor: "Additional lobbyist ask — client allocation open", type: "Lobbyist balance",
+    target: g.additional_ask, given: 0, remaining: g.additional_ask, last_cycle: 0,
+    donor_key: "", cycles: {}, comp_gifts: [], factors: [g.target_reason], contacts: [], also: [], attribution: null }];
+}
+
 /**
  * The call list, as rows plus a role for each one so the writer can style it.
  *
@@ -2269,7 +2306,7 @@ function planSheetAoa(groups, cycle) {
     : "No general-election margin on record for this seat.";
   push(sub, "note");
   const method = blank();
-  method[0] = "Prior-donor asks use giving history and comparable seats. First-time asks use initial giving, capped at half the established benchmark before rounding. All targets round to the nearest $250. "
+  method[0] = "Prior-donor asks use giving history and comparable seats. First-time asks use initial giving, capped at half the established benchmark before rounding. All donor targets round to the nearest $250; lobbyist targets cannot fall below last-cycle client giving. "
     + "The columns on the right show that giving.";
   push(method, "note");
   push(blank(), "blank");
@@ -2297,17 +2334,17 @@ function planSheetAoa(groups, cycle) {
     lead[1] = name;
     lead[3] = l ? g.tier.label : "";
     lead[4] = contact.name; lead[5] = contact.email; lead[6] = contact.phone;
-    lead[7] = l ? g.tier.why : "";
+    lead[7] = [l ? g.tier.why : "", g.target_reason].filter(Boolean).join(" · ");
     body.push(lead); bodyRoles.push(l && g.partner ? "lobbyist-partner" : "lobbyist");
     const groupSums = new Array(width).fill(0);
-    for (const r of g.rows) {
+    for (const r of planExportRows(g)) {
       const row = blank();
       row[0] = name;
       row[2] = r.donor;
-      row[3] = r.type === "Donor Target" ? "Gave before" : "New prospect";
+      row[3] = r.type === "Donor Target" ? "Gave before" : r.type === "New Prospect" ? "New prospect" : r.type;
       const dc = donorContact(r);
       row[4] = dc.name; row[5] = dc.email; row[6] = dc.phone;
-      row[7] = [plainAttribution(r.attribution), ...(r.factors || []).filter(f => /First-time ask|first observed|earliest observed/.test(f))].filter(Boolean).join(" · ");
+      row[7] = [plainAttribution(r.attribution), ...(r.factors || []).filter(f => /First-time ask|first observed|earliest observed|Lobbyist target/.test(f))].filter(Boolean).join(" · ");
       for (const b of bands) {
         b.cols.forEach((c, i) => {
           const at = b.start + i;
@@ -2394,6 +2431,7 @@ function lobbyistSheetRows(groups, cycle) {
       "Given to like candidates": Math.round(g.tier.likeTotal),
       "Clients": clients,
       "Why this tier": g.tier.why,
+      "Target calculation": g.target_reason || "",
     };
   });
 }
@@ -2405,11 +2443,12 @@ function lobbyistPlanExportRows() {
     const l = g.lobbyist;
     const name = l ? l.name : "(no lobbyist on file)";
     const c = planContact(l);
-    for (const r of g.rows) {
+    for (const r of planExportRows(g)) {
       const dc = donorContact(r);
       out.push({
         "Tier": l ? g.tier.label : "",
         "Lobbyist": name,
+        "Lobbyist Target": g.target, "Lobbyist Remaining": g.remaining,
         "Contact": c.name, "Email": c.email, "Phone": c.phone, "Other Firm Contacts": c.others,
         "Donor": r.donor,
         "Donor Contact": dc.name, "Donor Contact Email": dc.email, "Donor Contact Phone": dc.phone,
@@ -2419,7 +2458,7 @@ function lobbyistPlanExportRows() {
         "Remaining": Math.round(r.remaining),
         "Last Cycle": r.last_cycle ?? "",
         "Comparable Max": r.comp_max || "",
-        "Benchmark": r.benchmark ? `${r.benchmark.n} gifts to seats within ${r.benchmark.window} pts` : "all comparable giving",
+        "Benchmark": r.benchmark ? `${r.benchmark.n} gifts to ${peerDescription(r.benchmark)}` : "all comparable giving",
         "Ask calculation": (r.factors || []).join("; "),
         "Attribution": attributionText(r.attribution),
         "Also Lobbied By": r.also.map(a => a.lobbyist.name).join("; "),
@@ -2450,6 +2489,8 @@ function methodSheetRows(groups, cycle) {
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
       + `Unopposed seats are matched only to other unopposed seats, never numeric margins. Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
+  rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
+    Detail: "The greater of summed client asks or last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. The floor rounds up to $250 to avoid falling below actual giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",
     Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark before rounding to the nearest $250. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
   for (const t of TIER_RULES) {
