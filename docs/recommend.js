@@ -1243,6 +1243,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
   // Get comparable giving for upside adjustment — track per-filer details
   // compDonorDetails: lowered name → [{ filer, maxCycleAmt }]
   const compDonorDetails = new Map();
+  const observedComparableDonors = new Set();
   for (let i = 0; i < compProfiles.length; i++) {
     const profile = compProfiles[i];
     const comp = comparables[i];
@@ -1262,11 +1263,17 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const compIsLeadership = (comp.leadership_tier || 0) > 0;
     const compTier = comp.leadership_tier || 0;
     for (const [key, cyMap] of compDonorCycles) {
-      const maxCy = Math.max(...Object.values(cyMap));
+      observedComparableDonors.add(key); // Discovery is separate from the ask benchmark.
+      // Newer incumbents need recent ordinary peer giving, not a peer's
+      // lifetime maximum (or fundraising from the cycle being planned).
+      const recentCycles = [cycle - 2, cycle - 4].filter(c => cyMap[c] > 0);
+      if (historyWeight !== null && !recentCycles.length) continue;
+      const referenceCycle = historyWeight !== null ? recentCycles[0] : null;
+      const maxCy = referenceCycle !== null ? cyMap[referenceCycle] : Math.max(...Object.values(cyMap));
       if (!compDonorDetails.has(key)) compDonorDetails.set(key, []);
       compDonorDetails.get(key).push({ filer: comp.name, amount: maxCy, isLeadership: compIsLeadership,
                                        leadershipTier: compTier, benchmarkFactor: comp.benchmarkFactor ?? 1, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
-                                       cycles: cyMap });
+                                       cycles: cyMap, referenceCycle });
     }
   }
 
@@ -1294,7 +1301,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const cycleNums = Object.keys(donor.cycles).map(Number).sort((a, b) => a - b);
 
     // Single-cycle donors must also have given to comparable candidates
-    if (cycleNums.length < 2 && !compDonorDetails.has(key)) continue;
+    if (cycleNums.length < 2 && !observedComparableDonors.has(key)) continue;
 
     const currentCycleAmt = donor.cycles[cycle] || 0;
     const prevCycles = cycleNums.filter(c => c < cycle);
@@ -1355,9 +1362,10 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // Discount single-filer outliers: if the max is >1.5x the second-highest,
     // it's an outlier — use the second-highest as the reference instead.
     const sortedAmts = refGifts.map(benchmarkAmount).sort((a, b) => b - a);
-    const compRef = (sortedAmts.length >= 2 && sortedAmts[0] > sortedAmts[1] * 1.5)
-      ? sortedAmts[1]
-      : (sortedAmts[0] || 0);
+    const compRef = historyWeight !== null
+      ? percentile([...sortedAmts].reverse(), 0.5)
+      : (sortedAmts.length >= 2 && sortedAmts[0] > sortedAmts[1] * 1.5)
+        ? sortedAmts[1] : (sortedAmts[0] || 0);
     const refGift = refGifts.find(g => benchmarkAmount(g) === compRef);
     const maxFromNonLeadership = refGift && !refGift.isLeadership;
     const historyBlend = historyWeight !== null && compRef > 0;
@@ -1367,7 +1375,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       // Limited incumbent history is weaker evidence in either direction.
       // The peer reference already excludes first-primary giving and outliers.
       compWeight = historyWeight;
-      target = baselineAmt * 1.05 * (1-compWeight) + compRef * compWeight;
+      target = Math.min(compRef, baselineAmt * 1.05 * (1-compWeight) + compRef * compWeight);
     } else if (hasUplift) {
       const gapRatio = compRef / Math.max(target, 1);
       if (gapRatio >= 8) compWeight = 0.05;
@@ -1410,6 +1418,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
 
     if (primaryExclusionNote(targetProfile)) factors.push(primaryExclusionNote(targetProfile));
     if (targetProfile._entryBaseline) factors.push(`Incumbent baseline excludes giving through the first legislative primary (${targetProfile._entryBaseline.primaryDate}); full giving remains in history`);
+    if (historyBlend) factors.push(`Recent peer benchmark: ${fmt$(compRef)} median of ${refGifts.length} recipients, using each recipient's latest funded eligible cycle in ${cycle-5}–${cycle-2}; donor ask capped at this benchmark before $250 rounding`);
     if (historyBlend) factors.push(`Limited incumbent history: ${historyCycles} completed eligible cycle${historyCycles === 1 ? "" : "s"}; ${Math.round(compWeight*100)}% comparable benchmark + ${Math.round((1-compWeight)*100)}% own eligible baseline (with 5% growth)`);
     else if (historyWeight !== null) factors.push("Limited incumbent history, but no eligible comparable giving for this donor; own post-primary baseline used");
     for (let i = 0; i < compProfiles.length; i++) if (primaryExclusionNote(compProfiles[i]))
@@ -1431,12 +1440,12 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
         .sort((a, b) => b.amount - a.amount);
       const pct = Math.round(compWeight * 100);
       const nlTag = maxFromNonLeadership ? " — non-leadership benchmark" : "";
-      const outlierNote = (compRef < sortedAmts[0]) ? ` — top gift ${fmt$(sortedAmts[0])} discounted as outlier` : "";
+      const outlierNote = historyWeight !== null ? " — median recent peer giving" : (compRef < sortedAmts[0]) ? ` — top gift ${fmt$(sortedAmts[0])} discounted as outlier` : "";
       factors.push(`Comparable uplift (${pct}% weight, ref: ${fmt$(compRef)}${nlTag}${outlierNote}):`);
       upliftGifts.forEach(g => {
         const tag = g.isLeadership ? "" : " ★";
         const seat = g.seatBand === "unopposed" ? " [unopposed seat]" : g.marginPts != null ? ` [${g.marginPts.toFixed(1)} pt seat]` : "";
-        factors.push(`  • ${g.filer}: ${fmt$(g.amount)}${seat}${tag}`);
+        factors.push(`  • ${g.filer}: ${fmt$(g.amount)}${g.referenceCycle ? ` (${g.referenceCycle-1}–${g.referenceCycle})` : ""}${seat}${tag}`);
       });
     } else if (refGifts.length > 0) {
       // Show top comparable gifts even without uplift for context
@@ -1462,6 +1471,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       avg_prev: Math.round(avgPrev * 100) / 100,
       comp_max: refGift?.amount || 0,
       comp_max_filers: refGifts.filter(g => benchmarkAmount(g) === compRef).map(g => g.filer),
+      peer_benchmark: compRef,
       target,
       current_cycle_amt: currentCycleAmt,
       remaining,
@@ -2661,7 +2671,7 @@ function planSheetAoa(groups, cycle) {
     : "No general-election margin on record for this seat.";
   push(sub, "note");
   const method = blank();
-  method[0] = "Prior-donor asks use giving history and comparable seats. First-time asks use initial giving, capped at half the established benchmark before rounding. All donor targets round to the nearest $250; lobbyist targets cannot fall below last-cycle client giving. "
+  method[0] = "For candidates with fewer than two completed incumbent cycles, prior-donor asks use median recent peer giving and cannot exceed that benchmark before rounding. Peer evidence uses each recipient's latest funded eligible cycle in the preceding two cycles. First-time asks use initial giving, capped at half the established benchmark before rounding. All donor targets round to the nearest $250; lobbyist targets cannot fall below eligible last-cycle client giving after primary exclusions. "
     + "The columns on the right show that giving.";
   push(method, "note");
   push(blank(), "blank");
@@ -2847,7 +2857,7 @@ function methodSheetRows(groups, cycle) {
   for (const p of window._primaryExclusionNotes || []) rows.push({ Item: `Excluded primary: ${p.name}`, Value: `${p.start}–${p.through}`,
     Detail: `${fmt$(p.primary_cash)} cash vs ${fmt$(p.historical_median)} historical median; strongest named opponent ${p.opposition_pct}%.` });
   rows.push({ Item: "Limited incumbent history", Value: "75% / 60% comparable weight",
-    Detail: "Repeat-donor asks use 75% comparable giving with no completed eligible incumbent cycle, or 60% with one. The remainder is own post-primary giving plus 5%. Two or more completed cycles retain history-led weighting. No peer gift means no invented benchmark. New-donor first-gift limits are unchanged." });
+    Detail: "Repeat-donor asks use 75% comparable giving with no completed eligible incumbent cycle, or 60% with one. The remainder is own post-primary giving plus 5%, capped at the median peer benchmark before $250 rounding. Each peer contributes their latest funded eligible cycle from the preceding two cycles; current, future, and older cycles do not set this benchmark. Two or more completed cycles retain history-led weighting. No peer gift means no invented benchmark. New-donor first-gift limits are unchanged." });
   rows.push({ Item: "Leadership and committee chairs", Value: "same-chamber role peers",
     Detail: "Other leadership members and verified committee chairs compare with each other within the same chamber, party and compatible seat margins. Senior leaders retain their separate primary pool; ordinary members use ordinary peers." });
   rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
