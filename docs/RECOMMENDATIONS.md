@@ -31,8 +31,9 @@ The Donor Targets export includes both groups as well.
 
 Only candidate committees with a known election in the selected cycle or previous cycle are scored. Senate and statewide executive committees get a four-year lookback. Future elections, missing election metadata, noncandidate committees, and closed committees are excluded. Closed flags from detail profiles are checked before any scoring or export.
 
-Legislative peers must be current members of the **same chamber**: House only
-compares with House, and Senate only with Senate. The official Legislature rosters
+Ordinary legislative peers must be current members of the **same chamber**: House
+compares with House, and Senate with Senate. Senior leadership has the explicit
+cross-chamber exception below. The official Legislature rosters
 in `assets/current_legislators.json` establish membership, not an open committee
 or a recent election date. Whole-name tokens match candidate or committee names
 (accent and middle-initial tolerant); unverified names are excluded. This also
@@ -48,15 +49,32 @@ former members. The existing recent-election and closed-committee checks still a
 Every eligible committee is scored for similarity. Anything scoring **≤ 20 is
 discarded**; the top **20** survive.
 
-Before scoring, the House Speaker and House Majority Leader are isolated from
-all other candidates and may compare only with each other. Role detection uses
-live leadership metadata where available, then the filer-index role title;
-assistant/deputy leaders, Speaker Pro Tem, and Ways and Means chairs are not
-classified as either of these two offices. For a Majority Leader target, Speaker
-benchmark amounts receive a 10% discount. A Speaker target uses the Majority
-Leader's observed giving without that discount. Actual gifts, exported history,
-and the target candidate's own giving baseline remain unchanged. The exclusive
-pair permits a single-counterpart prospect sample, explicitly labeled in details.
+Senior leadership uses the House Speaker, Senate President, House and Senate
+Majority Leaders, and Ways and Means Co-Chairs as its **primary** pool across
+chambers. These roles are excluded from ordinary candidates' comparisons. Exact
+role titles use live leadership metadata first, then cached filer metadata;
+assistants, deputies, Pro Tems, and subcommittee co-chairs do not qualify.
+
+Automatic fundraising outliers among current same-party non-primary legislators
+are **secondary** references across chambers. For each member, use their highest
+cash-contribution total in the previous two completed two-year cycles (allowing
+for staggered Senate elections). An outlier exceeds Q3 + 1.5 × IQR among at least
+eight members with positive observed receipts. Closed profiles are excluded.
+Current-cycle and lifetime totals do not establish outlier status. Only timeline
+projections are loaded in one request, not every member's donor profile. Primary members sort first
+before the 20-comparison cap. Party, current-membership, election recency, and
+admin exclusion filters still apply; seat margins do not restrict leadership
+references. Each donor's primary leadership giving sets repeat and first-time
+benchmarks; secondary gifts are used only when no primary giving is available.
+The same priority applies to observed first-gift amounts. Secondary giving remains
+visible in history and can inform prospect discovery and ranking, but does not
+raise an ask when primary giving exists. A single primary recipient can support
+a prospect; secondary-only prospects still require more than one recipient.
+
+Speaker giving receives the existing 10% discount for a House Majority Leader
+target. Other role pairings have no new multiplier. Actual contribution amounts
+remain unchanged. App summaries identify primary and secondary filers; row
+explanations and workbook methodology state which reference group sets asks.
 
 For everyone else with known seat competitiveness, peers must have known seat
 competitiveness too. Unopposed seats only compare with unopposed seats; contested

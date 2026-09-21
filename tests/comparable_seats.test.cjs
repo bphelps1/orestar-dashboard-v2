@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-function harness(realMembership=false){const c=vm.createContext({window:{},document:{addEventListener(){}},console:{log(){}},setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(__dirname,'../docs/recommend.js'),'utf8'),c);if(!realMembership)vm.runInContext("loadCurrentLegislators=async()=>{};isCurrentLegislator=()=>true",c);return c;}
+function harness(realMembership=false){const c=vm.createContext({window:{},document:{addEventListener(){}},console:{log(){}},setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(__dirname,'../docs/recommend.js'),'utf8'),c);if(!realMembership)vm.runInContext("loadCurrentLegislators=async()=>{};isCurrentLegislator=()=>true;loadFundraisingOutliers=async()=>new Map()",c);return c;}
 const unopposed={band:'unopposed',margin_pts:100,year:2024,label:'unopposed last cycle'};
 test('unopposed is categorical and never participates in numeric margin windows',()=>{
  const c=harness(),gifts=[1,2,3].map(i=>({filer:`U${i}`,seatBand:'unopposed',marginPts:100,amount:1000}));
@@ -29,21 +29,21 @@ test('seat summary and spreadsheet describe unopposed peers without a synthetic 
 });
 
 function candidate(slug,extra={}){return {slug,name:slug,committee_type:'Candidate Committee',office:'State Representative',party:'Democrat',total_in:1000,election:'2026 Primary Election',...extra};}
-test('Speaker and House Majority Leader only compare to each other in both directions',async()=>{
+test('Senior leaders compare across chambers and exclude ordinary candidates',async()=>{
  const c=harness();c.filers=[candidate('speaker',{leadership_role:'Speaker of the House',leadership_tier:1}),candidate('majority',{leadership_role:'House Majority Leader',leadership_tier:2}),candidate('member'),candidate('assistant',{leadership_role:'House Assistant Majority Leader'}),candidate('protem',{leadership_role:'House Speaker Pro Tem'}),candidate('senator',{office:'State Senator',leadership_role:'Senate Majority Leader'})];
  vm.runInContext('filerIndex=filers;raceMarginIndex=new Map();adminTags={}',c);
- for(const slug of ['member','assistant','protem','senator']){
+ for(const slug of ['member','assistant','protem']){
   const result=await c.findComparables({},c.filers.find(f=>f.slug===slug),2026);
   assert.ok(result.every(f=>!['speaker','majority'].includes(f.slug)));
  }
- let result=await c.findComparables({},c.filers[0],2026);assert.deepEqual(Array.from(result,f=>f.slug),['majority']);assert.equal(result[0].benchmarkFactor,1);
- result=await c.findComparables({},c.filers[1],2026);assert.deepEqual(Array.from(result,f=>f.slug),['speaker']);assert.equal(result[0].benchmarkFactor,0.9);
+ let result=await c.findComparables({},c.filers[0],2026);assert.deepEqual(Array.from(result,f=>f.slug),['majority','senator']);assert.equal(result[0].benchmarkFactor,1);
+ result=await c.findComparables({},c.filers[1],2026);assert.deepEqual(Array.from(result,f=>f.slug),['speaker','senator']);assert.equal(result[0].benchmarkFactor,0.9);
 });
 test('live role metadata overrides stale cached leadership and excludes assistants',()=>{
  const c=harness();vm.runInContext(`leadershipRoles={leader:{filer_name:'Example Person',role_title:'House Majority Leader'}}`,c);
- assert.equal(c.houseTopRole(candidate('current',{name:'Friends of Example Person'})),'majority-leader');
- assert.equal(c.houseTopRole(candidate('assistant',{leadership_role:'House Assistant Majority Leader'})),null);
- assert.equal(c.houseTopRole(candidate('whip',{leadership_role:'House Majority Whip'})),null);
+ assert.equal(c.primaryLeadershipRole(candidate('current',{name:'Friends of Example Person'})),'house-majority-leader');
+ assert.equal(c.primaryLeadershipRole(candidate('assistant',{leadership_role:'House Assistant Majority Leader'})),null);
+ assert.equal(c.primaryLeadershipRole(candidate('whip',{leadership_role:'House Majority Whip'})),null);
 });
 test('strict seat eligibility prevents fallback from bringing a competitive seat into an unopposed pool',async()=>{
  const c=harness();c.filers=[candidate('target',{office_district:'State Representative, 54th District'}),candidate('wise',{office_district:'State Representative, 48th District'}),candidate('peer',{office_district:'State Representative, 38th District'}),candidate('unknown')];
@@ -62,12 +62,12 @@ test('eligible comparison pool is capped at twenty',async()=>{
 });
 test('exclusive pair supports single-counterpart prospects and discounts benchmark, not reported gifts',()=>{
  const c=harness();
- const comps=[candidate('speaker',{comparisonKind:'house-leadership',benchmarkFactor:0.9,leadership_tier:1})];
+ const comps=[candidate('speaker',{comparisonKind:'leadership-primary',benchmarkFactor:0.9,leadership_tier:1})];
  const profiles=[{top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:10000}],2026:[{donor_id:'a',name:'Acme',total:10000}]}}];
  const target={top_donors_by_year:{}};
  const result=c.scoreDonors(target,comps,profiles,['2025','2026'],2026,null).prospects;
  assert.equal(result.length,1);assert.equal(result[0].target_ask,4500);assert.equal(result[0].comp_max,10000);assert.equal(result[0].comp_gifts[0].amount,10000);
- assert.ok(result[0].factors.some(f=>f.includes('10% below')));
+ assert.ok(result[0].factors.some(f=>f.includes('discounted 10%')));
  const repeat=c.buildRepeatDonorTargets({top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:5000}]}},comps,profiles,['2025','2026'],2026,null).targets[0];
  assert.equal(repeat.target,6500);assert.equal(repeat.comp_max,10000);assert.equal(repeat.last_cycle_amt,5000);
 });
@@ -102,4 +102,54 @@ test('roster failure stops recommendations instead of admitting former legislato
  await assert.rejects(c.findComparables({},candidate('target'),2026),/Could not verify current legislators/);
  c.fetch=async()=>({ok:true,json:async()=>({members:{house:[],senate:[]}})});
  await assert.rejects(c.loadCurrentLegislators(),/roster is unavailable/);
+});
+
+test('leadership primary roles outrank automatic secondary outliers, with no ordinary or former peers',async()=>{
+ const c=harness();c.filers=[candidate('speaker',{leadership_role:'Speaker of the House'}),
+ candidate('president',{office:'State Senator',leadership_role:'Senate President'}),
+ candidate('senate-majority',{office:'State Senator',leadership_role:'Senate Majority Leader'}),
+ candidate('ways',{leadership_role:'Ways & Means Co-Chair'}),
+ candidate('subcommittee',{leadership_role:'Ways and Means Education Subcommittee Co-Chair'}),
+ candidate('ordinary'),candidate('outlier',{office:'State Senator',total_in:1000000}),
+ candidate('former',{leadership_role:'Senate President',office:'State Senator'}),
+ candidate('excluded',{leadership_role:'Ways and Means Co-Chair'})];
+ vm.runInContext('filerIndex=filers;raceMarginIndex=new Map();adminTags={outlier:[{tag:"prolific"}],excluded:[{tag:"exclude"}]};isCurrentLegislator=f=>f.slug!=="former";loadFundraisingOutliers=async()=>new Map([["outlier",{amount:1000000,threshold:500000}]])',c);
+ const result=await c.findComparables({},c.filers[0],2026);
+ assert.deepEqual(Array.from(result,f=>f.slug).sort(),['outlier','president','senate-majority','ways']);
+ assert.equal(result.at(-1).slug,'outlier');
+ assert.equal(result.at(-1).comparisonKind,'leadership-secondary');
+ assert.equal(c.primaryLeadershipRole(c.filers[4]),null);
+});
+test('primary leadership giving sets repeat and first-time targets even with huge secondary gifts',()=>{
+ const c=harness(),comps=[candidate('primary',{comparisonKind:'leadership-primary'}),candidate('outlier',{comparisonKind:'leadership-secondary'})];
+ const profiles=[{top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:10000}]}},{top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:1000000}]}}];
+ const first=c.scoreDonors({top_donors_by_year:{}},comps,profiles,['2024'],2026,null).prospects[0];
+ assert.equal(first.target_ask,5000);
+ assert.ok(first.factors.some(f=>f.includes('primary leadership references')));
+ const repeat=c.buildRepeatDonorTargets({top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:5000}]}},comps,profiles,[],2026,null).targets[0];
+ const baseline=c.buildRepeatDonorTargets({top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:5000}]}},comps.slice(0,1),profiles.slice(0,1),[],2026,null).targets[0];
+ assert.equal(repeat.target,baseline.target);
+ assert.equal(c.firstGivingBenchmark('a',profiles,comps,2026,null).amount,10000);
+ const ref=c.leadershipReference([{filer:'outlier',amount:2000}],comps);
+ assert.equal(ref.gifts.length,1);assert.match(ref.label,/secondary/);
+});
+
+test('automatic outliers use completed-cycle receipts, exclude closed profiles, and require eight observations',()=>{
+ const c=harness(),filers=Array.from({length:10},(_,i)=>candidate('peer'+i));
+ const rows=filers.map((f,i)=>({slug:f.slug,timeline:[{month:'2024-06',contributions:10000+i*1000},{month:'2026-06',contributions:99999999}]}));
+ rows[9].timeline.push({month:'2022-06',contributions:100000});
+ let outliers=c.fundraisingOutliers(filers,rows,2026);
+ assert.deepEqual(Array.from(outliers.keys()),['peer9']);assert.equal(outliers.get('peer9').amount,100000);
+ rows[9].closed=true;assert.equal(c.fundraisingOutliers(filers,rows,2026).size,0);
+ assert.equal(c.fundraisingOutliers(filers.slice(0,7),rows,2026).size,0);
+});
+
+test('observed first gifts prefer primary leaders, while secondary-only prospects still need breadth',()=>{
+ const c=harness(),comps=[candidate('primary',{comparisonKind:'leadership-primary'}),candidate('outlier',{comparisonKind:'leadership-secondary'})];
+ c.window._firstGifts=new Map([['a',[{filer:'primary',amount:1000},{filer:'outlier',amount:100000}]]]);
+ assert.equal(c.firstGivingBenchmark('a',[],comps,2026,null).amount,1000);
+ const profiles=[{top_donors_by_year:{}},{top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:10000}]}}];
+ const result=c.scoreDonors({top_donors_by_year:{}},comps,profiles,['2024'],2026,null);
+ assert.equal(result.prospects.length,0);
+ assert.ok(result.notRecommended.some(r=>r.whyNotIncluded.includes('one comparable')));
 });
