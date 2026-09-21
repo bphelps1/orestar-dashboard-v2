@@ -30,7 +30,7 @@ def test_immediate_merges_across_reads_and_undo():
                       'donor_client_links','donor_contacts','transactions','filer_detail','lobbyists','lobbyist_clients','donor_review_decisions']:
             q.execute(f'create table {schema}.{table} (like public.{table} including all)')
         normalize = (ROOT/'supabase/migrations/014_donor_leaderboard.sql').read_text().split('create or replace view')[0]
-        migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text() + '\n' + (ROOT/'supabase/migrations/022_donor_display_aliases.sql').read_text()
+        migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text() + '\n' + (ROOT/'supabase/migrations/022_donor_display_aliases.sql').read_text() + '\n' + (ROOT/'supabase/migrations/024_donor_profile_lookup_performance.sql').read_text()
         # All tables/functions/views/policies and grants stay in this schema.
         sql = (normalize + migration).replace('public.', schema + '.').replace('search_path = public', 'search_path = '+schema).replace('search_path=public', 'search_path='+schema)
         q.execute(sql)
@@ -113,6 +113,23 @@ def test_immediate_merges_across_reads_and_undo():
         q.execute('set local role anon')
         q.execute(f"select {schema}.donor_identity('b')")
         assert q.fetchone()[0]['donor_id']=='new'
+        q.execute('reset role')
+        # Exact IDs win over aliases; historical IDs still find a consolidated
+        # profile. Missing metadata retains raw/fallback labels and totals.
+        q.execute("insert into filer_detail(slug,name,filer_id,detail) values ('exact','Exact Committee','exact','{}'),('aaa-alias','Consolidated Committee','current','{\"filer_ids\":[\"exact\",\"old\"]}')")
+        q.execute("insert into transactions(tran_id,donor_id,tran_type,tran_date,filer_id,filer,filer_canonical,amount) values (10,'labels','C','2026-01-01','exact','Raw Exact','',100),(11,'labels','C','2026-01-01','old','Raw Old','',200),(12,'labels','C','2026-01-01','missing','Raw Fallback','',300),(13,'labels','C',null,'unknown','','',400),(14,'labels','E','2026-01-01','exact','Exact','',50)")
+        q.execute('set local role anon')
+        q.execute("select donor_profile('labels')")
+        result=q.fetchone()[0]
+        recipients={r['filer_id']:r for r in result['top_recipients']}
+        assert recipients['exact']['filer']=='Exact Committee'
+        assert recipients['old']['slug']=='aaa-alias'
+        assert recipients['missing']['filer']=='Raw Fallback'
+        assert recipients['unknown']['filer']=='Committee unknown'
+        assert result['by_year']==[{'year':2026,'given':600,'received':50}]
+        q.execute("select donor_profile('absent')")
+        assert q.fetchone()[0]=={'by_year':[],'top_recipients':[]}
+
     finally:
         conn.rollback()
         conn.close()
