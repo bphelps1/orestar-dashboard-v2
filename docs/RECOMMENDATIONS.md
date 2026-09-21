@@ -451,3 +451,14 @@ Its contact ordering does not change leads: preserve current leads unless the
 user explicitly selects a replacement. Missing contacts are proposed removals,
 not automatic deletions; ambiguous identities and unequal contact-column lengths
 require review. No spreadsheet-derived changes are included in this migration.
+
+### Editing a lobbyist's clients
+
+The Clients box provides Remove client for every source, including Capitol Club.
+Each client appears once even if several sources list the relationship. Removal
+is atomic across its sources and clears that lobbyist's client lead designation.
+A persistent exclusion prevents imports from reactivating the relationship.
+Removed and inactive clients appear in a collapsed section with Restore client;
+restoration creates an active manual relationship without selecting a new lead.
+Other lobbyists representing the client are unaffected. Admin/reviewer access is
+required. Apply migration 023 before deploying the client editor frontend.
