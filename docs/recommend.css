@@ -567,3 +567,5 @@
 
 .plan-group-toggle { border: 1px solid #cbd5e0; border-radius: 4px; padding: 5px 8px; background: white; color: inherit; cursor: pointer; white-space: nowrap; }
 .plan-donor[hidden] { display: none; }
+
+.plan-comp-source { font-size: 0.78rem; color: #556477; white-space: normal; margin-top: 3px; max-width: 220px; }

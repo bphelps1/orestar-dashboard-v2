@@ -35,6 +35,7 @@ MIGRATIONS = [
     "019_recommendation_first_gifts.sql",
     "020_donor_profile_recipients.sql",
     "021_immediate_entity_merges.sql",
+    "022_donor_display_aliases.sql",
 ]
 
 

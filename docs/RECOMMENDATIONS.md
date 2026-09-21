@@ -417,3 +417,37 @@ splits read-through groups immediately before physical resolution; undoing a gro
 already physically consolidated requires a resolver run to split its source IDs.
 Cached chart tooltip lists combine the entries already present in each cached list;
 full donor rankings and affected candidate donor histories are queried live.
+
+
+### Lobbyist plan follow-up (September 2026)
+
+The app opens donor groups and firm members expanded. Excel Call list donor
+rows use outline level 1, hidden and collapsed by default. Lobbyist summary
+rows include the sum of their donors' giving in the immediately preceding
+cycle, including an explicit zero. Comparable Max identifies the actual filer
+(or tied filers) whose gift sets that reference, including outlier discounting.
+
+Before scoring, recommendations group exact display-name matches only when
+both donor identities are known organizations. This fixes split address-based
+IDs such as State Farm Federal PAC without merging same-name individuals.
+Underlying IDs remain available for contacts and first-gift evidence.
+
+A member's represented donors roll up under their recorded firm and its lead;
+the admin firm view includes members' primary donor relationships. Ambiguous
+firm membership is not guessed, and explicit rejected relationships remain
+vetoes. This derives presentation from existing reviewed records; it does not
+change client leads or overwrite contact records.
+
+Migration 022 publishes only adopted display spellings from name-merge decisions.
+A shared display helper uses those choices across dashboard caches, Donor Lookup,
+Explore, Recommendations, admin donor displays and exports, and restores AT&T
+and known acronyms. Raw transaction fields and SQL-query results retain source
+values. Apply migrations 021 and 022 before deploying this frontend. PR 31 was
+merged into the earlier dependency branch after main received PR 30, so the
+follow-up PR carries the missing immediate-merge changes into main as well.
+
+The supplied 2026 Future PAC workbook is reviewed separately from code changes.
+Its contact ordering does not change leads: preserve current leads unless the
+user explicitly selects a replacement. Missing contacts are proposed removals,
+not automatic deletions; ambiguous identities and unequal contact-column lengths
+require review. No spreadsheet-derived changes are included in this migration.

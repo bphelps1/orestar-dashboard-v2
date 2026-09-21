@@ -54,6 +54,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 async function initApp() {
+  await DN.load();
   // The resolver publishes this queue directly to dashboard_cache. Keeping a
   // static fallback made the admin page show an old queue after generated data
   // moved out of Git, which is worse than showing that the live read failed.
@@ -710,7 +711,7 @@ function emRenderCard(side) {
   if (side === "b") {
     const el = document.getElementById("em-card-b");
     el.innerHTML = [...emState.selected.values()].map(d => `<div class="em-selected">
-      <span>${esc(d.display_name)} · ${emFmt$(d.total_given)}</span>
+      <span>${esc(DN.display(d.display_name))} · ${emFmt$(d.total_given)}</span>
       <button type="button" data-remove="${esc(d.donor_id)}">Remove</button></div>`).join("");
     el.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", () => {
       emState.selected.delete(b.dataset.remove); emRenderCard("b");
@@ -726,7 +727,7 @@ function emRenderCard(side) {
   if (!d) { el.innerHTML = ""; emSyncButtons(); return; }
   const addrs = (d.addresses || []);
   el.innerHTML = `
-    <div class="em-card-name">${esc(d.display_name)}</div>
+    <div class="em-card-name">${esc(DN.display(d.display_name))}</div>
     <div class="em-card-meta">${esc([d.book_type,
         [d.city, d.state].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}</div>
     <div class="em-card-nums">
@@ -770,7 +771,7 @@ function emInitSide(side) {
       if (!rows.length) { ul.hidden = true; return; }
       ul.innerHTML = rows.map((r, i) => `
         <li data-i="${i}" data-donor-id="${esc(r.donor_id)}">
-          <div class="em-r-name">${side === "b" ? `<input type="checkbox" aria-label="Select ${esc(r.display_name)}" ${r.donor_id === emState.a?.donor_id ? "disabled" : ""} ${emState.selected.has(r.donor_id) ? "checked" : ""} /> ` : ""}${esc(r.display_name)}</div>
+          <div class="em-r-name">${side === "b" ? `<input type="checkbox" aria-label="Select ${esc(DN.display(r.display_name))}" ${r.donor_id === emState.a?.donor_id ? "disabled" : ""} ${emState.selected.has(r.donor_id) ? "checked" : ""} /> ` : ""}${esc(DN.display(r.display_name))}</div>
           <div class="em-r-meta">${esc([r.book_type,
             [r.city, r.state].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}
             · ${emFmt$(r.total_given)} · ${(r.addresses || []).length} addr</div>

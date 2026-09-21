@@ -100,6 +100,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 // ── Loading ─────────────────────────────────────────────────────────────────
 async function loadAll() {
+  await DN.load();
   const sb = await getSupabase();
   const [lobbyists, clients, dll, dcl, contacts, partners] = await Promise.all([
     LOB.loadLobbyists(),
@@ -204,6 +205,13 @@ function donorsForLobbyist(id) {
     d.statuses.add(status);
   };
   for (const r of S.dll) if (r.lobbyist_id === id) add(r.donor_id, LOB.describeMethod(r.method), r.status);
+  // A member's primary contact relationship is also a client of their firm.
+  for (const r of S.dll) {
+    if (!r.is_primary || r.status === "rejected" || r.lobbyist_id === id) continue;
+    const person = S.lobbyists.get(r.lobbyist_id);
+    if (LOB.owningFirm(person, S.lobbyists)?.lobbyist_id === id)
+      add(r.donor_id, `primary contact ${person.name} at this firm`, r.status);
+  }
   const keys = new Set((S.clientsByLobbyist.get(id) || []).filter(c => c.active).map(c => c.client_key));
   for (const r of S.dcl) {
     if (keys.has(r.client_key) && r.status !== "rejected") add(r.donor_id, `via client ${r.client_name}`, r.status);
@@ -255,12 +263,16 @@ function renderStats() {
  */
 function primaryFor(donorId) {
   const direct = S.dll.find(r => r.donor_id === donorId && r.is_primary && r.status !== "rejected");
-  if (direct) return { lobbyist: S.lobbyists.get(direct.lobbyist_id), why: "set here" };
+  if (direct) {
+    const person = S.lobbyists.get(direct.lobbyist_id), firm = LOB.owningFirm(person, S.lobbyists);
+    const veto = S.dll.some(r => r.donor_id === donorId && r.lobbyist_id === firm?.lobbyist_id && r.status === "rejected");
+    return { lobbyist: veto ? person : firm, why: "primary contact / firm lead" };
+  }
   for (const c of S.dcl) {
     if (c.donor_id !== donorId || c.status === "rejected") continue;
     for (const lc of [...S.clientsByLobbyist.values()].flat()) {
       if (lc.client_key === c.client_key && lc.active && lc.is_lead) {
-        return { lobbyist: S.lobbyists.get(lc.lobbyist_id), why: `lead for ${lc.client_name}` };
+        return { lobbyist: LOB.owningFirm(S.lobbyists.get(lc.lobbyist_id), S.lobbyists), why: `lead for ${lc.client_name}` };
       }
     }
   }
@@ -273,7 +285,7 @@ function donorBlock(id) {
   const bits = [d.book_type, d.committee_id ? `ORESTAR #${d.committee_id}` : "",
                 `${fmt$(d.total_since_2021)} since 2021`, `${d.recipients} recipient${d.recipients === 1 ? "" : "s"}`]
     .filter(Boolean);
-  return `<span class="lob-donor">${esc(d.display_name)}</span><span class="lob-meta">${esc(bits.join(" · "))}</span>`;
+  return `<span class="lob-donor">${esc(DN.display(d.display_name))}</span><span class="lob-meta">${esc(bits.join(" · "))}</span>`;
 }
 
 function lobbyistBlock(l) {
@@ -544,7 +556,7 @@ function lobbyistDetail(l) {
           const how = d.hows.join("; ");
           const status = d.status === "confirmed" ? '<span class="badge badge-green">confirmed</span>'
             : d.status === "rejected" ? '<span class="badge badge-red">rejected</span>' : '<span class="badge badge-gray">suggested</span>';
-          return `<li>${esc(p?.display_name || d.donor_id)} <span class="lob-meta">${fmt$(p?.total_since_2021)} · ${esc(how)}</span> ${status}
+          return `<li>${esc(DN.display(p?.display_name) || d.donor_id)} <span class="lob-meta">${fmt$(p?.total_since_2021)} · ${esc(how)}</span> ${status}
             ${S.canWrite && d.status !== "rejected" ? `<button class="link-btn" data-drop-donor="${esc(d.donor_id)}" data-lobbyist="${l.lobbyist_id}">not theirs</button>` : ""}</li>`;
         }).join("") || '<li class="lob-meta">None yet.</li>'}
         </ul>
@@ -583,7 +595,7 @@ async function renderDonors() {
     const contacts = S.contacts.get(d.donor_id) || [];
     const first = contacts[0];
     return `<tr class="lob-row${S.openDonor === d.donor_id ? " open" : ""}" data-donor-row="${esc(d.donor_id)}">
-      <td><a href="#" data-open-donor="${esc(d.donor_id)}" class="lob-name">${esc(d.display_name)}</a>
+      <td><a href="#" data-open-donor="${esc(d.donor_id)}" class="lob-name">${esc(DN.display(d.display_name))}</a>
         <div class="lob-meta">${esc([d.book_type, d.committee_id ? `#${d.committee_id}` : ""].filter(Boolean).join(" · "))}</div></td>
       <td>${p?.lobbyist ? `${esc(p.lobbyist.name)}<div class="lob-meta">${esc(p.why)}</div>` : '<span class="lob-meta">—</span>'}</td>
       <td>${first ? `${esc(first.name)}<div class="lob-meta">${esc([first.email, first.phone].filter(Boolean).join(" · "))}</div>`
@@ -711,7 +723,7 @@ function renderDecisions() {
   const tbody = document.getElementById("decision-tbody");
   tbody.innerHTML = rows.slice(0, S.decisionShown).map(({ table, r }, i) => `
     <tr>
-      <td><a href="#" class="lob-name" data-open-donor="${esc(r.donor_id)}">${esc(S.pool.get(r.donor_id)?.display_name || r.donor_id)}</a></td>
+      <td><a href="#" class="lob-name" data-open-donor="${esc(r.donor_id)}">${esc(DN.display(S.pool.get(r.donor_id)?.display_name) || r.donor_id)}</a></td>
       <td>${table === "dll" ? esc(S.lobbyists.get(r.lobbyist_id)?.name || r.lobbyist_id) : `client: ${esc(r.client_name)}`}
         ${table === "dll" && r.is_primary ? '<span class="badge badge-green">primary</span>' : ""}</td>
       <td class="lob-meta">${esc(LOB.describeMethod(table === "dcl" ? "client:" + r.method : r.method))}${noteText(r)}</td>
@@ -751,7 +763,7 @@ async function renderUnmatched() {
   const dis = S.canWrite ? "" : "disabled";
   tbody.innerHTML = rows.slice(0, S.unmatchedShown).map(d => `
     <tr>
-      <td>${esc(d.display_name)}${d.committee_id ? ` <span class="lob-meta">#${esc(d.committee_id)}</span>` : ""}
+      <td>${esc(DN.display(d.display_name))}${d.committee_id ? ` <span class="lob-meta">#${esc(d.committee_id)}</span>` : ""}
         <div class="lob-meta">${esc([d.city, d.state].filter(Boolean).join(", "))}</div></td>
       <td class="lob-meta">${esc(d.book_type || "")}</td>
       <td class="num">${fmt$(d.total_since_2021)}</td>
@@ -1157,7 +1169,7 @@ function wireDonorPickers(root) {
           .order("total_since_2021", { ascending: false }).limit(12);
         (data || []).forEach(r => S.pool.set(r.donor_id, r));
         list.innerHTML = (data || []).map(r => `<li data-donor="${esc(r.donor_id)}">
-          <span>${esc(r.display_name)}</span><span class="filer-meta">${esc(r.book_type || "")} · ${fmt$(r.total_since_2021)} since 2021</span></li>`).join("")
+          <span>${esc(DN.display(r.display_name))}</span><span class="filer-meta">${esc(r.book_type || "")} · ${fmt$(r.total_since_2021)} since 2021</span></li>`).join("")
           || `<li class="lob-meta">No donor since 2021 matches.</li>`;
         list.hidden = false;
       }, 200);

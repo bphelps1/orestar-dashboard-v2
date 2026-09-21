@@ -64,6 +64,7 @@ test('an unaffected profile keeps its cache rather than re-querying donor histor
 });
 test('Lobbyist Plan carries contacts and confirmed attribution from a merged-away donor',async()=>{
  const tables={
+  donor_lobbyist_links:[],
   donor_lobbyists:[{donor_id:'a',lobbyist_id:7,status:'confirmed',methods:['manual'],client_names:[],is_primary:true,score:1}],
   donor_contacts:[{donor_id:'b',contact_id:1,name:'Contact',is_primary:true,sort_order:0}],
   donors:[{donor_id:'a',book_type:'Business Entity'},{donor_id:'b',book_type:'Business Entity'}],

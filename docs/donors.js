@@ -25,12 +25,13 @@ let highlightIdx = -1;
 let results = [];
 
 async function runSearch(q) {
+  if (typeof DN !== "undefined") await DN.load();
   const sb = await getSupabase();
   // RPC rather than a display_name filter: it searches aliases too, so a raw
   // spelling ("Phillip H Knight") finds the resolved entity.
   const { data, error } = await sb.rpc("search_donors", { p_q: q, p_limit: 12 });
   if (error) { console.warn(error.message); return; }
-  results = data || [];
+  results = typeof DN === "undefined" ? data || [] : DN.tree(data || []);
   const ul = $("dn-results");
   highlightIdx = -1;
   if (!results.length) {
@@ -95,6 +96,7 @@ async function loadProfile(donorId) {
   $("dn-profile").hidden = true;
   $("dn-loading").hidden = false;
   try {
+    if (typeof DN !== "undefined") await DN.load();
     const sb = await getSupabase();
     const { data: donor, error: e1 } = await sb.rpc("donor_identity", { p_donor_id: donorId });
     if (e1) throw new Error(e1.message);
@@ -105,6 +107,7 @@ async function loadProfile(donorId) {
       sb.from("donor_aliases").select("raw_name").in("donor_id", memberIds).limit(40),
     ]);
     if (e2) throw new Error(e2.message);
+    if (typeof DN !== "undefined") donor.display_name = DN.display(donor.display_name);
     currentDonor = donor;
 
     $("dn-name").textContent = donor.display_name;

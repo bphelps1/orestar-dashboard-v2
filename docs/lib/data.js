@@ -16,9 +16,11 @@
 
 const DL = (() => {
   const donorRequests = new Map();
+  const names = value => typeof DN === "undefined" ? value : DN.tree(value);
 
   /** Fetch a whole-dashboard aggregate blob by key from dashboard_cache. */
   async function getBlob(key) {
+    if (typeof DN !== "undefined") await DN.load();
     if (key === "top_donors" && typeof ID !== "undefined" && await ID.hasMerges()) return getDonors();
     const sb = await getSupabase();
     const { data, error } = await sb
@@ -28,11 +30,12 @@ const DL = (() => {
       .single();
     if (error) throw new Error(`Failed to load '${key}': ${error.message}`);
     return typeof ID !== "undefined" && ["by_contributor_type", "activity_snapshot"].includes(key)
-      ? ID.rekeyBlob(data.data) : data.data;
+      ? names(await ID.rekeyBlob(data.data)) : names(data.data);
   }
 
   /** Fetch a single filer's detail blob by slug from filer_detail. */
   async function getFilerDetail(slug) {
+    if (typeof DN !== "undefined") await DN.load();
     const sb = await getSupabase();
     const { data, error } = await sb
       .from("filer_detail")
@@ -40,7 +43,7 @@ const DL = (() => {
       .eq("slug", slug)
       .single();
     if (error) throw new Error(`Failed to load filer '${slug}': ${error.message}`);
-    const detail = data.detail;
+    const detail = names(data.detail);
     const ids = detail.filer_ids?.length ? detail.filer_ids : [data.filer_id].filter(Boolean);
     if (typeof ID !== "undefined" && await ID.affectsFilers(ids)) {
       const donors = await getDonors({ filerIds: ids });
@@ -61,10 +64,11 @@ const DL = (() => {
     const key = JSON.stringify(params);
     if (!donorRequests.has(key)) {
       const request = (async () => {
+        if (typeof DN !== "undefined") await DN.load();
         const sb = await getSupabase();
         const { data, error } = await sb.rpc("donor_leaderboard", params);
         if (error) throw new Error(`Failed to load donors: ${error.message}`);
-        return data;
+        return names(data);
       })().catch(error => {
         donorRequests.delete(key);
         throw error;

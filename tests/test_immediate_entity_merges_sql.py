@@ -27,13 +27,16 @@ def test_immediate_merges_across_reads_and_undo():
         q.execute(f'create schema {schema}')
         q.execute(f'set local search_path={schema}')
         for table in ['donors','donor_aliases','donor_merge_overrides','donor_lobbyist_links',
-                      'donor_client_links','donor_contacts','transactions','filer_detail','lobbyists','lobbyist_clients']:
+                      'donor_client_links','donor_contacts','transactions','filer_detail','lobbyists','lobbyist_clients','donor_review_decisions']:
             q.execute(f'create table {schema}.{table} (like public.{table} including all)')
         normalize = (ROOT/'supabase/migrations/014_donor_leaderboard.sql').read_text().split('create or replace view')[0]
-        migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text()
+        migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text() + '\n' + (ROOT/'supabase/migrations/022_donor_display_aliases.sql').read_text()
         # All tables/functions/views/policies and grants stay in this schema.
         sql = (normalize + migration).replace('public.', schema + '.').replace('search_path = public', 'search_path = '+schema).replace('search_path=public', 'search_path='+schema)
         q.execute(sql)
+        q.execute("insert into donor_review_decisions(pair_key,decision,merged_name,kept_name) values ('old|||new','merged','Old Brand','eBay PAC')")
+        q.execute("select alias,display_name from donor_display_aliases order by alias")
+        assert q.fetchall()==[('ebay pac','eBay PAC'),('old brand','eBay PAC')]
         q.execute("insert into donors(donor_id,display_name,total_given,gift_count) values ('a','Acme',100,1),('b','Acme Services',200,1),('c','Acme LLC',300,1),('x','Unrelated',400,1)")
         q.execute("insert into donor_aliases(alias_key,donor_id,raw_name,norm_name,addr_key,source) values ('aa','a','Acme','acme','','test'),('bb','b','Acme Services','acme services','','test'),('bb2','b','Acme Services Other','acme services other','','test'),('cc','c','Acme LLC','acme llc','','test'),('xx','x','Unrelated','unrelated','','test')")
         q.execute("insert into transactions(tran_id,donor_id,tran_type,tran_date,filer_id,filer,amount,contributor_payee) values (1,'a','C','2026-02-01','f','Candidate',100,'Acme'),(2,'b','C','2026-01-01','f','Candidate',200,'Acme Services'),(3,'c','C','2026-03-01','f','Candidate',300,'Acme LLC'),(4,'x','C','2026-01-01','f','Candidate',400,'Unrelated')")

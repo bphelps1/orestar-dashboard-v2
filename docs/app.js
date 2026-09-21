@@ -3371,6 +3371,7 @@ function donorFilterKey() {
 }
 
 function cleanDonorName(name) {
+  if (typeof DN !== "undefined") return DN.display(name);
   const clean = String(name || "").trim().replace(/\s+/g, " ");
   return clean.toLowerCase() === "miscellaneous cash contributions $100 and under"
     ? "Miscellaneous Cash Contributions $100 and under" : clean;
