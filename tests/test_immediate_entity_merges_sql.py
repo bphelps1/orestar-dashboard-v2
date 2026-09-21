@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scraper'))
 
 @pytest.mark.skipif(os.environ.get('ORESTAR_TEST_DB') != '1', reason='requires opt-in database connection')
-def test_immediate_merges_across_reads_and_undo():
+@pytest.mark.parametrize('stored', [False, True])
+def test_immediate_merges_across_reads_and_undo(stored):
     import supabase_sync as s
     import psycopg2
     try:
@@ -29,11 +30,27 @@ def test_immediate_merges_across_reads_and_undo():
         for table in ['donors','donor_aliases','donor_merge_overrides','donor_lobbyist_links',
                       'donor_client_links','donor_contacts','transactions','filer_detail','lobbyists','lobbyist_clients','donor_review_decisions']:
             q.execute(f'create table {schema}.{table} (like public.{table} including all)')
+        q.execute(f'alter table {schema}.donors drop column if exists canonical_entity_id')
         normalize = (ROOT/'supabase/migrations/014_donor_leaderboard.sql').read_text().split('create or replace view')[0]
         migration = (ROOT/'supabase/migrations/021_immediate_entity_merges.sql').read_text() + '\n' + (ROOT/'supabase/migrations/022_donor_display_aliases.sql').read_text() + '\n' + (ROOT/'supabase/migrations/024_donor_profile_lookup_performance.sql').read_text() + '\n' + (ROOT/'supabase/migrations/025_recommendation_first_gift_performance.sql').read_text()
+        if stored:
+            migration += '\n' + (ROOT/'supabase/migrations/026_donor_filer_index.sql').read_text()
+            migration += '\n' + (ROOT/'supabase/migrations/027_stored_donor_identities.sql').read_text()
         # All tables/functions/views/policies and grants stay in this schema.
         sql = (normalize + migration).replace('public.', schema + '.').replace('search_path = public', 'search_path = '+schema).replace('search_path=public', 'search_path='+schema)
+        sql = sql.replace('pg_advisory_xact_lock(726027)', 'pg_advisory_xact_lock(726027000000 + pg_backend_pid())')
         q.execute(sql)
+        if stored:
+            for role in ('anon', 'authenticated'):
+                q.execute("select has_function_privilege(%s,%s,'execute')", (role,schema+'.refresh_stored_donor_identities()'))
+                assert q.fetchone()[0] is False
+                q.execute("select has_table_privilege(%s,%s,'select')", (role,schema+'.donor_identity_graph'))
+                assert q.fetchone()[0] is False
+                q.execute("select has_table_privilege(%s,%s,'update')", (role,schema+'.donor_identity_redirects'))
+                assert q.fetchone()[0] is False
+            # Each statement below models a separate API save/commit. Dedicated
+            # stored-identity tests exercise deferred bulk-import behavior.
+            q.execute('set constraints finish_donor_identity_refresh immediate')
         q.execute("insert into donor_review_decisions(pair_key,decision,merged_name,kept_name) values ('old|||new','merged','Old Brand','eBay PAC')")
         q.execute("select alias,display_name from donor_display_aliases order by alias")
         assert q.fetchall()==[('ebay pac','eBay PAC'),('old brand','eBay PAC')]

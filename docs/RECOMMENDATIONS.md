@@ -441,6 +441,44 @@ Cached chart tooltip lists combine the entries already present in each cached li
 full donor rankings and affected candidate donor histories are queried live.
 
 
+### Stored canonical donor IDs (migrations 026–027)
+
+Apply `026_donor_filer_index.sql` first using `scraper/db_admin.py apply`; its
+runner builds the covering transaction index concurrently and repairs an invalid
+index left by an interrupted build. Then apply `027_stored_donor_identities.sql`
+before deploying the matching frontend. Migration 027 backfills existing saved
+merges; it does not rewrite transaction identities or require a full resolver run.
+
+`donors.canonical_entity_id` stores the effective donor identity. Unmerged donors
+point to themselves. Entity Merges saves still record reviewed alias pairs, but
+triggers now resolve those decisions once before commit, updating the column and
+preserving historical ID redirects. The existing shared `donor_identity_map`
+interface reads stored assignments, so donor search, profiles, rankings, first
+gifts, and lobbyist attribution retain the same grouping semantics without
+running the recursive graph during page loads.
+
+The affected-committee list is also stored and indexed. Refresh only examines
+transaction history for newly added or changed merge members; new transaction
+imports maintain the list from their inserted/updated rows. Recommendations
+check this small list instead of probing statewide transaction history. Undo or
+deletions can leave conservative extra flags until all merges are removed; these
+cause a fresh donor query, never an incorrectly unmerged cached result.
+
+Alias changes, new donors, historical anchors, and full resolver rebuilds queue
+one identity refresh per transaction. Identity maintenance and transaction-cache
+maintenance serialize with a transaction-scoped advisory lock. A failed refresh
+rolls back the save/import, so readers cannot see partially applied merges.
+Normal donor-name edits are reflected by the stored map's join to the current
+canonical donor label. Existing open browser pages still require a refresh.
+
+After migration 027, the resolver no longer physically applies Entity Merges
+must-link decisions; canonical assignments handle them. It continues honoring
+explicit separate decisions and normal automatic entity resolution. Legacy
+physical consolidations can still require a resolver run to recover distinct
+source IDs before an undo can separate them. Other recommendation queries and
+large initial migration work can still be expensive: this removes the merge
+check's transaction scans, not all database work.
+
 ### Lobbyist plan follow-up (September 2026)
 
 The app opens donor groups and firm members expanded. Excel Call list donor

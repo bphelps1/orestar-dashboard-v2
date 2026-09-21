@@ -1,4 +1,4 @@
-/** Saved entity merges are read-through identities; refresh the page to read
+/** Saved entity merges use stored canonical identities; refresh the page to read
  * the latest decisions. Raw transaction records and reviewed links stay intact.
  */
 "use strict";
@@ -30,17 +30,12 @@ const ID = (() => {
     const key = JSON.stringify(scope);
     if (!filerChecks.has(key)) filerChecks.set(key, (async () => {
       const sb = await getSupabase();
-      // The map is already loaded. Joining its recursive view to transactions
-      // can choose an expensive plan even with a filer filter and LIMIT 1.
-      // Probe indexed transactions using the known member IDs instead.
-      const members = [...(await loadMap()).keys()];
-      for (let start = 0; start < members.length; start += 100) {
-        const { data, error } = await sb.from('transactions').select('filer_id')
-          .in('filer_id', scope).in('donor_id', members.slice(start, start + 100)).limit(1);
-        if (error) throw new Error(`Could not check saved donor merges: ${error.message}`);
-        if (data.length) return true;
-      }
-      return false;
+      // Migration 027 maintains this indexed list on merge saves/imports.
+      // Page loads never probe transaction history to detect saved merges.
+      const { data, error } = await sb.from('donor_merge_filers').select('filer_id')
+        .in('filer_id', scope).limit(1);
+      if (error) throw new Error(`Could not check saved donor merges: ${error.message}`);
+      return data.length > 0;
     })().catch(error => { filerChecks.delete(key); throw error; }));
     return filerChecks.get(key);
   }
