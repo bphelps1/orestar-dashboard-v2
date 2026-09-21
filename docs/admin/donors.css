@@ -372,3 +372,9 @@
   color: #718096;
   margin-top: 2px;
 }
+
+#em-results-b { max-height: 320px; overflow-y: auto; }
+.em-selected { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; }
+#em-results-b { position: static; margin-top: 6px; }
+#em-results-b .em-r-name { display: flex; align-items: center; gap: 8px; }
+#em-results-b input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }

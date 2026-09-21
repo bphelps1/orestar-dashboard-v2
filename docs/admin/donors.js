@@ -694,19 +694,33 @@ async function reconsiderPair(pk) {
 // across resolver runs. donor_id must NOT be used: it is a content hash of the
 // cluster and changes on every run.
 
-const emState = { a: null, b: null };
+const emState = { a: null, selected: new Map(), saving: false };
 
 const emFmt$ = v => Number(v || 0).toLocaleString("en-US",
   { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 async function emSearch(q) {
   const sb = await getSupabase();
-  const { data, error } = await sb.rpc("donor_search", { p_q: q, p_limit: 12 });
+  const { data, error } = await sb.rpc("donor_search", { p_q: q, p_limit: 50 });
   if (error) { console.warn("donor_search:", error.message); return []; }
   return data || [];
 }
 
 function emRenderCard(side) {
+  if (side === "b") {
+    const el = document.getElementById("em-card-b");
+    el.innerHTML = [...emState.selected.values()].map(d => `<div class="em-selected">
+      <span>${esc(d.display_name)} · ${emFmt$(d.total_given)}</span>
+      <button type="button" data-remove="${esc(d.donor_id)}">Remove</button></div>`).join("");
+    el.querySelectorAll("[data-remove]").forEach(b => b.addEventListener("click", () => {
+      emState.selected.delete(b.dataset.remove); emRenderCard("b");
+    }));
+    document.querySelectorAll("#em-results-b li[data-donor-id]").forEach(li => {
+      li.querySelector("input").checked = emState.selected.has(li.dataset.donorId);
+      li.querySelector("input").disabled = emState.saving || li.dataset.donorId === emState.a?.donor_id;
+    });
+    emSyncButtons(); return;
+  }
   const d = emState[side];
   const el = document.getElementById(`em-card-${side}`);
   if (!d) { el.innerHTML = ""; emSyncButtons(); return; }
@@ -729,17 +743,14 @@ function emRenderCard(side) {
 }
 
 function emSyncButtons() {
-  const ready = !!(emState.a && emState.b &&
-                   emState.a.rep_alias_key && emState.b.rep_alias_key &&
-                   emState.a.donor_id !== emState.b.donor_id);
+  const ready = !emState.saving && emState.a?.rep_alias_key && emState.selected.size > 0
+    && [...emState.selected.values()].every(b => b.rep_alias_key && b.donor_id !== emState.a.donor_id);
   document.getElementById("em-merge-btn").disabled = !ready;
   document.getElementById("em-separate-btn").disabled = !ready;
-  const status = document.getElementById("em-status");
-  if (emState.a && emState.b && emState.a.donor_id === emState.b.donor_id) {
-    status.textContent = "Both sides are the same entity — pick two different ones.";
-  } else if (ready) {
-    status.textContent = "";
-  }
+  document.getElementById("em-merge-btn").textContent = `Merge ${emState.selected.size} selected into Entity A`;
+  for (const side of ["a", "b"]) document.getElementById(`em-search-${side}`).disabled = emState.saving;
+  document.querySelectorAll("#em-card-b button").forEach(button => { button.disabled = emState.saving; });
+
 }
 
 function emInitSide(side) {
@@ -747,26 +758,39 @@ function emInitSide(side) {
   const ul = document.getElementById(`em-results-${side}`);
   let timer = null;
   input.addEventListener("input", () => {
-    emState[side] = null;
+    document.getElementById("em-status").textContent = "";
+    if (side === "a") emState.a = null;
     emRenderCard(side);
     clearTimeout(timer);
     const q = input.value.trim();
     if (q.length < 2) { ul.hidden = true; return; }
     timer = setTimeout(async () => {
       const rows = await emSearch(q);
+      if (input.value.trim() !== q) return;
       if (!rows.length) { ul.hidden = true; return; }
       ul.innerHTML = rows.map((r, i) => `
-        <li data-i="${i}">
-          <div class="em-r-name">${esc(r.display_name)}</div>
+        <li data-i="${i}" data-donor-id="${esc(r.donor_id)}">
+          <div class="em-r-name">${side === "b" ? `<input type="checkbox" aria-label="Select ${esc(r.display_name)}" ${r.donor_id === emState.a?.donor_id ? "disabled" : ""} ${emState.selected.has(r.donor_id) ? "checked" : ""} /> ` : ""}${esc(r.display_name)}</div>
           <div class="em-r-meta">${esc([r.book_type,
             [r.city, r.state].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}
             · ${emFmt$(r.total_given)} · ${(r.addresses || []).length} addr</div>
         </li>`).join("");
       ul.hidden = false;
-      ul.querySelectorAll("li").forEach((li, i) => li.addEventListener("mousedown", () => {
-        emState[side] = rows[i];
-        input.value = rows[i].display_name;
-        ul.hidden = true;
+      ul.querySelectorAll("li").forEach((li, i) => li.addEventListener("click", () => {
+        if (emState.saving) return;
+        if (side === "b") {
+          const r = rows[i];
+          if (r.donor_id === emState.a?.donor_id) return;
+          if (emState.selected.has(r.donor_id)) emState.selected.delete(r.donor_id);
+          else emState.selected.set(r.donor_id, r);
+          li.querySelector("input").checked = emState.selected.has(r.donor_id);
+        } else {
+          emState.a = rows[i];
+          emState.selected.delete(rows[i].donor_id);
+          emRenderCard("b");
+          input.value = rows[i].display_name;
+          ul.hidden = true;
+        }
         emRenderCard(side);
       }));
     }, 220);
@@ -779,26 +803,32 @@ function emInitSide(side) {
 }
 
 async function emRecord(decision) {
-  const a = emState.a, b = emState.b;
-  if (!a || !b) return;
+  const a = emState.a, selected = [...emState.selected.values()];
+  if (emState.saving || !a?.rep_alias_key || !selected.length || selected.some(b => !b.rep_alias_key || b.donor_id === a.donor_id)) return;
+  emState.saving = true; emSyncButtons();
   const status = document.getElementById("em-status");
   status.textContent = "Saving…";
   try {
     const sb = await getSupabase();
-    const [ka, kb] = [a.rep_alias_key, b.rep_alias_key].sort();
     const session = await getSession();
-    const { error } = await sb.from("donor_merge_overrides").upsert({
+    const records = selected.map(b => {
+      const [ka, kb] = [a.rep_alias_key, b.rep_alias_key].sort();
+      return {
       merge_key: `${ka}|||${kb}`,
       alias_a: ka, alias_b: kb,
       decision,
-      label_a: a.display_name, label_b: b.display_name,
+      label_a: ka === a.rep_alias_key ? a.display_name : b.display_name,
+      label_b: kb === b.rep_alias_key ? b.display_name : a.display_name,
       decided_by: session?.user?.email || null,
+      };
     });
+    const { error } = await sb.from("donor_merge_overrides").upsert(records);
     if (error) throw new Error(error.message);
     status.textContent = decision === "merged"
       ? "Merge recorded — applied on the next resolver run."
       : "Marked as separate — they will not be merged.";
-    emState.a = emState.b = null;
+    emState.a = null;
+    emState.selected.clear();
     ["a", "b"].forEach(s => {
       document.getElementById(`em-search-${s}`).value = "";
       emRenderCard(s);
@@ -806,6 +836,8 @@ async function emRecord(decision) {
     await emLoadList();
   } catch (e) {
     status.textContent = "Failed: " + e.message;
+  } finally {
+    emState.saving = false; emSyncButtons();
   }
 }
 

@@ -272,3 +272,27 @@ test("data layer memoizes exact scope, supports open ends, and retries failed re
   await dl.getDonors({ start: "2026-09-01" });
   assert.equal(calls.length, 4);
 });
+
+test('Donor Lookup uses original committee names when canonical names are blank', async () => {
+  const code = fs.readFileSync(path.join(root, 'docs/donors.js'), 'utf8');
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { querySelector: () => element(`${id} tbody`) });
+    return elements.get(id);
+  };
+  const data = [
+    { filer_canonical: null, filer: 'Friends of Tina Kotek', amount: 20000 },
+    { filer_canonical: '  ', filer: 'Committee to Elect Lucetta Elmer', amount: 2500 },
+    { filer_canonical: 'Friends of Julie Fahey', filer: 'Raw name', amount: 2500 },
+    { filer_canonical: null, filer: null, filer_id: '99', amount: 500 },
+  ];
+  const query = { select() { return this; }, eq() { return this; }, order() { return this; },
+    async range() { return { data }; } };
+  const ctx = vm.createContext({ $: element, esc: String, fmt$: String, PAGE: 25, txnPage: 0,
+    currentDonor: { donor_id: 'uber' }, getSupabase: async () => ({ from: () => query }) });
+  vm.runInContext(code.slice(code.indexOf('async function loadTxns()'), code.indexOf('// ── Init')), ctx);
+  await ctx.loadTxns();
+  const html = element('dn-txns tbody').innerHTML;
+  for (const name of ['Friends of Tina Kotek', 'Committee to Elect Lucetta Elmer', 'Friends of Julie Fahey', 'Committee 99']) assert.ok(html.includes(name));
+  assert.ok(!html.includes('Raw name'));
+});
