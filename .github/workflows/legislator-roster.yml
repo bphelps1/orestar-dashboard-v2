@@ -21,7 +21,9 @@ jobs:
       - uses: peter-evans/create-pull-request@v7
         with:
           branch: codex/refresh-current-legislators
-          add-paths: docs/assets/current_legislators.json
+          add-paths: |
+            docs/assets/current_legislators.json
+            docs/assets/current_committee_chairs.json
           commit-message: Update current Oregon legislator roster
           title: Update current Oregon legislator roster
-          body: Official House and Senate membership changed. Review the roster diff before merging; recommendations only use current members of the same chamber.
+          body: Official membership or committee-chair assignments changed. Review the roster diff before merging; these assets establish current membership and comparison roles.

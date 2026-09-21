@@ -371,7 +371,8 @@ async function runRecommendations() {
 
     // 4. Build repeat donor targets (existing donors to THIS filer)
     showStatus("Analyzing repeat donors…", "loading");
-    targetProfile._leadershipTier = filer.leadership_tier || 0;
+    targetProfile._leadershipTier = effectiveLeadershipTier(filer);
+    targetProfile._recommendationOffice = getOffice(filer);
     const targetSeat = seatCompetitiveness(filer);
     const { targets: repeatTargets, notRecommended: repeatNotRec } = buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years, cycle, targetSeat);
 
@@ -461,9 +462,7 @@ const MIN_PEER_GIFTS = 3;
 
 // Senior legislative leadership shares a primary pool across chambers.
 const HOUSE_MAJORITY_BENCHMARK_FACTOR = 0.90;
-function primaryLeadershipRole(filer) {
-  const chamber = getChamber(filer);
-  if (!chamber) return null;
+function leadershipTitle(filer) {
   const normalized = text => String(text || "").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
   const candidate = normalized(filer.candidate_name).replace(/\b[a-z]\b/g, "").replace(/\s+/g," ").trim();
   const name = normalized(filer.name);
@@ -471,12 +470,63 @@ function primaryLeadershipRole(filer) {
     (r.filer_id && [filer.filer_id,...(filer.filer_ids || [])].map(String).includes(String(r.filer_id)))
     || (r.filer_name && (normalized(r.filer_name) === candidate
       || ` ${name} `.includes(` ${normalized(r.filer_name)} `))));
-  const title = normalized(live?.role_title || filer.leadership_role);
+  return normalized(live?.role_title || filer.leadership_role);
+}
+let committeeChairs = null;
+async function loadCommitteeChairs() {
+  if (committeeChairs) return committeeChairs;
+  const response = await fetch("assets/current_committee_chairs.json", { cache: "no-cache" });
+  if (!response.ok) throw new Error("Could not verify committee chairs. Please retry.");
+  const data = await response.json();
+  if (!Array.isArray(data.chairs) || !data.chairs.length) throw new Error("Committee chair roster is unavailable.");
+  committeeChairs = data.chairs;
+  return committeeChairs;
+}
+const chairMatchCache = new WeakMap();
+function chairAssignments(filer) {
+  const cached = chairMatchCache.get(filer);
+  if (cached?.roster === committeeChairs) return cached.matches;
+  const matches = (committeeChairs || []).filter(r => r.chamber === getChamber(filer) && matchesElectionName(filer,r.name));
+  chairMatchCache.set(filer, { roster: committeeChairs, matches });
+  return matches;
+}
+function primaryLeadershipRole(filer) {
+  const chamber = getChamber(filer), title = leadershipTitle(filer);
+  if (!chamber) return null;
   if (chamber === "house" && /^(speaker of (the )?house|house speaker|speaker)$/.test(title)) return "speaker";
   if (chamber === "senate" && /^(president of (the )?senate|senate president|president)$/.test(title)) return "president";
   if (new RegExp(`^(${chamber} )?majority leader$`).test(title)) return `${chamber}-majority-leader`;
-  if (/^((house|senate|joint) )?ways (and )?means co ?chair(s)?$/.test(title)) return "ways-means";
+  if (/^((house|senate|joint) )?ways (and )?means co ?chair(s)?$/.test(title)
+    || chairAssignments(filer).some(r => r.committees.some(c => c.toLowerCase() === "ways and means"))) return "ways-means";
   return null;
+}
+function otherLeadershipOrChair(filer) {
+  if (!getChamber(filer) || primaryLeadershipRole(filer)) return false;
+  const title = leadershipTitle(filer);
+  return chairAssignments(filer).length > 0
+    || /\b(leader|whip|pro tem|floor manager|ex officio)\b/.test(title)
+    || (/\bchair\b/.test(title) && !/\bvice\b/.test(title))
+    || (!title && Number(filer.leadership_tier) === 3);
+}
+function effectiveLeadershipTier(filer) {
+  const primary = primaryLeadershipRole(filer);
+  return primary ? (["speaker","president"].includes(primary) ? 1 : 2)
+    : otherLeadershipOrChair(filer) ? 3 : 0;
+}
+function completedHistoryCycles(profile, cycle) {
+  const cycles = new Set();
+  for (const [year, donors] of Object.entries(askDonorsByYear(profile))) {
+    const c = yearToCycle(Number(year));
+    if (c < cycle && (!profile._entryBaseline || c > profile._entryBaseline.year)
+      && donors.some(d => Number(d.total) > 0)) cycles.add(c);
+  }
+  return cycles.size;
+}
+function limitedHistoryWeight(profile, cycle) {
+  const office = profile._recommendationOffice || getOffice(profile);
+  if (office && !LEGISLATIVE_OFFICES.has(office)) return null;
+  const n = completedHistoryCycles(profile, cycle);
+  return n === 0 ? 0.75 : n === 1 ? 0.60 : null;
 }
 function leadershipPool(comparables) {
   return comparables.length > 0 && comparables.every(c =>
@@ -750,7 +800,7 @@ function seatCompetitiveness(filer) {
 }
 
 async function findComparables(targetProfile, targetFiler, cycle) {
-  await Promise.all([loadRaceMargins(), loadCurrentLegislators()]);
+  await Promise.all([loadRaceMargins(), loadCurrentLegislators(), loadCommitteeChairs()]);
   const targetSeat = seatCompetitiveness(targetFiler);
   if (targetSeat) {
     console.log(`[recommend] target seat: ${targetSeat.label} (${targetSeat.year})`);
@@ -760,7 +810,8 @@ async function findComparables(targetProfile, targetFiler, cycle) {
   const chamber = getChamber(targetFiler);
   const targetLeadershipRole = primaryLeadershipRole(targetFiler);
   const outliers = targetLeadershipRole ? await loadFundraisingOutliers(targetFiler, cycle) : new Map();
-  const targetTier = targetFiler.leadership_tier || 0;
+  const targetOtherLeader = otherLeadershipOrChair(targetFiler);
+  const targetTier = effectiveLeadershipTier(targetFiler);
   const isTargetLeadership = targetTier > 0;
 
   console.log(`[recommend] Target: office=${officeType}, party=${party}, chamber=${chamber}, leadership_tier=${targetTier}`);
@@ -776,7 +827,7 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     const fOffice = getOffice(f);
     const fParty = getParty(f);
     const fChamber = getChamber(f);
-    const fTier = f.leadership_tier || 0;
+    const fTier = effectiveLeadershipTier(f);
     const peerLeadershipRole = primaryLeadershipRole(f);
     const fTags = adminTags[f.slug] || [];
     let comparisonKind = "seat";
@@ -789,6 +840,8 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     } else {
       // Ordinary candidates never benchmark against the senior leadership group.
       if (peerLeadershipRole) continue;
+      if (targetOtherLeader !== otherLeadershipOrChair(f)) continue;
+      comparisonKind = targetOtherLeader ? "leadership-chair" : "seat";
       if (fChamber && !isCurrentLegislator(f)) continue;
       if (chamber && (fChamber !== chamber || !isCurrentLegislator(f))) continue;
       if (officeType && !isOfficeComparable(officeType, fOffice)) continue;
@@ -857,7 +910,7 @@ async function findComparables(targetProfile, targetFiler, cycle) {
 
     if (similarity > 20) {
       scored.push({ ...f, similarity, officeType: fOffice, party: fParty, chamber: fChamber, seat: fSeat,
-        comparisonKind, outlierEvidence: outliers.get(f.slug) || null,
+        comparisonKind, leadership_tier: fTier, outlierEvidence: outliers.get(f.slug) || null,
         benchmarkFactor: targetLeadershipRole === "house-majority-leader" && peerLeadershipRole === "speaker" ? HOUSE_MAJORITY_BENCHMARK_FACTOR : 1 });
     }
   }
@@ -1123,6 +1176,8 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
   const byYear = targetProfile.top_donors_by_year || {};
   const allYears = Object.keys(byYear).map(Number).sort((a, b) => a - b);
   const cycleStart = cycle - 1;
+  const historyCycles = completedHistoryCycles(targetProfile, cycle);
+  const historyWeight = limitedHistoryWeight(targetProfile, cycle);
 
   // Build per-donor cycle history: donor → { cycles: {cycle: amount}, totalGifts }
   const donorHistory = new Map();
@@ -1229,7 +1284,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // donor, use that as the starting point (not just a blend).
     const compGifts = compDonorDetails.get(key) || [];
     const targetTier = targetProfile._leadershipTier || 0;
-    if (targetTier > 0) {
+    if (targetTier > 0 && historyWeight === null) {
       const sameTierGifts = compGifts
         .filter(g => g.leadershipTier === targetTier)
         .sort((a, b) => b.amount - a.amount);
@@ -1266,28 +1321,22 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       : (sortedAmts[0] || 0);
     const refGift = refGifts.find(g => benchmarkAmount(g) === compRef);
     const maxFromNonLeadership = refGift && !refGift.isLeadership;
-    if (targetProfile._entryBaseline && baselineAmt === 0 && compRef > 0) {
-      // An entry-primary-only relationship has no incumbent baseline. Start
-      // conservatively from eligible peers, like an introductory ask.
-      const first = firstGivingBenchmark(key, compProfiles, comparables, cycle, targetSeat);
-      target = Math.min(compRef * 0.5, first.amount || compRef * 0.5);
-    }
-    const hasUplift = compRef > target && !(targetProfile._entryBaseline && baselineAmt === 0);
+    const historyBlend = historyWeight !== null && compRef > 0;
+    const hasUplift = compRef > target;
     let compWeight = 0;
-    if (hasUplift) {
-      // Scale blend weight INVERSELY with the gap ratio:
-      // Small gap (< 2x) → 35% weight (realistic uplift)
-      // Medium gap (2-4x) → 20% weight (stretch goal)
-      // Large gap (4-8x) → 10% weight (aspirational, stay close to history)
-      // Huge gap (8x+) → 5% weight (almost entirely history-based)
+    if (historyBlend) {
+      // Limited incumbent history is weaker evidence in either direction.
+      // The peer reference already excludes first-primary giving and outliers.
+      compWeight = historyWeight;
+      target = baselineAmt * 1.05 * (1-compWeight) + compRef * compWeight;
+    } else if (hasUplift) {
       const gapRatio = compRef / Math.max(target, 1);
       if (gapRatio >= 8) compWeight = 0.05;
       else if (gapRatio >= 4) compWeight = 0.10;
       else if (gapRatio >= 2) compWeight = 0.20;
       else compWeight = 0.35;
-      // Non-leadership max gets +5% weight (stronger signal of donor capacity)
       if (maxFromNonLeadership) compWeight = Math.min(compWeight + 0.05, 0.40);
-      target = Math.round((target * (1 - compWeight) + compRef * compWeight) * 100) / 100;
+      target = Math.round((target * (1-compWeight) + compRef * compWeight) * 100) / 100;
     }
 
     target = roundTarget(target);
@@ -1314,14 +1363,15 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const factors = [];
     if (prevCycles.length) {
       factors.push(`${prevCycles.length} previous cycle${prevCycles.length > 1 ? "s" : ""}: ${historyParts.join(", ")}`);
-      factors.push(`Ask baseline (${lastCycle - 1}–${lastCycle}): ${fmt$(baselineAmt)} → target: ${fmt$(target)} (${targetProfile._entryBaseline && baselineAmt === 0 ? "conservative peer-based ask" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
+      factors.push(`Ask baseline (${lastCycle - 1}–${lastCycle}): ${fmt$(baselineAmt)} → target: ${fmt$(target)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     } else {
       factors.push(`Current cycle donor: ${fmt$(currentCycleAmt)} given so far`);
-      factors.push(`Base target: ${fmt$(target)} (${targetProfile._entryBaseline && baselineAmt === 0 ? "conservative peer-based ask" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
+      factors.push(`Base target: ${fmt$(target)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     }
 
     if (targetProfile._entryBaseline) factors.push(`Incumbent baseline excludes giving through the first legislative primary (${targetProfile._entryBaseline.primaryDate}); full giving remains in history`);
-    if (targetProfile._entryBaseline && baselineAmt === 0) factors.push("No post-entry-primary baseline: conservative peer-based ask, capped at 50% of the comparable benchmark");
+    if (historyBlend) factors.push(`Limited incumbent history: ${historyCycles} completed eligible cycle${historyCycles === 1 ? "" : "s"}; ${Math.round(compWeight*100)}% comparable benchmark + ${Math.round((1-compWeight)*100)}% own eligible baseline (with 5% growth)`);
+    else if (historyWeight !== null) factors.push("Limited incumbent history, but no eligible comparable giving for this donor; own post-primary baseline used");
     if (compProfiles.some(p => p._entryBaseline)) factors.push("Comparable benchmarks exclude pre-entry-primary fundraising; reported historical contributions remain unchanged");
     leadershipFactors(factors, reference);
     // Say which giving the benchmark came from before quoting a number from it.
@@ -1335,7 +1385,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // Show comparable uplift details
     if (hasUplift) {
       const upliftGifts = refGifts
-        .filter(g => g.amount > lastCycleAmt * 1.05)
+        .filter(g => benchmarkAmount(g) > baselineAmt * 1.05)
         .sort((a, b) => b.amount - a.amount);
       const pct = Math.round(compWeight * 100);
       const nlTag = maxFromNonLeadership ? " — non-leadership benchmark" : "";
@@ -1366,6 +1416,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       prev_cycles: prevCycles.length,
       last_cycle_amt: lastCycleAmt,
       baseline_cycle_amt: baselineAmt,
+      history_cycles: historyCycles, comparable_weight: compWeight,
       avg_prev: Math.round(avgPrev * 100) / 100,
       comp_max: refGift?.amount || 0,
       comp_max_filers: refGifts.filter(g => benchmarkAmount(g) === compRef).map(g => g.filer),
@@ -1715,6 +1766,7 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     <div class="summary-card"><span class="sc-label">Comparable Filers <span class="sc-help" title="Number of similar candidates used as benchmarks for donor targeting and prospect identification.">?</span></span><br><span class="sc-value">${fmtNum(comparables.length)}</span></div>
     <div class="summary-card"><span class="sc-label">Total Fundraising Target <span class="sc-help" title="Combined target from existing donor asks plus new prospect asks. Represents the total recommended fundraising goal.">?</span></span><br><span class="sc-value">${fmt$(repeatRemaining + newRemaining)}</span></div>
     ${leadershipPool(comparables) ? `<div class="summary-card"><span class="sc-label">Leadership references</span><p>Primary: ${comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => esc(c.name)).join(", ") || "None available"}</p><p>Secondary: ${comparables.filter(c => c.comparisonKind === "leadership-secondary").map(c => `${esc(c.name)} (${fmt$(c.outlierEvidence?.amount)} in best prior completed cycle)`).join(", ") || "None detected"}</p></div>` : ""}
+    ${comparables.some(c => c.comparisonKind === "leadership-chair") ? `<div class="summary-card"><span class="sc-label">Leadership and committee-chair peers</span><p>${comparables.map(c => esc(c.name)).join(", ")}</p><p>Same chamber and compatible seat margins.</p></div>` : ""}
     ${targetProfile._entryBaseline ? `<div class="summary-card"><span class="sc-label">Incumbent ask baseline</span><p>Giving from ${esc(targetProfile._entryBaseline.start)} onward. First-primary fundraising is excluded from asks and lobbyist minimums; historical giving remains visible.</p></div>` : ""}
     ${seatBenchmarkCard(targetSeat, seatContext, cycleContributions)}
   `;
@@ -2745,6 +2797,10 @@ function methodSheetRows(groups, cycle) {
   }
   if (window._targetProfile?._entryBaseline) rows.push({ Item: "Incumbent ask baseline", Value: window._targetProfile._entryBaseline.start,
     Detail: "Exclude fundraising through the first legislative primary from donor ask baselines and lobbyist minimums. Last Cycle and historical contribution columns retain full actual giving." });
+  rows.push({ Item: "Limited incumbent history", Value: "75% / 60% comparable weight",
+    Detail: "Repeat-donor asks use 75% comparable giving with no completed eligible incumbent cycle, or 60% with one. The remainder is own post-primary giving plus 5%. Two or more completed cycles retain history-led weighting. No peer gift means no invented benchmark. New-donor first-gift limits are unchanged." });
+  rows.push({ Item: "Leadership and committee chairs", Value: "same-chamber role peers",
+    Detail: "Other leadership members and verified committee chairs compare with each other within the same chamber, party and compatible seat margins. Senior leaders retain their separate primary pool; ordinary members use ordinary peers." });
   rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `

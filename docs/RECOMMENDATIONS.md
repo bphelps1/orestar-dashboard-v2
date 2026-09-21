@@ -76,6 +76,14 @@ target. Other role pairings have no new multiplier. Actual contribution amounts
 remain unchanged. App summaries identify primary and secondary filers; row
 explanations and workbook methodology state which reference group sets asks.
 
+Other leadership members (assistants, deputies, whips, Pro Tems, floor managers,
+minority leaders) and current committee chairs form a separate role group within
+the **same chamber**. Ordinary members compare to ordinary members. Primary senior
+leaders remain in their separate cross-chamber pool. Chairs and co-chairs come
+from the official OLIS assignments asset, refreshed by the existing weekly roster
+PR workflow; vice chairs alone do not qualify. Effective leadership tiers reflect
+these verified assignments even when cached filer tiers are zero.
+
 For everyone else with known seat competitiveness, peers must have known seat
 competitiveness too. Unopposed seats only compare with unopposed seats; contested
 seats must be within 20 margin points. These are eligibility restrictions, so a
@@ -615,9 +623,9 @@ Last Cycle, and exported actual contribution columns. The adjustment applies to
 repeat asks, comparable benchmarks, first-gift evidence, and lobbyist-group
 minimums, including clients omitted from individual recommendations. A donor who
 only gave before the cutoff has no incumbent baseline; an eligible peer benchmark
-can support a conservative ask capped at half that benchmark (and the observed
-first-gift benchmark when available), rounded to $250. It does not reinstate the
-primary gift as a floor.
+supports the limited-history weighting below, rounded to $250. The primary gift
+is not reinstated as a floor. The 50% introductory cap continues to apply to new
+donors, not repeat donors with an existing relationship.
 
 An actual first contribution before the cutoff is not used as first-gift evidence;
 a later gift is not relabeled as the first. If exact eligible first-gift evidence
@@ -626,3 +634,31 @@ Automatic fundraising outlier detection uses only complete cycles after verified
 entry, so the initial primary cannot establish outlier status either. Bounded
 four-at-a-time entry-year queries are cached by the existing donor data loader.
 No source transactions are changed and no migration is required.
+
+
+## Repeat asks for members with limited incumbent history
+
+For legislative candidates, count completed two-year cycles with positive eligible
+giving across the candidate's whole history, not just the individual donor. Ignore
+the current cycle and the verified entry cycle, which contains only a partial
+post-primary period. Repeat-donor asks blend the candidate's eligible baseline
+(with 5% growth) with the donor's outlier-adjusted comparable benchmark:
+
+| Completed eligible cycles | Comparable weight | Own baseline weight |
+|---|---:|---:|
+| None | 75% | 25% |
+| One | 60% | 40% |
+| Two or more | Existing history-led calculation | Existing calculation |
+
+The blend can move an ask up or down. With no comparable giving for a donor, only
+the candidate's own eligible baseline is used. The same-tier leadership floor is
+retained only for established histories; it does not override the limited-history
+blend. These are explicit policy weights, not fitted statistical estimates.
+
+Example: a member with only a partial entry cycle, a $1,000 post-primary donor
+baseline, and a $10,000 comparable benchmark gets
+`25% × $1,050 + 75% × $10,000 = $7,762.50`, rounded to **$7,750**. With one completed
+eligible cycle, the same example rounds to **$6,500**. First-time donor limits,
+actual giving, and the existing eligible lobbyist-group floor remain unchanged.
+Non-legislative candidates retain their existing weighting. App explanations and
+the workbook Method sheet show the history count and policy.

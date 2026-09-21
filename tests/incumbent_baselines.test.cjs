@@ -54,10 +54,10 @@ test('entry-cycle primary receipts do not establish automatic outlier status',()
  const rows=filers.map((f,i)=>({slug:f.slug,timeline:[{month:'2024-03',contributions:i?10000+i*1000:9999999}]}));
  assert.equal(c.fundraisingOutliers(filers,rows,2026).has('fragala'),false);
 });
-test('primary-only repeat donor gets conservative peer ask instead of their large entry-primary gift',()=>{
+test('primary-only repeat donor gets history-weighted peer ask instead of their large entry-primary gift',()=>{
  const c=harness();const target={top_donors_by_year:{2024:[gift(50000)]},_askDonorsByYear:{2024:[]},_entryBaseline:{primaryDate:'2024-05-21'}};
  const comp={name:'Peer',slug:'peer'},profile={top_donors_by_year:{2024:[gift(10000)]}};
  const row=c.buildRepeatDonorTargets(target,[comp],[profile],[],2026,null).targets[0];
- assert.equal(row.last_cycle_amt,50000);assert.equal(row.baseline_cycle_amt,0);assert.equal(row.target,5000);
- assert.ok(row.factors.some(f=>f.includes('conservative peer-based ask')));
+ assert.equal(row.last_cycle_amt,50000);assert.equal(row.baseline_cycle_amt,0);assert.equal(row.target,7500);
+ assert.ok(row.factors.some(f=>f.includes('75% comparable benchmark')));
 });
