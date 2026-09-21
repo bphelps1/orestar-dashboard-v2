@@ -341,3 +341,18 @@ test('first-gift requests exclude repeat donors and pool family identities per r
   assert.deepEqual(Array.from(gifts, g => g.amount), [500, 1000]);
   assert.equal(ctx.window._planIdentityIds.get('family:amazon').size, 2);
 });
+
+test('final targets round to the nearest $250, with halfway values rounded up', () => {
+ const ctx=context();
+ for (const [amount,expected] of [[5124.99,5000],[5125,5250],[5249,5250],[5375,5500],[0,0]])
+  assert.equal(ctx.roundTarget(amount),expected);
+});
+
+test('first-time asks round after the initial-gift adjustment', () => {
+ const ctx=scoringContext();
+ const comps=['A','B','C'].map(name=>({name,slug:name,similarity:100}));
+ const profiles=comps.map(()=>({top_donors_by_year:{2026:[{name:'Acme',donor_id:'a',total:10000}]}}));
+ ctx.window._firstGifts=new Map([['a',[{amount:1125},{amount:1125},{amount:1125}]]]);
+ const result=ctx.scoreDonors({top_donors_by_year:{}},comps,profiles,['2026'],2026,null).prospects[0];
+ assert.equal(result.target_ask,1250);assert.equal(result.remaining_ask,1250);
+});

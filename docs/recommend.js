@@ -766,6 +766,11 @@ function planDonorFamily(name) {
   return PLAN_DONOR_FAMILIES.get(core) || null;
 }
 
+/** Round final asks once, before calculating remaining balances. Halfway rounds up. */
+function roundTarget(amount) {
+  return Math.round(amount / 250) * 250;
+}
+
 function donorDisplayName(name) {
   const label = planDonorFamily(name) || String(name || "");
   return typeof DN !== "undefined" ? DN.display(label) : label.trim().replace(/\s+/g, " ")
@@ -1006,6 +1011,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       target = Math.round((target * (1 - compWeight) + compRef * compWeight) * 100) / 100;
     }
 
+    target = roundTarget(target);
     const remaining = Math.max(0, Math.round((target - currentCycleAmt) * 100) / 100);
 
     if (!gaveInPrevCycle && prevCycles.length > 0) {
@@ -1029,10 +1035,10 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const factors = [];
     if (prevCycles.length) {
       factors.push(`${prevCycles.length} previous cycle${prevCycles.length > 1 ? "s" : ""}: ${historyParts.join(", ")}`);
-      factors.push(`Last cycle (${lastCycle - 1}–${lastCycle}): ${fmt$(lastCycleAmt)} → target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""})`);
+      factors.push(`Last cycle (${lastCycle - 1}–${lastCycle}): ${fmt$(lastCycleAmt)} → target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""}; rounded to nearest $250)`);
     } else {
       factors.push(`Current cycle donor: ${fmt$(currentCycleAmt)} given so far`);
-      factors.push(`Base target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""})`);
+      factors.push(`Base target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""}; rounded to nearest $250)`);
     }
 
     // Say which giving the benchmark came from before quoting a number from it.
@@ -1210,6 +1216,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     // A new relationship should not start at an established donor's ask.
     // Annual aggregates cannot identify a single first gift: label that limit.
     targetAsk = Math.round(Math.min(targetAsk * 0.5, firstGiving.amount || targetAsk * 0.5) * 100) / 100;
+    targetAsk = roundTarget(targetAsk);
     const remainingAsk = Math.max(0, targetAsk - alreadyGiven);
 
     // Comparable giving range
@@ -1220,7 +1227,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     let score = 0;
     const factors = [];
 
-    factors.push(`First-time ask: ${fmt$(targetAsk)} — capped at 50% of the established-giving benchmark`);
+    factors.push(`First-time ask: ${fmt$(targetAsk)} — capped at 50% of the established-giving benchmark before rounding to the nearest $250`);
     if (firstGiving.n) factors.push(firstGiving.actual
       ? `Median first observed cash contribution to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.amount)}`
       : `Median earliest observed annual giving to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.amount)}; annual totals are a proxy, not individual first gifts`);
@@ -2226,7 +2233,7 @@ function planSheetAoa(groups, cycle) {
     : "No general-election margin on record for this seat.";
   push(sub, "note");
   const method = blank();
-  method[0] = "Prior-donor asks use giving history and comparable seats. First-time asks use initial giving, capped at half the established benchmark. "
+  method[0] = "Prior-donor asks use giving history and comparable seats. First-time asks use initial giving, capped at half the established benchmark before rounding. All targets round to the nearest $250. "
     + "The columns on the right show that giving.";
   push(method, "note");
   push(blank(), "blank");
@@ -2408,7 +2415,7 @@ function methodSheetRows(groups, cycle) {
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
       + `Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",
-    Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
+    Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark before rounding to the nearest $250. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
   for (const t of TIER_RULES) {
     rows.push({ Item: t.label, Value: `score ≥ ${t.min === -Infinity ? "0" : t.min}`,
       Detail: "6 × donors in plan (max 30) + 2 × like candidates supported (max 30) + giving to them ÷ 5,000 (max 20) + 15 if they have given here before + 5 if they have given this cycle" });

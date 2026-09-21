@@ -56,3 +56,14 @@ test('Comparable Max names the actual discounted benchmark filer, not the outlie
  const r=c.buildRepeatDonorTargets(p,[{name:'Outlier'},{name:'Benchmark'}],profiles,['2025','2026'],2026,null).targets[0];
  assert.equal(r.comp_max,4000);assert.deepEqual(Array.from(r.comp_max_filers),['Benchmark']);
 });
+
+test('repeat asks round before computing remaining amounts and export uses that target',()=>{
+ const {c}=harness();
+ const profile={top_donors_by_year:{2022:[{donor_id:'a',name:'Acme',total:1000}],2024:[{donor_id:'a',name:'Acme',total:5000}],2026:[{donor_id:'a',name:'Acme',total:123}]}};
+ const r=c.buildRepeatDonorTargets(profile,[],[],['2025','2026'],2026,null).targets[0];
+ assert.equal(r.target,5250);assert.equal(r.remaining,5127);
+ c.window._repeatTargets=[r];c.window._recommendations=[];c.window._lobbyAttr=new Map();c.window._cycle=2026;c.window._targetProfile={name:'Candidate'};
+ const sheet=c.planSheetAoa(c.planGroups(),2026);
+ const donor=sheet.rows.find((row,i)=>sheet.roles[i]==='donor');
+ assert.equal(donor[sheet.moneyFrom+1],5250);
+});
