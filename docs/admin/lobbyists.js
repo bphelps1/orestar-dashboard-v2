@@ -403,7 +403,7 @@ function renderLobbyists() {
   const rows = filteredLobbyists();
   const tbody = document.getElementById("lob-tbody");
   tbody.innerHTML = rows.slice(0, S.lobShown).map(({ l, donors }) => {
-    const clients = (S.clientsByLobbyist.get(l.lobbyist_id) || []).filter(c => c.active).length;
+    const clients = editableClients(l.lobbyist_id).filter(c => c.active).length;
     const source = { capitol_club: "Capitol Club", manual: "Added by admin", sheet_2024: "2024 list",
                      tracker: "Fundraising Tracker" }[l.source] || l.source;
     return `<tr class="lob-row${S.openLobbyist === l.lobbyist_id ? " open" : ""}" data-lobbyist="${l.lobbyist_id}">
@@ -502,8 +502,7 @@ function partnerBlock(l) {
 }
 
 function lobbyistDetail(l) {
-  const clients = (S.clientsByLobbyist.get(l.lobbyist_id) || [])
-    .sort((a, b) => (b.active - a.active) || a.client_name.localeCompare(b.client_name));
+  const clients = editableClients(l.lobbyist_id);
   const donors = donorsForLobbyist(l.lobbyist_id)
     .sort((a, b) => Number(S.pool.get(b.donor_id)?.total_since_2021 || 0) - Number(S.pool.get(a.donor_id)?.total_since_2021 || 0));
   const dis = S.canWrite ? "" : "disabled";
@@ -533,17 +532,9 @@ function lobbyistDetail(l) {
     <div class="lob-cols">
       <div>
         <h4>Clients (${clients.filter(c => c.active).length} current)</h4>
-        <ul class="lob-client-list">${clients.map(c => `
-          <li class="${c.active ? "" : "inactive"}">
-            ${esc(c.client_name)}
-            <span class="badge ${c.source === "capitol_club" ? "badge-blue" : "badge-gray"}">${esc({ capitol_club: "Capitol Club", sheet_2024: "2024 list", manual: "manual" }[c.source] || c.source)}</span>
-            ${c.active ? "" : '<span class="lob-meta">not current</span>'}
-            ${c.is_lead ? '<span class="badge badge-green" title="Donors reached through this client are filed under this lobbyist">lead</span>' : ""}
-            ${c.active && S.canWrite && (S.lobbyistsByClient.get(c.client_key)?.size || 0) > 1
-              ? `<button class="link-btn" data-lead-client="${esc(c.client_key)}" data-lobbyist="${l.lobbyist_id}" data-on="${c.is_lead ? "0" : "1"}">${c.is_lead ? "unset lead" : "make lead"}</button>` : ""}
-            ${c.source !== "capitol_club" && S.canWrite ? `<button class="link-btn" data-toggle-client="${esc(c.client_key)}" data-source="${esc(c.source)}" data-lobbyist="${l.lobbyist_id}">${c.active ? "mark not current" : "mark current"}</button>` : ""}
-          </li>`).join("") || '<li class="lob-meta">None listed.</li>'}
-        </ul>
+        <p class="lob-meta">Remove a client from this lobbyist's list. Removals stay in effect after imports and can be restored below.</p>
+        ${clientEditorList(l.lobbyist_id, clients.filter(c => c.active))}
+        ${clients.some(c => !c.active) ? `<details><summary>Removed / inactive clients</summary>${clientEditorList(l.lobbyist_id, clients.filter(c => !c.active))}</details>` : ""}
         <form class="lob-inline" data-add-client="${l.lobbyist_id}">
           <input name="client" list="client-options" placeholder="Add a client…" ${dis} />
           <button class="btn-small" ${dis}>Add</button>
@@ -879,24 +870,38 @@ async function undoDecision(table, row) {
 }
 
 async function addClient(lobbyistId, clientName) {
-  const sb = await getSupabase();
-  const row = { lobbyist_id: lobbyistId, client_key: LOB.normOrg(clientName), client_name: clientName.trim(),
-                source: "manual", active: true };
-  const { error } = await sb.from("lobbyist_clients").upsert(row, { onConflict: "lobbyist_id,client_key,source" });
-  if (error) throw new Error(error.message);
-  indexClients([...[...S.clientsByLobbyist.values()].flat().filter(c =>
-    !(c.lobbyist_id === lobbyistId && c.client_key === row.client_key && c.source === "manual")), row]);
+  await setClientActive(lobbyistId, LOB.normOrg(clientName), true, clientName.trim());
 }
 
-async function setClientActive(lobbyistId, clientKey, source, active) {
+async function setClientActive(lobbyistId, clientKey, active, clientName = null) {
   const sb = await getSupabase();
-  const { error } = await sb.from("lobbyist_clients").update({ active })
-    .eq("lobbyist_id", lobbyistId).eq("client_key", clientKey).eq("source", source);
+  const { data, error } = await sb.rpc("edit_lobbyist_client", {
+    p_lobbyist_id: lobbyistId, p_client_key: clientKey, p_active: active, p_client_name: clientName,
+  });
   if (error) throw new Error(error.message);
-  const all = [...S.clientsByLobbyist.values()].flat();
-  const c = all.find(x => x.lobbyist_id === lobbyistId && x.client_key === clientKey && x.source === source);
-  if (c) c.active = active;
-  indexClients(all);
+  const all = [...S.clientsByLobbyist.values()].flat().filter(c =>
+    !(c.lobbyist_id === lobbyistId && c.client_key === clientKey));
+  indexClients([...all, ...data]);
+}
+
+function clientEditorList(lobbyistId, clients) {
+  return `<ul class="lob-client-list">${clients.map(c => `<li class="${c.active ? "" : "inactive"}">
+    ${esc(c.client_name)} <span class="lob-meta">${esc(c.sources.map(s => ({capitol_club:"Capitol Club",sheet_2024:"2024 list",manual:"manual"}[s] || s)).join(", "))}</span>
+    ${c.active && c.is_lead ? '<span class="badge badge-green">lead</span>' : ""}
+    ${c.active && S.canWrite && (S.lobbyistsByClient.get(c.client_key)?.size || 0) > 1
+      ? `<button type="button" class="link-btn" data-lead-client="${esc(c.client_key)}" data-lobbyist="${lobbyistId}" data-on="${c.is_lead ? "0" : "1"}">${c.is_lead ? "unset lead" : "make lead"}</button>` : ""}
+    ${S.canWrite ? `<button type="button" class="link-btn" data-toggle-client="${esc(c.client_key)}" data-active="${c.active ? "0" : "1"}" data-lobbyist="${lobbyistId}">${c.active ? "Remove client" : "Restore client"}</button>` : ""}
+    </li>`).join("") || '<li class="lob-meta">None listed.</li>'}</ul>`;
+}
+
+function editableClients(lobbyistId) {
+  const grouped = new Map();
+  for (const row of S.clientsByLobbyist.get(lobbyistId) || []) {
+    const prior = grouped.get(row.client_key);
+    if (!prior) grouped.set(row.client_key, { ...row, is_lead: row.active && row.is_lead, sources: [row.source] });
+    else { prior.active ||= row.active; prior.is_lead ||= row.active && row.is_lead; prior.sources.push(row.source); }
+  }
+  return [...grouped.values()].sort((a,b) => Number(b.active)-Number(a.active) || a.client_name.localeCompare(b.client_name));
 }
 
 async function saveFirmMembers(firmId, primaryId, memberIds) {
@@ -1369,8 +1374,7 @@ function wireUi() {
     }
     if (t.dataset.toggleClient) {
       const lid = Number(t.dataset.lobbyist);
-      const c = (S.clientsByLobbyist.get(lid) || []).find(x => x.client_key === t.dataset.toggleClient && x.source === t.dataset.source);
-      await guarded(async () => { await setClientActive(lid, c.client_key, c.source, !c.active); renderAll(); });
+      await guarded(async () => { await setClientActive(lid, t.dataset.toggleClient, t.dataset.active === "1"); renderAll(); });
     }
   });
 
