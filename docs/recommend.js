@@ -259,7 +259,7 @@ async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
   comparables.forEach((c, i) => {
     if (c.committee_type && c.committee_type !== "Candidate Committee") return;
     const ids = compProfiles[i].filer_ids?.length ? compProfiles[i].filer_ids : [c.filer_id];
-    ids.filter(Boolean).forEach(id => filers.set(String(id), c));
+    ids.filter(Boolean).forEach(id => filers.set(String(id), { ...c, baselineStart: compProfiles[i]._entryBaseline?.start }));
   });
   try {
     const sb = await getSupabase();
@@ -277,7 +277,7 @@ async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
       }));
       for (const r of data || []) {
         const key = keysById.get(r.donor_id), comp = filers.get(String(r.filer_id));
-        if (!comp) continue;
+        if (!comp || (comp.baselineStart && r.first_date < comp.baselineStart)) continue;
         const pair = `${key}|${comp.slug}`;
         const prior = earliest.get(pair);
         if (!prior || r.first_date < prior.first_date || (r.first_date === prior.first_date && Number(r.amount) < prior.amount)) {
@@ -338,6 +338,7 @@ async function runRecommendations() {
     // 1. Load the target filer's profile
     const targetProfile = await loadFilerProfile(filer.slug);
 
+    await loadLegislativeWinners();
     // 2. Find comparable filers
     const comparables = await findComparables(targetProfile, filer, cycle);
     showStatus(`Loading donor data for ${comparables.length} comparable filers…`, "loading");
@@ -360,6 +361,8 @@ async function runRecommendations() {
     // before scoring, classifying repeat donors, or building export history.
     await loadRecommendationIdentities([targetProfile, ...compProfiles], [filer, ...comparables]);
 
+    showStatus("Separating first-primary fundraising from incumbent baselines…", "loading");
+    await loadIncumbentBaselines([targetProfile, ...compProfiles], [filer, ...comparables], cycle);
     showStatus("Combining donor identities…", "loading");
     await loadPlanningKeys([targetProfile, ...compProfiles]);
 
@@ -499,7 +502,9 @@ function fundraisingOutliers(filers, rows, cycle) {
   const bySlug = new Map(rows.filter(r => !r.closed).map(r => [r.slug, r]));
   const amounts = filers.filter(f => bySlug.has(f.slug)).map(f => {
     const timeline = bySlug.get(f.slug).timeline || [];
+    const entry = firstLegislativeBaseline(f, cycle);
     const totals = [cycle - 2, cycle - 4].map(c => {
+      if (entry && c <= entry.year) return 0; // Outliers require a complete incumbent cycle.
       const { start, end } = cycleDateRange(c);
       return timeline.filter(t => t.month >= start && t.month <= end)
         .reduce((sum, t) => sum + Number(t.contributions || 0), 0);
@@ -591,6 +596,87 @@ function memberNameTokens(name) {
     .toLowerCase().replace(/[^a-z]+/g, " ").trim().split(/\s+/)
     .filter(t => t.length > 1 && !["jr", "sr", "ii", "iii"].includes(t));
 }
+// Keep reporting history intact; use a separate post-entry-primary history for asks.
+let legislativeWinners = null;
+async function loadLegislativeWinners() {
+  if (legislativeWinners) return legislativeWinners;
+  const sb = await getSupabase(), rows = [];
+  for (let start = 0; ; start += 1000) {
+    const { data, error } = await sb.from("election_results")
+      .select("id,year,office_normalized,district,candidate")
+      .eq("election_type", "General").eq("won", true)
+      .in("office_normalized", ["State Representative", "State Senator"])
+      .order("id").range(start, start + 999);
+    if (error) throw new Error(`Could not verify first legislative elections: ${error.message}`);
+    rows.push(...(data || []));
+    if ((data || []).length < 1000) break;
+  }
+  if (!rows.length) throw new Error("First legislative election history is unavailable.");
+  legislativeWinners = rows;
+  return rows;
+}
+const ELECTION_NAME_VARIANTS = {
+  rob:"robert", bob:"robert", bobby:"robert", deb:"deborah", debbie:"deborah",
+  rich:"richard", rick:"richard", dick:"richard", bill:"william", will:"william",
+  jim:"james", mike:"michael", dan:"daniel", dave:"david", tom:"thomas",
+  chris:"christopher", kim:"kimberly", ben:"benjamin", jeff:"jeffrey",
+  sue:"susan", liz:"elizabeth", matt:"matthew", greg:"gregory", ken:"kenneth",
+  kate:"katherine", steve:"steven", stephen:"steven", joe:"joseph",
+};
+function electionNameTokens(name) {
+  return memberNameTokens(name).map(t => ELECTION_NAME_VARIANTS[t] || t);
+}
+function matchesElectionName(filer, name) {
+  const tokens = electionNameTokens(name);
+  if (tokens.length < 2) return false;
+  return [filer.candidate_name, filer.name].some(value => {
+    const own = electionNameTokens(value);
+    const shared = tokens.filter(t => own.includes(t));
+    // Permit full middle names on either side; never match only a surname.
+    return shared.length >= 2 && (tokens.every(t => own.includes(t)) || own.every(t => tokens.includes(t)));
+  });
+}
+function firstLegislativeBaseline(filer, cycle) {
+  if (!getChamber(filer) || !legislativeWinners?.length) return null;
+  const wins = legislativeWinners.filter(r => matchesElectionName(filer, r.candidate)).sort((a,b) => a.year-b.year);
+  const first = wins[0];
+  const firstAvailableYear = Math.min(...legislativeWinners.map(r => r.year));
+  if (!first || first.year <= firstAvailableYear || first.year >= cycle) return null;
+  // A different predecessor provides affirmative evidence of entry; do not
+  // treat the first available database record as someone's first term.
+  const predecessor = legislativeWinners.filter(r => r.year < first.year
+    && r.office_normalized === first.office_normalized && r.district === first.district)
+    .sort((a,b) => b.year-a.year)[0];
+  if (!predecessor || matchesElectionName(filer, predecessor.candidate)) return null;
+  const may1 = new Date(Date.UTC(first.year, 4, 1));
+  const primaryDay = 1 + (2 - may1.getUTCDay() + 7) % 7 + 14;
+  return { year: first.year, primaryDate: `${first.year}-05-${String(primaryDay).padStart(2,"0")}`,
+    start: `${first.year}-05-${String(primaryDay+1).padStart(2,"0")}` };
+}
+function askDonorsByYear(profile) {
+  return profile?._askDonorsByYear ?? profile?.top_donors_by_year ?? {};
+}
+async function loadIncumbentBaselines(profiles, filers, cycle) {
+  const pending = profiles.map((profile,i) => ({profile,filer:filers[i]}));
+  await Promise.all(Array.from({length:Math.min(4,pending.length)},async()=>{
+    while (pending.length) {
+      const {profile,filer} = pending.shift();
+      delete profile._askDonorsByYear; delete profile._entryBaseline;
+      const entry = firstLegislativeBaseline(filer,cycle);
+      if (!entry) continue;
+      const filerIds = profile.filer_ids?.length ? profile.filer_ids : [filer.filer_id].filter(Boolean);
+      if (!filerIds.length) throw new Error(`Cannot verify post-primary giving for ${filer.name}: missing committee ID`);
+      // Only the entry year's partial period needs a dated query. Later years
+      // already have complete annual totals; earlier years are campaign entry.
+      const partial = await DL.getDonors({start:entry.start,end:`${entry.year}-12-31`,filerIds});
+      profile._askDonorsByYear = Object.fromEntries(Object.entries(profile.top_donors_by_year || {})
+        .filter(([year]) => Number(year) > entry.year));
+      profile._askDonorsByYear[entry.year] = partial.by_year?.[entry.year] || [];
+      profile._entryBaseline = entry;
+    }
+  }));
+}
+
 // Reviewed ORESTAR/legal-name variants; never match on surname alone.
 const CURRENT_MEMBER_NAME_ALIASES = {
   "Ricki Ruiz": ["Ricardo Ruiz"],
@@ -967,9 +1053,9 @@ function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
   const gifts = [];
   profiles.forEach((profile, i) => {
     if (comparables[i].committee_type && comparables[i].committee_type !== "Candidate Committee") return;
-    const years = Object.keys(profile.top_donors_by_year || {}).map(Number).filter(y => y <= cycle).sort((a,b) => a-b);
+    const years = Object.keys(askDonorsByYear(profile)).map(Number).filter(y => y <= cycle).sort((a,b) => a-b);
     for (const year of years) {
-      const amount = (profile.top_donors_by_year[year] || []).filter(d => donorKey(d) === key)
+      const amount = (askDonorsByYear(profile)[year] || []).filter(d => donorKey(d) === key)
         .reduce((sum, d) => sum + Number(d.total || 0), 0);
       if (amount > 0) {
         gifts.push({ amount, filer: comparables[i].name, benchmarkFactor: comparables[i].benchmarkFactor ?? 1, seatBand: comparables[i].seat?.band, marginPts: comparables[i].seat?.margin_pts ?? null, year });
@@ -1054,13 +1140,21 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     }
   }
 
+  const baselineByDonorCycle = new Map();
+  for (const [year, donors] of Object.entries(askDonorsByYear(targetProfile))) {
+    for (const donor of donors) {
+      const key = `${donorKey(donor)}|${yearToCycle(Number(year))}`;
+      baselineByDonorCycle.set(key, (baselineByDonorCycle.get(key) || 0) + donor.total);
+    }
+  }
+
   // Get comparable giving for upside adjustment — track per-filer details
   // compDonorDetails: lowered name → [{ filer, maxCycleAmt }]
   const compDonorDetails = new Map();
   for (let i = 0; i < compProfiles.length; i++) {
     const profile = compProfiles[i];
     const comp = comparables[i];
-    const compByYear = profile.top_donors_by_year || {};
+    const compByYear = askDonorsByYear(profile);
     const compDonorCycles = new Map(); // donor → {cycle: amount}
     for (const [yrStr, donors] of Object.entries(compByYear)) {
       const yr = parseInt(yrStr);
@@ -1127,8 +1221,9 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       lastCycleAmt = currentCycleAmt;
     }
 
-    // Base target: 5% increase from last cycle (or current if no prior)
-    let target = Math.round(lastCycleAmt * 1.05 * 100) / 100;
+    const baselineAmt = baselineByDonorCycle.get(`${key}|${lastCycle}`) || 0;
+    // Reporting retains full historical giving; asks use eligible post-primary giving.
+    let target = Math.round(baselineAmt * 1.05 * 100) / 100;
 
     // Same-tier leadership floor: if a same-tier leader received more from this
     // donor, use that as the starting point (not just a blend).
@@ -1171,7 +1266,13 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       : (sortedAmts[0] || 0);
     const refGift = refGifts.find(g => benchmarkAmount(g) === compRef);
     const maxFromNonLeadership = refGift && !refGift.isLeadership;
-    const hasUplift = compRef > target;
+    if (targetProfile._entryBaseline && baselineAmt === 0 && compRef > 0) {
+      // An entry-primary-only relationship has no incumbent baseline. Start
+      // conservatively from eligible peers, like an introductory ask.
+      const first = firstGivingBenchmark(key, compProfiles, comparables, cycle, targetSeat);
+      target = Math.min(compRef * 0.5, first.amount || compRef * 0.5);
+    }
+    const hasUplift = compRef > target && !(targetProfile._entryBaseline && baselineAmt === 0);
     let compWeight = 0;
     if (hasUplift) {
       // Scale blend weight INVERSELY with the gap ratio:
@@ -1213,12 +1314,15 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const factors = [];
     if (prevCycles.length) {
       factors.push(`${prevCycles.length} previous cycle${prevCycles.length > 1 ? "s" : ""}: ${historyParts.join(", ")}`);
-      factors.push(`Last cycle (${lastCycle - 1}–${lastCycle}): ${fmt$(lastCycleAmt)} → target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""}; rounded to nearest $250)`);
+      factors.push(`Ask baseline (${lastCycle - 1}–${lastCycle}): ${fmt$(baselineAmt)} → target: ${fmt$(target)} (${targetProfile._entryBaseline && baselineAmt === 0 ? "conservative peer-based ask" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     } else {
       factors.push(`Current cycle donor: ${fmt$(currentCycleAmt)} given so far`);
-      factors.push(`Base target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""}; rounded to nearest $250)`);
+      factors.push(`Base target: ${fmt$(target)} (${targetProfile._entryBaseline && baselineAmt === 0 ? "conservative peer-based ask" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     }
 
+    if (targetProfile._entryBaseline) factors.push(`Incumbent baseline excludes giving through the first legislative primary (${targetProfile._entryBaseline.primaryDate}); full giving remains in history`);
+    if (targetProfile._entryBaseline && baselineAmt === 0) factors.push("No post-entry-primary baseline: conservative peer-based ask, capped at 50% of the comparable benchmark");
+    if (compProfiles.some(p => p._entryBaseline)) factors.push("Comparable benchmarks exclude pre-entry-primary fundraising; reported historical contributions remain unchanged");
     leadershipFactors(factors, reference);
     // Say which giving the benchmark came from before quoting a number from it.
     if (!reference && targetSeat && targetSeat.margin_pts != null && compGifts.length) {
@@ -1261,6 +1365,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       donor_key: key,
       prev_cycles: prevCycles.length,
       last_cycle_amt: lastCycleAmt,
+      baseline_cycle_amt: baselineAmt,
       avg_prev: Math.round(avgPrev * 100) / 100,
       comp_max: refGift?.amount || 0,
       comp_max_filers: refGifts.filter(g => benchmarkAmount(g) === compRef).map(g => g.filer),
@@ -1293,7 +1398,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
 
   compProfiles.forEach((profile, idx) => {
     const comp = comparables[idx];
-    const donors = mergeDonorsByYear(profile.top_donors_by_year || {}, years);
+    const donors = mergeDonorsByYear(askDonorsByYear(profile), years);
 
     donors.forEach(d => {
       const key = donorKey(d);
@@ -1414,6 +1519,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       ? `Median first observed cash contribution to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.rawAmount ?? firstGiving.amount)}`
       : `Median earliest observed annual giving to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.rawAmount ?? firstGiving.amount)}; annual totals are a proxy, not individual first gifts`);
 
+    if (compProfiles.some(p => p._entryBaseline)) factors.push("Comparable benchmarks exclude pre-entry-primary fundraising; reported historical contributions remain unchanged");
     leadershipFactors(factors, reference);
     // Show what the ask was measured against, so the number is traceable to
     // real gifts rather than to a rule.
@@ -1609,6 +1715,7 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     <div class="summary-card"><span class="sc-label">Comparable Filers <span class="sc-help" title="Number of similar candidates used as benchmarks for donor targeting and prospect identification.">?</span></span><br><span class="sc-value">${fmtNum(comparables.length)}</span></div>
     <div class="summary-card"><span class="sc-label">Total Fundraising Target <span class="sc-help" title="Combined target from existing donor asks plus new prospect asks. Represents the total recommended fundraising goal.">?</span></span><br><span class="sc-value">${fmt$(repeatRemaining + newRemaining)}</span></div>
     ${leadershipPool(comparables) ? `<div class="summary-card"><span class="sc-label">Leadership references</span><p>Primary: ${comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => esc(c.name)).join(", ") || "None available"}</p><p>Secondary: ${comparables.filter(c => c.comparisonKind === "leadership-secondary").map(c => `${esc(c.name)} (${fmt$(c.outlierEvidence?.amount)} in best prior completed cycle)`).join(", ") || "None detected"}</p></div>` : ""}
+    ${targetProfile._entryBaseline ? `<div class="summary-card"><span class="sc-label">Incumbent ask baseline</span><p>Giving from ${esc(targetProfile._entryBaseline.start)} onward. First-primary fundraising is excluded from asks and lobbyist minimums; historical giving remains visible.</p></div>` : ""}
     ${seatBenchmarkCard(targetSeat, seatContext, cycleContributions)}
   `;
 
@@ -2168,7 +2275,9 @@ function planDonorRows() {
       cycles: { [cycle - 2]: last, [cycle]: given }, factors: [], comp_gifts: [],
       comp_max: 0, comp_max_filers: [], history_only: true });
   }
-  return donorRows;
+  const eligiblePrior = new Map(mergeDonorsByYear(askDonorsByYear(window._targetProfile), [cycle-3,cycle-2]).map(d => [d.donor_key,d.total]));
+  return donorRows.map(r => ({ ...r, baseline_last_cycle: window._targetProfile?._entryBaseline
+    ? eligiblePrior.get(r.donor_key) || 0 : r.last_cycle }));
 }
 
 function planGroups() {
@@ -2210,11 +2319,12 @@ function planGroups() {
     g.last_cycle = g.rows.reduce((s, r) => s + Number(r.last_cycle || 0), 0);
     g.donor_target = g.rows.reduce((s, r) => s + r.target, 0);
     // A hard historical floor must round up if nearest-$250 would undershoot.
-    g.target = g.lobbyist ? Math.max(g.donor_target, Math.ceil(g.last_cycle / 250) * 250) : g.donor_target;
+    g.baseline_last_cycle = g.rows.reduce((s,r) => s+Number(r.baseline_last_cycle || 0),0);
+    g.target = g.lobbyist ? Math.max(g.donor_target, Math.ceil(g.baseline_last_cycle / 250) * 250) : g.donor_target;
     g.additional_ask = g.target - g.donor_target;
     g.given = g.rows.reduce((s, r) => s + r.given, 0);
     g.remaining = g.lobbyist ? Math.max(0, g.target - g.given) : g.rows.reduce((s, r) => s + r.remaining, 0);
-    g.target_reason = g.lobbyist ? `Lobbyist target: at least last cycle’s ${fmt$(g.last_cycle)} across currently attributed clients.`
+    g.target_reason = g.lobbyist ? `Lobbyist target: at least last cycle’s eligible baseline of ${fmt$(g.baseline_last_cycle)} across currently attributed clients.${window._targetProfile?._entryBaseline ? ` Giving through ${window._targetProfile._entryBaseline.primaryDate} is excluded from the ask floor; Last Cycle shows actual giving.` : ""}`
       + (g.additional_ask ? ` Includes ${fmt$(g.additional_ask)} beyond individual client asks; client allocation remains open.` : "") : "";
     g.partner = g.lobbyist ? isPartner(g.lobbyist.lobbyist_id) : false;
     g.tier = lobbyistTier(g.rows, g.partner);
@@ -2633,12 +2743,14 @@ function methodSheetRows(groups, cycle) {
       rows.push({ Item: "  peer", Value: p.name, Detail: `${seatDescription(p.seat)} · ${fmt$(p.total)} this cycle` });
     }
   }
+  if (window._targetProfile?._entryBaseline) rows.push({ Item: "Incumbent ask baseline", Value: window._targetProfile._entryBaseline.start,
+    Detail: "Exclude fundraising through the first legislative primary from donor ask baselines and lobbyist minimums. Last Cycle and historical contribution columns retain full actual giving." });
   rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
       + `Legislative comparisons use current members verified against the official roster. Ordinary candidates use the same chamber; senior leaders use a cross-chamber primary leadership pool, with automatically identified fundraising outliers as secondary references only when the donor has no primary leadership giving. Unopposed seats are matched only to other unopposed seats, never numeric margins. Outliers exceed Q3 + 1.5 × IQR among at least eight current same-party non-primary members, using each member’s best two-year total in the preceding two completed cycles. Primary leaders are the House Speaker, Senate President, both Majority Leaders, and Ways and Means Co-Chairs. Speaker giving is discounted 10% for a House Majority Leader target. Other comparisons exclude mismatched unopposed seats, unknown peer margins when the target margin is known, and seats more than 20 points apart. Under ${MIN_PEER_GIFTS} such gifts, only eligible comparable giving is used and the donor row says so.` });
   rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
-    Detail: "The greater of summed client asks or last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. The floor rounds up to $250 to avoid falling below actual giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
+    Detail: "The greater of summed client asks or eligible last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. Verified first-campaign fundraising through the entry primary is excluded from this floor, while Last Cycle shows actual giving. The floor rounds up to $250 to avoid falling below eligible baseline giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",
     Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark before rounding to the nearest $250. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
   for (const t of TIER_RULES) {

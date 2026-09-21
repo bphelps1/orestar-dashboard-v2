@@ -588,3 +588,41 @@ Removed and inactive clients appear in a collapsed section with Restore client;
 restoration creates an active manual relationship without selecting a new lead.
 Other lobbyists representing the client are unaffected. Admin/reviewer access is
 required. Apply migration 023 before deploying the client editor frontend.
+
+
+## First legislative campaign and incumbent baselines
+
+For future cycles, fundraising through a legislator's first legislative primary
+is excluded from ask baselines. The first general-election win is matched across
+both House and Senate histories, with an earlier different winner in that seat
+required as evidence of entry. Moving from House to Senate does not create a new
+first-campaign cutoff. The first year of available results is not assumed to be
+the first term. Missing or unmatched history leaves the existing baseline in
+place rather than inventing a cutoff; available general-election winners currently
+start in 2012. Appointed service and name changes may require additional history
+before a cutoff can be verified.
+
+The regular primary is the third Tuesday in May; eligible giving begins the next
+day. The cutoff applies only to cycles after the first successful legislative
+election, not to that campaign itself. For Lisa Fragala, the first election was
+2024 and the cutoff starts May 22, 2024. Sources: [official biography](https://www.oregonlegislature.gov/fragala/Pages/biography.aspx)
+and [Secretary of State primary announcement](https://apps.oregon.gov/oregon-newsroom/OR/SOS/Posts/Post/april-30-deadline-registration-may-primary-election).
+
+The app queries dated, merge-aware contributions for the post-primary part of the
+entry year and combines those with later annual totals. Earlier fundraising is
+excluded from the separate ask history. It is still present in original history,
+Last Cycle, and exported actual contribution columns. The adjustment applies to
+repeat asks, comparable benchmarks, first-gift evidence, and lobbyist-group
+minimums, including clients omitted from individual recommendations. A donor who
+only gave before the cutoff has no incumbent baseline; an eligible peer benchmark
+can support a conservative ask capped at half that benchmark (and the observed
+first-gift benchmark when available), rounded to $250. It does not reinstate the
+primary gift as a floor.
+
+An actual first contribution before the cutoff is not used as first-gift evidence;
+a later gift is not relabeled as the first. If exact eligible first-gift evidence
+is unavailable, the existing explicitly labeled annual proxy uses eligible giving.
+Automatic fundraising outlier detection uses only complete cycles after verified
+entry, so the initial primary cannot establish outlier status either. Bounded
+four-at-a-time entry-year queries are cached by the existing donor data loader.
+No source transactions are changed and no migration is required.
