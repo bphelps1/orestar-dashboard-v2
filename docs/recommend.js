@@ -270,7 +270,7 @@ async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
       const keys = new Set(cycleYears(cycle).flatMap(year => profile.top_donors_by_year?.[year] || []).map(donorKey));
       for (const key of keys) breadth.set(key, (breadth.get(key) || 0) + 1);
     }
-    const ids = [...keysById.keys()].filter(id => !existing.has(keysById.get(id)) && breadth.get(keysById.get(id)) > 1);
+    const ids = [...keysById.keys()].filter(id => !existing.has(keysById.get(id)) && breadth.get(keysById.get(id)) > (exclusiveHousePool(comparables) ? 0 : 1));
     for (let i = 0; i < ids.length; i += 150) {
       const data = await LOB.fetchAll(() => sb.rpc("recommendation_first_gifts", {
         p_donor_ids: ids.slice(i, i + 150), p_filer_ids: [...filers.keys()], p_through: `${cycle}-12-31`,
@@ -282,7 +282,7 @@ async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
         const prior = earliest.get(pair);
         if (!prior || r.first_date < prior.first_date || (r.first_date === prior.first_date && Number(r.amount) < prior.amount)) {
           earliest.set(pair, { key, first_date: r.first_date, amount: Number(r.amount),
-            filer: comp.name, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null });
+            filer: comp.name, benchmarkFactor: comp.benchmarkFactor ?? 1, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null });
         }
       }
     }
@@ -456,6 +456,36 @@ const UNOPPOSED = { band: "unopposed", label: "unopposed last cycle" };
 const PEER_WINDOWS = [5, 10, 20];
 const MIN_PEER_GIFTS = 3;
 
+// Speaker and House Majority Leader form an exclusive comparison pair.
+const HOUSE_MAJORITY_BENCHMARK_FACTOR = 0.90;
+function houseTopRole(filer) {
+  if (getOffice(filer) !== "state_rep") return null;
+  const normalized = text => String(text || "").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+  const candidate = normalized(filer.candidate_name).replace(/\b[a-z]\b/g, "").replace(/\s+/g," ").trim();
+  const name = normalized(filer.name);
+  const live = Object.values(leadershipRoles).find(r =>
+    (r.filer_id && [filer.filer_id,...(filer.filer_ids || [])].map(String).includes(String(r.filer_id)))
+    || (r.filer_name && (normalized(r.filer_name) === candidate
+      || ` ${name} `.includes(` ${normalized(r.filer_name)} `))));
+  const title = normalized(live?.role_title || filer.leadership_role);
+  if (/^(speaker of (the )?house|house speaker|speaker)$/.test(title)) return "speaker";
+  if (/^(house )?majority leader$/.test(title)) return "majority-leader";
+  return null;
+}
+function exclusiveHousePool(comparables) {
+  return comparables.length > 0 && comparables.every(c => c.comparisonKind === "house-leadership");
+}
+function benchmarkAmount(gift) { return gift.amount * (gift.benchmarkFactor ?? 1); }
+function compatibleSeat(target, peer) {
+  if (!target) return true; // No measured seat constraint is available.
+  if (!peer) return false;
+  if (target.band === "unopposed" || peer.band === "unopposed") return target.band === peer.band;
+  return target.margin_pts != null && peer.margin_pts != null
+    && Math.abs(target.margin_pts - peer.margin_pts) <= PEER_WINDOWS[PEER_WINDOWS.length - 1];
+}
+
+
+
 /**
  * The subset of a donor's comparable gifts made in seats about as contested
  * as the target's, using the narrowest window that holds enough of them.
@@ -554,6 +584,7 @@ async function findComparables(targetProfile, targetFiler, cycle) {
   const officeType = getOffice(targetFiler);
   const party = getParty(targetFiler);
   const chamber = getChamber(targetFiler);
+  const targetHouseRole = houseTopRole(targetFiler);
   const targetTier = targetFiler.leadership_tier || 0;
   const isTargetLeadership = targetTier > 0;
 
@@ -571,6 +602,10 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     const fParty = getParty(f);
     const fChamber = getChamber(f);
     const fTier = f.leadership_tier || 0;
+    const peerHouseRole = houseTopRole(f);
+    if (targetHouseRole || peerHouseRole) {
+      if (!targetHouseRole || !peerHouseRole || targetHouseRole === peerHouseRole) continue;
+    } else if (!compatibleSeat(targetSeat, seatCompetitiveness(f))) continue;
 
     // Party filter: if target has a known party, SKIP filers from other parties.
     // PACs/committees without party affiliation are allowed through.
@@ -634,13 +669,15 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     }
 
     if (similarity > 20) {
-      scored.push({ ...f, similarity, officeType: fOffice, party: fParty, chamber: fChamber, seat: fSeat });
+      scored.push({ ...f, similarity, officeType: fOffice, party: fParty, chamber: fChamber, seat: fSeat,
+        comparisonKind: targetHouseRole ? "house-leadership" : "seat",
+        benchmarkFactor: targetHouseRole === "majority-leader" ? HOUSE_MAJORITY_BENCHMARK_FACTOR : 1 });
     }
   }
 
-  // Sort by similarity descending, take top 50
+  // Sort eligible peers by similarity descending, take at most 20
   scored.sort((a, b) => b.similarity - a.similarity);
-  return scored.slice(0, 50);
+  return scored.slice(0, 20);
 }
 
 /**
@@ -822,7 +859,7 @@ function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
   if (actual?.length) {
     const peers = peerMarginGifts(actual, seat);
     const sample = peers?.gifts || actual;
-    return { amount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length, actual: true };
+    return { amount: percentile(sample.map(benchmarkAmount).sort((a,b) => a-b), 0.5), rawAmount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length, actual: true };
   }
   const gifts = [];
   profiles.forEach((profile, i) => {
@@ -832,14 +869,14 @@ function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
       const amount = (profile.top_donors_by_year[year] || []).filter(d => donorKey(d) === key)
         .reduce((sum, d) => sum + Number(d.total || 0), 0);
       if (amount > 0) {
-        gifts.push({ amount, filer: comparables[i].name, seatBand: comparables[i].seat?.band, marginPts: comparables[i].seat?.margin_pts ?? null, year });
+        gifts.push({ amount, filer: comparables[i].name, benchmarkFactor: comparables[i].benchmarkFactor ?? 1, seatBand: comparables[i].seat?.band, marginPts: comparables[i].seat?.margin_pts ?? null, year });
         break;
       }
     }
   });
   const peer = peerMarginGifts(gifts, seat);
   const sample = peer?.gifts || gifts;
-  return { amount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length };
+  return { amount: percentile(sample.map(benchmarkAmount).sort((a,b) => a-b), 0.5), rawAmount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length };
 }
 
 function donorKey(d) {
@@ -938,7 +975,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       const maxCy = Math.max(...Object.values(cyMap));
       if (!compDonorDetails.has(key)) compDonorDetails.set(key, []);
       compDonorDetails.get(key).push({ filer: comp.name, amount: maxCy, isLeadership: compIsLeadership,
-                                       leadershipTier: compTier, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
+                                       leadershipTier: compTier, benchmarkFactor: comp.benchmarkFactor ?? 1, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
                                        cycles: cyMap });
     }
   }
@@ -1023,11 +1060,11 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const refGifts = peer ? peer.gifts : compGifts;
     // Discount single-filer outliers: if the max is >1.5x the second-highest,
     // it's an outlier — use the second-highest as the reference instead.
-    const sortedAmts = refGifts.map(g => g.amount).sort((a, b) => b - a);
+    const sortedAmts = refGifts.map(benchmarkAmount).sort((a, b) => b - a);
     const compRef = (sortedAmts.length >= 2 && sortedAmts[0] > sortedAmts[1] * 1.5)
       ? sortedAmts[1]
       : (sortedAmts[0] || 0);
-    const refGift = refGifts.find(g => g.amount === compRef);
+    const refGift = refGifts.find(g => benchmarkAmount(g) === compRef);
     const maxFromNonLeadership = refGift && !refGift.isLeadership;
     const hasUplift = compRef > target;
     let compWeight = 0;
@@ -1077,12 +1114,16 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       factors.push(`Base target: ${fmt$(target)} (+5%${hasUplift ? " + comparable uplift" : ""}; rounded to nearest $250)`);
     }
 
+    if (exclusiveHousePool(comparables)) {
+      factors.push("Exclusive comparison: House Speaker and House Majority Leader only");
+      if (comparables.some(c => c.benchmarkFactor < 1)) factors.push("House Majority Leader benchmark: 10% below Speaker giving; actual contributions and this candidate’s own giving history are unchanged");
+    }
     // Say which giving the benchmark came from before quoting a number from it.
     if (targetSeat && targetSeat.margin_pts != null && compGifts.length) {
       factors.push(peer
         ? `Benchmark: ${peer.gifts.length} gift${peer.gifts.length === 1 ? "" : "s"} to ${peerDescription(peer)}`
           + ` (${seatDescription(targetSeat)}, ${targetSeat.year})`
-        : `Benchmark: all comparable giving — fewer than ${MIN_PEER_GIFTS} gifts to seats of similar closeness`);
+        : `Benchmark: all eligible comparable giving — fewer than ${MIN_PEER_GIFTS} gifts to seats of similar closeness`);
     }
 
     // Show comparable uplift details
@@ -1119,8 +1160,8 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       prev_cycles: prevCycles.length,
       last_cycle_amt: lastCycleAmt,
       avg_prev: Math.round(avgPrev * 100) / 100,
-      comp_max: compRef,
-      comp_max_filers: refGifts.filter(g => g.amount === compRef).map(g => g.filer),
+      comp_max: refGift?.amount || 0,
+      comp_max_filers: refGifts.filter(g => benchmarkAmount(g) === compRef).map(g => g.filer),
       target,
       current_cycle_amt: currentCycleAmt,
       remaining,
@@ -1170,6 +1211,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
         amount: d.total,
         similarity: comp.similarity,
         isLeadership: (comp.leadership_tier || 0) > 0,
+        benchmarkFactor: comp.benchmarkFactor ?? 1,
         seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
       });
       entry.totalToComps += d.total;
@@ -1220,7 +1262,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     const distinctYears = new Set(allYearGifts).size;
     const totalDonationInstances = allYearGifts.length; // times across all years × filers
 
-    if (donor.distinctComps <= 1) {
+    if (donor.distinctComps <= 1 && !exclusiveHousePool(comparables)) {
       notRecommended.push({
         donor: donor.name,
         type: "Donor Prospect",
@@ -1240,13 +1282,14 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     // scaling a safe-seat number up.
     const compAmounts = donor.compGifts.map(g => g.amount).sort((a, b) => a - b);
     const peer = peerMarginGifts(donor.compGifts, targetSeat);
-    const askAmounts = (peer ? peer.gifts.map(g => g.amount) : compAmounts).sort((a, b) => a - b);
+    const askAmounts = (peer ? peer.gifts : donor.compGifts).map(benchmarkAmount).sort((a, b) => a - b);
     const median = percentile(askAmounts, 0.5);
     const p75 = percentile(askAmounts, 0.75);
 
     // Target = upper-median (between median and 75th) capped by donor's own max
     const maxGift = Math.max(...compAmounts);
-    let targetAsk = Math.min(Math.round(((median + p75) / 2) * 100) / 100, maxGift);
+    const benchmarkMax = Math.max(...donor.compGifts.map(benchmarkAmount));
+    let targetAsk = Math.min(Math.round(((median + p75) / 2) * 100) / 100, benchmarkMax);
 
     const firstGiving = firstGivingBenchmark(key, compProfiles, comparables, cycle, targetSeat);
     // A new relationship should not start at an established donor's ask.
@@ -1265,9 +1308,13 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
 
     factors.push(`First-time ask: ${fmt$(targetAsk)} — capped at 50% of the established-giving benchmark before rounding to the nearest $250`);
     if (firstGiving.n) factors.push(firstGiving.actual
-      ? `Median first observed cash contribution to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.amount)}`
-      : `Median earliest observed annual giving to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.amount)}; annual totals are a proxy, not individual first gifts`);
+      ? `Median first observed cash contribution to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.rawAmount ?? firstGiving.amount)}`
+      : `Median earliest observed annual giving to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.rawAmount ?? firstGiving.amount)}; annual totals are a proxy, not individual first gifts`);
 
+    if (exclusiveHousePool(comparables)) {
+      factors.push("Exclusive comparison: House Speaker and House Majority Leader only; single-counterpart sample");
+      if (comparables.some(c => c.benchmarkFactor < 1)) factors.push("House Majority Leader benchmark: 10% below Speaker giving; actual contributions remain unchanged");
+    }
     // Show what the ask was measured against, so the number is traceable to
     // real gifts rather than to a rule.
     if (peer) {
@@ -1276,7 +1323,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       [...peer.gifts].sort((a, b) => b.amount - a.amount).slice(0, 4)
         .forEach(g => factors.push(`  • ${peerGiftLabel(g)}`));
     } else if (targetSeat && targetSeat.margin_pts != null) {
-      factors.push(`Ask set by all comparable giving — under ${MIN_PEER_GIFTS} gifts to `
+      factors.push(`Ask set by all eligible comparable giving — under ${MIN_PEER_GIFTS} gifts to `
         + (targetSeat.band === "unopposed" ? "unopposed seats" : `seats within ${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one`));
     }
 
@@ -2488,7 +2535,7 @@ function methodSheetRows(groups, cycle) {
   rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
-      + `Unopposed seats are matched only to other unopposed seats, never numeric margins. Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
+      + `Unopposed seats are matched only to other unopposed seats, never numeric margins. Speaker and House Majority Leader only compare with each other, with a 10% benchmark discount for the Majority Leader. Other comparisons exclude mismatched unopposed seats, unknown peer margins when the target margin is known, and seats more than 20 points apart. Under ${MIN_PEER_GIFTS} such gifts, only eligible comparable giving is used and the donor row says so.` });
   rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
     Detail: "The greater of summed client asks or last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. The floor rounds up to $250 to avoid falling below actual giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",

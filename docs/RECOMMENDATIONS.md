@@ -13,7 +13,7 @@ who already gave to a *comparable* committee.
 
 ```
 1. Load the target committee's profile          (filer_detail)
-2. Find comparable committees                   → similarity score, top 50
+2. Find comparable committees                   → similarity score, top 20
 3. Pull every donor who gave to those           (their filer_detail records)
 4. Score each donor 0–100                       → ranked list
 5. Compute a target ask per donor               → benchmarked against giving
@@ -32,7 +32,25 @@ The Donor Targets export includes both groups as well.
 Only candidate committees with a known election in the selected cycle or previous cycle are scored. Senate and statewide executive committees get a four-year lookback. Future elections, missing election metadata, noncandidate committees, and closed committees are excluded. Closed flags from detail profiles are checked before any scoring or export.
 
 Every eligible committee is scored for similarity. Anything scoring **≤ 20 is
-discarded**; the top **50** survive.
+discarded**; the top **20** survive.
+
+Before scoring, the House Speaker and House Majority Leader are isolated from
+all other candidates and may compare only with each other. Role detection uses
+live leadership metadata where available, then the filer-index role title;
+assistant/deputy leaders, Speaker Pro Tem, and Ways and Means chairs are not
+classified as either of these two offices. For a Majority Leader target, Speaker
+benchmark amounts receive a 10% discount. A Speaker target uses the Majority
+Leader's observed giving without that discount. Actual gifts, exported history,
+and the target candidate's own giving baseline remain unchanged. The exclusive
+pair permits a single-counterpart prospect sample, explicitly labeled in details.
+
+For everyone else with known seat competitiveness, peers must have known seat
+competitiveness too. Unopposed seats only compare with unopposed seats; contested
+seats must be within 20 margin points. These are eligibility restrictions, so a
+thin donor sample cannot bring excluded leaders or mismatched seats back through
+the fallback. The narrower 5/10/20-point donor benchmark selection still applies
+within this eligible pool. Smaller pools are retained rather than filled with
+incompatible candidates just to reach the 20-comparable cap.
 
 | Signal | Weight |
 |---|---|
@@ -129,7 +147,7 @@ coefficient said so.
 - Unopposed seats form a separate category, never a numeric 100-point margin.
   They benchmark against at least three gifts to other unopposed seats; contested
   seats exclude unopposed seats from every margin window. When that sample is too
-  small, the explicitly labeled all-comparable fallback still applies. The app
+  small, the explicitly labeled fallback uses only the eligible comparison pool. The app
   and workbook label these comparisons as unopposed-seat peers.
 - The gifts behind an ask are listed in the donor's "why", each with the margin
   of the seat it was given in, so the figure can be traced to real
@@ -400,7 +418,7 @@ next sweep finished.
 
 | Change | Where |
 |---|---|
-| Similarity weights, the ≤ 20 cutoff, top-50 | `findComparables()` |
+| Similarity weights, the ≤ 20 cutoff, top-20 | `findComparables()` |
 | Score factors 1–8 | `buildRepeatDonorTargets()` / `scoreDonors()` |
 | Competitiveness bands (comparability and labels) | `MARGIN_BANDS` / `UNOPPOSED` |
 | Peer-margin windows and the 3-gift minimum | `PEER_WINDOWS` / `MIN_PEER_GIFTS` |
