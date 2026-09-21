@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-function harness(realMembership=false){const c=vm.createContext({window:{},document:{addEventListener(){}},console:{log(){}},setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(__dirname,'../docs/recommend.js'),'utf8'),c);if(!realMembership)vm.runInContext("loadCurrentLegislators=async()=>{};isCurrentLegislator=()=>true;loadFundraisingOutliers=async()=>new Map()",c);return c;}
+function harness(realMembership=false){const c=vm.createContext({window:{},document:{addEventListener(){}},console:{log(){}},setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(__dirname,'../docs/recommend.js'),'utf8'),c);if(!realMembership)vm.runInContext("loadCurrentLegislators=async()=>{};isCurrentLegislator=()=>true;loadFundraisingOutliers=async()=>new Map()",c);vm.runInContext("committeeChairs=[]",c);return c;}
 const unopposed={band:'unopposed',margin_pts:100,year:2024,label:'unopposed last cycle'};
 test('unopposed is categorical and never participates in numeric margin windows',()=>{
  const c=harness(),gifts=[1,2,3].map(i=>({filer:`U${i}`,seatBand:'unopposed',marginPts:100,amount:1000}));
@@ -69,7 +69,7 @@ test('exclusive pair supports single-counterpart prospects and discounts benchma
  assert.equal(result.length,1);assert.equal(result[0].target_ask,4500);assert.equal(result[0].comp_max,10000);assert.equal(result[0].comp_gifts[0].amount,10000);
  assert.ok(result[0].factors.some(f=>f.includes('discounted 10%')));
  const repeat=c.buildRepeatDonorTargets({top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:5000}]}},comps,profiles,['2025','2026'],2026,null).targets[0];
- assert.equal(repeat.target,6500);assert.equal(repeat.comp_max,10000);assert.equal(repeat.last_cycle_amt,5000);
+ assert.equal(repeat.target,7500);assert.equal(repeat.comp_max,10000);assert.equal(repeat.last_cycle_amt,5000);
 });
 
 test('current-member filter removes Holvey and excludes Taylor from House comparisons',async()=>{

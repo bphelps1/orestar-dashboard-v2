@@ -1,0 +1,399 @@
+{
+  "verified_on": "2026-09-21",
+  "sources": {
+    "assignments": "https://olis.oregonlegislature.gov/liz/committees/assignments/committee"
+  },
+  "chairs": [
+    {
+      "chamber": "house",
+      "name": "Andrea Valderrama",
+      "committees": [
+        "Human Services"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Annessa Hartman",
+      "committees": [
+        "Early Childhood and Human Services (Inactive)"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Ben Bowman",
+      "committees": [
+        "Rules"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Dacia Grayber",
+      "committees": [
+        "Labor and Workforce Development"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Daniel Nguyen",
+      "committees": [
+        "Economic Development, Small Business, and Trade"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "David Gomberg",
+      "committees": [
+        "Blue Economy",
+        "Transportation and Economic Development"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Emerson Levy",
+      "committees": [
+        "Natural Resources"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Farrah Chaichi",
+      "committees": [
+        "General Government"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Hai Pham",
+      "committees": [
+        "Behavioral Health"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Jason Kropf",
+      "committees": [
+        "Judiciary"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Jules Walters",
+      "committees": [
+        "Early Childhood"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Julie Fahey",
+      "committees": [
+        "Emergency Board",
+        "Legislative Administration",
+        "Legislative Counsel",
+        "Legislative Policy and Research",
+        "Oregon-China Sister State",
+        "Transportation Funding"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Kevin Mannix",
+      "committees": [
+        "Conduct"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Kim Wallan",
+      "committees": [
+        "Public Records"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Lisa Fragala",
+      "committees": [
+        "Higher Education"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Mark Gamba",
+      "committees": [
+        "Climate, Energy, and Environment",
+        "Transportation Oversight"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Mark Owens",
+      "committees": [
+        "Agriculture, Land Use, Natural Resources, and Water"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Nancy Nathanson",
+      "committees": [
+        "Revenue"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Nathan Sosa",
+      "committees": [
+        "Commerce and Consumer Protection"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Pam Marsh",
+      "committees": [
+        "Housing and Homelessness"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Paul Evans",
+      "committees": [
+        "Public Safety"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Ricki Ruiz",
+      "committees": [
+        "Education",
+        "Higher Education",
+        "Public Education Appropriation"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Rob Nosse",
+      "committees": [
+        "Capital Construction",
+        "Health Care"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Sarah McDonald",
+      "committees": [
+        "Agriculture, Land Use, Natural Resources, and Water"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Susan McLain",
+      "committees": [
+        "Interstate 5 Bridge",
+        "Transportation"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Tawna Sanchez",
+      "committees": [
+        "Conduct",
+        "Legislative Audits",
+        "Ways and Means"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Thuy Tran",
+      "committees": [
+        "Emergency Management and Veterans"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Travis Nelson",
+      "committees": [
+        "Human Services"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Willy Chotzen",
+      "committees": [
+        "Information Management and Technology"
+      ]
+    },
+    {
+      "chamber": "house",
+      "name": "Zach Hudson",
+      "committees": [
+        "Education"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Anthony Broadman",
+      "committees": [
+        "Finance and Revenue",
+        "Public Safety"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Chris Gorsek",
+      "committees": [
+        "General Government",
+        "Transportation"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Courtney Neron Misslin",
+      "committees": [
+        "Higher Education",
+        "Natural Resources"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Deb Patterson",
+      "committees": [
+        "Health Care"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Dick Anderson",
+      "committees": [
+        "Conduct",
+        "Regional Behavioral Health Accountability"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Floyd Prozanski",
+      "committees": [
+        "Conduct",
+        "Judiciary",
+        "Public Records"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Fred Girod",
+      "committees": [
+        "Capital Construction"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "James Manning Jr.",
+      "committees": [
+        "Veterans, Emergency Management, Federal and World Affairs"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Janeen Sollman",
+      "committees": [
+        "Education",
+        "Energy and Environment",
+        "Public Education Appropriation"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Jeff Golden",
+      "committees": [
+        "Natural Resources",
+        "Natural Resources and Wildfire",
+        "Transportation and Economic Development"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Kate Lieber",
+      "committees": [
+        "Legislative Audits",
+        "Regional Behavioral Health Accountability",
+        "Ways and Means"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Kathleen Taylor",
+      "committees": [
+        "Labor and Business"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Kayse Jama",
+      "committees": [
+        "Rules and Executive Appointments"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Khanh Pham",
+      "committees": [
+        "Housing and Development",
+        "Information Management and Technology",
+        "Transportation",
+        "Transportation Oversight"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Kim Thatcher",
+      "committees": [
+        "Transparency Oregon Advisory Commission"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Lew Frederick",
+      "committees": [
+        "Education",
+        "Interstate 5 Bridge"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Lisa Reynolds",
+      "committees": [
+        "Early Childhood and Behavioral Health"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Mark Meek",
+      "committees": [
+        "Commerce and General Government"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Rob Wagner",
+      "committees": [
+        "Emergency Board",
+        "Legislative Administration",
+        "Legislative Counsel",
+        "Legislative Policy and Research",
+        "Oregon-China Sister State",
+        "Transportation Funding"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Sara Gelser Blouin",
+      "committees": [
+        "Human Services"
+      ]
+    },
+    {
+      "chamber": "senate",
+      "name": "Wlnsvey Campos",
+      "committees": [
+        "Human Services"
+      ]
+    }
+  ]
+}
