@@ -501,6 +501,21 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_STORAGE_BUCKET: exports
 
+      - name: Re-key donor aggregates onto resolved entities
+        # process.py rebuilds every committee's donor table from the raw
+        # transaction labels. Without this step the run silently undoes the
+        # donor resolver and every merge recorded at /admin/donors, which is
+        # what left the dashboard showing "FamilyCare" and "FamilyCare, Inc"
+        # as two donors. Every other workflow that calls process.py pairs it
+        # with this one.
+        if: always() && steps.final_aggregation.outcome == 'success'
+        run: python scraper/refresh_donor_aggregates.py
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_STORAGE_BUCKET: exports
+
       - name: Publish account-summary state
         id: summary_publish
         if: >-

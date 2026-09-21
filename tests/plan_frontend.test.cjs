@@ -26,6 +26,7 @@ function slice(from, to) {
 const peerCode = slice("const PEER_WINDOWS = [", "async function findComparables(");
 const tierCode = slice("const TIER_RULES = [", "function renderRepeatDonors(");
 const exportCode = slice("/** Contact details for a lobbyist row", "/** Sheet 2: one line per lobbyist");
+const keyCode = slice("/** Oregon cycles run odd→even", "function _getAllYearGifts(");
 
 function context(extra = {}) {
   const ctx = vm.createContext({
@@ -37,7 +38,7 @@ function context(extra = {}) {
     window: {},
     ...extra,
   });
-  vm.runInContext(peerCode + tierCode + exportCode, ctx);
+  vm.runInContext(keyCode + peerCode + tierCode + exportCode, ctx);
   return ctx;
 }
 
@@ -128,12 +129,12 @@ function planFixture() {
   });
   const groups = [{
     lobbyist: { lobbyist_id: 1, name: "Amanda Dalton", kind: "person", email: "a@d.com", phone: "503-000-0000" },
-    tier: { label: "Tier 1", why: "2 donors in this plan" },
+    tier: { label: "Tier 1", why: "2 donors in this plan" }, partner: false,
     rows: [
-      { donor: "Grocery PAC", type: "Donor Target", target: 1100, given: 500, cycles: { 2026: 500, 2024: 1000 },
-        contacts: [], attribution: null, also: [] },
-      { donor: "Foresight", type: "New Prospect", target: 1000, given: 0, cycles: {},
-        contacts: [], attribution: null, also: [] },
+      { donor: "Grocery PAC", donor_key: "grocery pac", type: "Donor Target", target: 1100, given: 500,
+        cycles: { 2026: 500, 2024: 1000 }, contacts: [], attribution: null, also: [] },
+      { donor: "Foresight", donor_key: "foresight", type: "New Prospect", target: 1000, given: 0,
+        cycles: {}, contacts: [], attribution: null, also: [] },
     ],
   }];
   return { ctx, groups };
@@ -141,34 +142,58 @@ function planFixture() {
 
 test("the sheet is banded by cycle, with the candidate and its comparables", () => {
   const { ctx, groups } = planFixture();
-  const { rows, merges } = ctx.planSheetAoa(groups, 2026);
-  assert.match(String(rows[0][0]), /Friends of A — fundraising plan, 2025–2026/);
-  assert.match(String(rows[1][0]), /3\.2 pt margin/);
+  const { rows, merges, roles } = ctx.planSheetAoa(groups, 2026);
+  assert.match(String(rows[0][0]), /Friends of A — who to ask/);
+  assert.match(String(rows[1][0]), /35\.5|3\.2 points/);
   const [cycleRow, nameRow, kindRow] = [rows[4], rows[5], rows[6]];
-  assert.deepEqual(cycleRow.filter(Boolean).slice(-3), ["2025–2026", "2023–2024", "2021–2022"]);
+  assert.deepEqual(cycleRow.filter(Boolean).slice(-3),
+                   ["This cycle (2025–2026)", "2023–2024", "2021–2022"]);
   assert.equal(nameRow.filter(Boolean)[0], "Friends of A");
   assert.ok(nameRow.includes("Fahey"));
-  assert.deepEqual([...new Set(kindRow.filter(Boolean))], ["Target", "Actual"]);
+  assert.deepEqual([...new Set(kindRow.filter(Boolean))], ["Ask", "Given", "Gave"]);
   assert.equal(merges.length, 3);          // one per cycle band
+  // Roles drive the formatting, so every row must carry one.
+  assert.equal(roles.length, rows.length);
+  assert.deepEqual(roles.slice(0, 8),
+    ["title", "note", "note", "blank", "head-band", "head-name", "head-kind", "total"]);
 });
 
-test("the lobbyist row totals its donors and the TOTAL row totals everything", () => {
+test("the lobbyist row totals its donors and the totals row totals everything", () => {
   const { ctx, groups } = planFixture();
-  const { rows } = ctx.planSheetAoa(groups, 2026);
-  const total = rows.find(r => r[1] === "TOTAL");
+  const { rows, roles, moneyFrom } = ctx.planSheetAoa(groups, 2026);
+  const total = rows.find(r => r[1] === "Everyone");
   const lead = rows.find(r => r[1] === "Amanda Dalton");
   const donor = rows.find(r => r[2] === "Grocery PAC");
-  const targetCol = rows[6].indexOf("Target");
-  assert.equal(donor[targetCol], 1100);
-  assert.equal(lead[targetCol], 2100);     // 1,100 + 1,000
-  assert.equal(total[targetCol], 2100);
+  const askCol = rows[6].indexOf("Ask");
+  assert.ok(askCol > moneyFrom);
+  assert.equal(donor[askCol], 1100);
+  assert.equal(lead[askCol], 2100);        // 1,100 + 1,000
+  assert.equal(total[askCol], 2100);
   assert.equal(lead[3], "Tier 1");
+  assert.equal(roles[rows.indexOf(donor)], "donor");
+});
+
+test("a donor's row says in words why that lobbyist has it", () => {
+  const ctx = context();
+  assert.equal(ctx.plainAttribution(null), "");
+  assert.equal(
+    ctx.plainAttribution({ status: "confirmed", methods: ["client:name_exact"],
+                           client_names: ["Oregon Health Care Association"] }),
+    "Lobbies for Oregon Health Care Association · donor name matches a client of theirs");
+  assert.match(
+    ctx.plainAttribution({ status: "suggested", methods: ["email_domain"], client_names: [] }),
+    /^Not yet reviewed — shares the committee's email domain$/);
+  // The same method name means different things on the two link tables.
+  assert.equal(
+    ctx.plainAttribution({ status: "confirmed", methods: ["name_exact"], client_names: [] }),
+    "named on the committee's filing");
 });
 
 test("a donor's giving to a comparable lands in the right cycle band", () => {
   const { ctx, groups } = planFixture();
   const { rows } = ctx.planSheetAoa(groups, 2026);
   const names = rows[5], cycles = rows[4];
+  assert.ok(cycles.some(c => String(c).includes("2023–2024")));
   // Column for Fahey in the 2023–2024 band.
   let band = null, col = -1;
   for (let i = 0; i < names.length; i++) {
@@ -185,8 +210,9 @@ test("only the five comparables this plan's donors gave most to get columns", ()
   const many = new Map();
   for (let i = 0; i < 8; i++) many.set(`F${i}`, { 2024: 1000 * (i + 1) });
   ctx.window._compCycles = new Map([["d", many]]);
-  const groups = [{ lobbyist: null, tier: { label: "", why: "" },
-                    rows: [{ donor: "d", type: "Donor Target", target: 0, given: 0, cycles: {}, contacts: [], attribution: null, also: [] }] }];
+  const groups = [{ lobbyist: null, tier: { label: "", why: "" }, partner: false,
+                    rows: [{ donor: "d", donor_key: "d", type: "Donor Target", target: 0, given: 0,
+                             cycles: {}, contacts: [], attribution: null, also: [] }] }];
   const { comps } = ctx.planCycleColumns(groups, 2026);
   assert.deepEqual(comps, ["F7", "F6", "F5", "F4", "F3"]);
 });
