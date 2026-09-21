@@ -296,3 +296,23 @@ test('Donor Lookup uses original committee names when canonical names are blank'
   for (const name of ['Friends of Tina Kotek', 'Committee to Elect Lucetta Elmer', 'Friends of Julie Fahey', 'Committee 99']) assert.ok(html.includes(name));
   assert.ok(!html.includes('Raw name'));
 });
+
+test('Top Recipients never renders a blank linked or unlinked committee label', () => {
+  const code = fs.readFileSync(path.join(root, 'docs/donors.js'), 'utf8');
+  const tbody = { innerHTML: '' };
+  const ctx = vm.createContext({
+    $: () => ({ querySelector: () => tbody, querySelectorAll: () => [] }),
+    esc: s => String(s).replaceAll('<', '&lt;'), fmtN: String, fmt$: String,
+  });
+  vm.runInContext(code.slice(code.indexOf('function renderRecipients('), code.indexOf('async function loadTxns(')), ctx);
+  ctx.renderRecipients([
+    { filer: null, filer_id: '4792', slug: 'friends_of_tina_kotek', n: 2, total: 22500 },
+    { filer: '  ', filer_id: '20136', n: 1, total: 2500 },
+    { filer: null, n: 1, total: 500 },
+    { filer: '<Named Committee>', n: 1, total: 500 },
+  ]);
+  assert.match(tbody.innerHTML, />Committee 4792<\/a>/);
+  assert.match(tbody.innerHTML, /Committee 20136/);
+  assert.match(tbody.innerHTML, /Committee name unavailable/);
+  assert.match(tbody.innerHTML, /&lt;Named Committee>/);
+});
