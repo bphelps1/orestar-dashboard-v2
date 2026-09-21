@@ -111,3 +111,15 @@ test('merge detection reads only the requested scope and shares concurrent check
  await assert.rejects(ctx.identity.affectsFilers(['1']),/timeout/);
  assert.equal(await ctx.identity.affectsFilers(['1']),true);assert.equal(attempts,2);
  });
+
+test('ID-bearing chart donors do not load name-only identity labels',async()=>{
+ const {id,reads}=identityHarness();
+ const out=await id.rekeyBlob({by_year:{2026:[{top_donors:[{donor_id:'b',name:'Old Acme',total:100},{donor_id:'a',name:'Acme',total:200}]}]}});
+ assert.equal(out.by_year[2026][0].top_donors[0].total,300);
+ assert.equal(reads.includes('donor_identity_labels'),false);
+});
+test('empty chart data does not load label identities',async()=>{
+ const {id,reads}=identityHarness();
+ await id.rekeyBlob({by_year:{},top_donors:[]});
+ assert.equal(reads.includes('donor_identity_labels'),false);
+});

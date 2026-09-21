@@ -2114,12 +2114,7 @@ function initCyclePresets(dateStartEl, dateEndEl, updateClearBtn) {
 // ── Overview ──────────────────────────────────────────────────────────────────
 
 async function loadOverview() {
-  if (!summaryData) {
-    [summaryData, byTypeDataGlobal] = await Promise.all([
-      DL.getBlob("summary"),
-      DL.getBlob("by_contributor_type"),
-    ]);
-  }
+  if (!summaryData) summaryData = await DL.getBlob("summary");
   if (!timelineData) {
     timelineData = await DL.getBlob("timeline");
   }
@@ -2136,6 +2131,9 @@ async function loadOverview() {
   const n = state.selectedFilers.length;
 
   if (n === 0) {
+    // Selected candidates use their own profiles. Statewide chart labels
+    // must not block opening an individual or multi-committee overview.
+    if (!byTypeDataGlobal) byTypeDataGlobal = await DL.getBlob("by_contributor_type");
     setOverviewTiles("statewide");
     renderOverviewGlobal();
     await loadTimeline();

@@ -13,7 +13,7 @@ const ID = (() => {
       const { data, error } = await sb.from(table).select('*').order(
         table === 'donor_identity_map' ? 'donor_id' : table === 'donor_identity_labels' ? 'label' : 'filer_id'
       ).range(start, start + 999);
-      if (error) throw new Error(`Could not read saved donor merges: ${error.message}`);
+      if (error) throw new Error(`Could not read saved donor merges (${table}): ${error.message}`);
       rows.push(...data);
       if (data.length < 1000) return rows;
     }
@@ -47,9 +47,19 @@ const ID = (() => {
   async function rekeyBlob(blob) {
     const map = await loadMap();
     if (!map.size) return blob;
-    if (!labels) labels = readAll('donor_identity_labels').then(rows => new Map(rows.map(r => [r.label, r])))
-      .catch(error => { labels = null; throw error; });
-    const names = await labels;
+    function needsLabels(value, key) {
+      if (Array.isArray(value)) return key === 'top_donors'
+        ? value.some(item => !item.donor_id && !item.donor_key)
+        : value.some(item => needsLabels(item));
+      return value && typeof value === 'object'
+        ? Object.entries(value).some(([k,v]) => needsLabels(v,k)) : false;
+    }
+    let names = new Map();
+    if (needsLabels(blob)) {
+      if (!labels) labels = readAll('donor_identity_labels').then(rows => new Map(rows.map(r => [r.label, r])))
+        .catch(error => { labels = null; throw error; });
+      names = await labels;
+    }
     function rows(items) {
       const out = new Map();
       for (const item of items) {
