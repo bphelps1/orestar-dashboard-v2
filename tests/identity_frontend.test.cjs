@@ -11,10 +11,10 @@ function identityHarness(overrides = {}) {
  const tables = {
   donor_identity_map: [{donor_id:'a',canonical_id:'a',canonical_name:'Acme'}, {donor_id:'b',canonical_id:'a',canonical_name:'Acme'}],
   donor_identity_labels: [{label:'old acme',canonical_id:'a',canonical_name:'Acme'}],
-  donor_merge_filers: [{filer_id:'1'}], ...overrides,
+  transactions: [{filer_id:'1',donor_id:'b'}], ...overrides,
  };
  const reads=[];
- const ctx=vm.createContext({getSupabase:async()=>({from:table=>({select(){return this;},order(){return this;},in(col,values){this.col=col;this.values=values;return this;},async limit(n){reads.push({table,scope:this.values,limit:n});return {data:tables[table].filter(r=>this.values.includes(r[this.col])).slice(0,n)};},async range(start,end){reads.push(table);return {data:tables[table].slice(start,end+1)};}})})});
+ const ctx=vm.createContext({getSupabase:async()=>({from:table=>({select(){return this;},order(){return this;},in(col,values){(this.filters ||= {})[col]=values;return this;},async limit(n){reads.push({table,filters:this.filters,limit:n});return {data:tables[table].filter(r=>Object.entries(this.filters).every(([col,values])=>values.includes(r[col]))).slice(0,n)};},async range(start,end){reads.push(table);return {data:tables[table].slice(start,end+1)};}})})});
  vm.runInContext(read('docs/lib/identity.js')+'\nthis.identity=ID;',ctx);
  return {ctx,id:ctx.identity,reads};
 }
@@ -87,10 +87,26 @@ test('label attribution follows an old pool ID to the canonical merged ID',async
 });
 
 test('merge detection reads only the requested scope and shares concurrent checks',async()=>{
- const {id,reads}=identityHarness({donor_merge_filers:Array.from({length:7000},(_,i)=>({filer_id:String(i)}))});
+ const {id,reads}=identityHarness({transactions:Array.from({length:7000},(_,i)=>({filer_id:String(i),donor_id:'b'}))});
  assert.deepEqual(await Promise.all([id.affectsFilers(['18661','1']),id.affectsFilers(['1','18661'])]),[true,true]);
  assert.equal(reads.filter(r=>r==='donor_merge_filers').length,0);
- const scoped=reads.filter(r=>r.table==='donor_merge_filers');
- assert.equal(scoped.length,1);assert.deepEqual(plain(scoped[0].scope),['1','18661']);assert.equal(scoped[0].limit,1);
+ const scoped=reads.filter(r=>r.table==='transactions');
+ assert.equal(scoped.length,1);assert.deepEqual(plain(scoped[0].filters.filer_id),['1','18661']);assert.equal(scoped[0].limit,1);
  assert.equal(await id.affectsFilers([]),false);
 });
+
+ test('merge probes cover later member batches and ignore unrelated transactions',async()=>{
+ const rows=Array.from({length:205},(_,i)=>({donor_id:String(i),canonical_id:'0'}));
+ const {id,reads}=identityHarness({donor_identity_map:rows,transactions:[{filer_id:'1',donor_id:'204'},{filer_id:'2',donor_id:'unrelated'}]});
+ assert.equal(await id.affectsFilers([' 1 ']),true);
+ assert.equal(await id.affectsFilers(['2']),false);
+ assert.equal(reads.filter(r=>r.table==='transactions').length,6);
+ assert.ok(reads.filter(r=>r.table==='transactions').every(r=>r.filters.donor_id.length<=100));
+ });
+ test('failed merge probes are retried and never cached as unaffected',async()=>{
+ let attempts=0;
+ const ctx=vm.createContext({getSupabase:async()=>({from:table=>({select(){return this},order(){return this},in(){return this},range:async()=>({data:[{donor_id:'a',canonical_id:'a'}]}),limit:async()=>++attempts===1?{error:{message:'timeout'}}:{data:[{filer_id:'1'}]}})})});
+ vm.runInContext(read('docs/lib/identity.js')+'\nthis.identity=ID;',ctx);
+ await assert.rejects(ctx.identity.affectsFilers(['1']),/timeout/);
+ assert.equal(await ctx.identity.affectsFilers(['1']),true);assert.equal(attempts,2);
+ });

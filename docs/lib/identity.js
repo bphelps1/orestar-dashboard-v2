@@ -25,17 +25,22 @@ const ID = (() => {
   }
   async function hasMerges() { return (await loadMap()).size > 0; }
   async function affectsFilers(ids) {
-    const scope = [...new Set(ids.filter(id => id != null && String(id).trim()).map(String))].sort();
+    const scope = [...new Set(ids.filter(id => id != null && String(id).trim()).map(id => String(id).trim()))].sort();
     if (!scope.length || !await hasMerges()) return false;
     const key = JSON.stringify(scope);
     if (!filerChecks.has(key)) filerChecks.set(key, (async () => {
       const sb = await getSupabase();
-      // Ask only about this committee scope. Paging the statewide distinct
-      // view repeats its full transaction scan for every 1,000-row page.
-      const { data, error } = await sb.from('donor_merge_filers').select('filer_id')
-        .in('filer_id', scope).limit(1);
-      if (error) throw new Error(`Could not check saved donor merges: ${error.message}`);
-      return data.length > 0;
+      // The map is already loaded. Joining its recursive view to transactions
+      // can choose an expensive plan even with a filer filter and LIMIT 1.
+      // Probe indexed transactions using the known member IDs instead.
+      const members = [...(await loadMap()).keys()];
+      for (let start = 0; start < members.length; start += 100) {
+        const { data, error } = await sb.from('transactions').select('filer_id')
+          .in('filer_id', scope).in('donor_id', members.slice(start, start + 100)).limit(1);
+        if (error) throw new Error(`Could not check saved donor merges: ${error.message}`);
+        if (data.length) return true;
+      }
+      return false;
     })().catch(error => { filerChecks.delete(key); throw error; }));
     return filerChecks.get(key);
   }
