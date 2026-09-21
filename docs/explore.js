@@ -34,6 +34,7 @@ let page = 0;
 let sortCol = "tran_date";
 let sortDir = false; // false = descending
 let lastPageCount = 0;
+let searchRequest = 0;
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -72,6 +73,35 @@ function applyFilters(q, f) {
   return q;
 }
 
+const nonblank = value => String(value ?? "").trim();
+
+/** Preserve source columns, but never let an absent derived label hide a recorded name. */
+function transactionNames(row, donor = null) {
+  const selectedName = donor && String(row.donor_id) === String(donor.donor_id)
+    ? nonblank(donor.display_name) : "";
+  const payee = nonblank(row.contributor_payee_canonical) || selectedName
+    || nonblank(row.contributor_payee) || "Not reported";
+  return { ...row,
+    filer_canonical: nonblank(row.filer_canonical) || nonblank(row.filer)
+      || (nonblank(row.filer_id) ? `Committee ${row.filer_id}` : "Not reported"),
+    contributor_payee_canonical: typeof DN === "undefined" ? payee : DN.display(payee),
+  };
+}
+
+/** The browse RPC omits source names. Fetch only incomplete rows by primary key. */
+async function completeTransactionNames(sb, rows, donor) {
+  const missing = rows.filter(r => !nonblank(r.filer_canonical) || !nonblank(r.contributor_payee_canonical));
+  let sources = new Map();
+  if (missing.length) {
+    const { data, error } = await sb.from("transactions")
+      .select("tran_id,filer,filer_id,contributor_payee,donor_id")
+      .in("tran_id", missing.map(r => r.tran_id));
+    if (error) throw new Error(`Could not load transaction names: ${error.message}`);
+    sources = new Map((data || []).map(r => [String(r.tran_id), r]));
+  }
+  return rows.map(row => transactionNames({ ...sources.get(String(row.tran_id)), ...row }, donor));
+}
+
 function showError(el, msg) {
   const box = $(el);
   if (!msg) { box.hidden = true; box.textContent = ""; return; }
@@ -81,6 +111,8 @@ function showError(el, msg) {
 
 // ── Browse ──────────────────────────────────────────────────────────────────
 async function runSearch() {
+  const request = ++searchRequest;
+  const donor = selectedDonor;
   showError("xp-error", "");
   $("xp-status").textContent = "Loading…";
   try {
@@ -110,8 +142,11 @@ async function runSearch() {
       p_limit: PAGE_SIZE, p_offset: page * PAGE_SIZE,
     });
     if (error) throw new Error(error.message);
+    if (typeof DN !== "undefined") await DN.load();
+    const namedRows = await completeTransactionNames(sb, data, donor);
+    if (request !== searchRequest) return;
     lastPageCount = data.length;
-    renderTable(data);
+    renderTable(namedRows);
     $("xp-status").textContent = data.length
       ? `Showing ${page * PAGE_SIZE + 1}–${page * PAGE_SIZE + data.length}`
       : "No matching transactions";
@@ -119,6 +154,7 @@ async function runSearch() {
     $("pg-next").disabled = data.length < PAGE_SIZE;
     $("pg-label").textContent = `Page ${page + 1}`;
   } catch (e) {
+    if (request !== searchRequest) return;
     $("xp-status").textContent = "";
     // A very broad term ("oregon" matches 124k rows) can still exceed the
     // server's statement timeout: sorting that many rows by date is expensive
@@ -165,6 +201,8 @@ async function downloadFiltered() {
   try {
     const sb = await getSupabase();
     const filters = readFilters();
+    const donor = selectedDonor;
+    if (typeof DN !== "undefined") await DN.load();
     let rows = [];
     let truncated = false;
 
@@ -175,7 +213,7 @@ async function downloadFiltered() {
         .order("tran_id", { ascending: true })
         .range(offset, offset + DOWNLOAD_CHUNK - 1);
       if (error) throw new Error(error.message);
-      rows = rows.concat(data);
+      rows = rows.concat(data.map(row => transactionNames(row, donor)));
       if (data.length < DOWNLOAD_CHUNK) break;
       if (rows.length >= DOWNLOAD_MAX_ROWS) { truncated = true; break; }
     }
