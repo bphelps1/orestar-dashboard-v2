@@ -122,8 +122,8 @@ const LOB = (() => {
       if (!idsByKey.has(key)) idsByKey.set(key, new Set());
     }
     if (unresolved.size) {
-      for (const [label, id] of await _poolIdsForLabels([...unresolved.keys()])) {
-        add(unresolved.get(label), id);
+      for (const [label, ids] of await _poolIdsForLabels([...unresolved.keys()])) {
+        for (const id of ids) add(unresolved.get(label), id);
       }
     }
 
@@ -225,19 +225,31 @@ const LOB = (() => {
     return out;
   }
 
-  /** Pool ids for labels we have no donor_id for: Map<labelKey, donor_id>. */
-  async function _poolIdsForLabels(keys) {
-    const sb = await getSupabase();
+  /** Prefer canonical matches over overlapping aliases. A name-only fallback
+   * must never pick an arbitrary donor (OBRC also occurs in Beverage PAC's
+   * raw aliases). Multiple exact canonical records are the same named org;
+   * ambiguous alias-only matches are left unattributed for review.
+   */
+  function poolIdsForLabels(rows, keys) {
     const out = new Map();
-    const wanted = new Set(keys);
-    for (let i = 0; i < keys.length; i += 80) {
-      const part = keys.slice(i, i + 80);
-      for (const r of await fetchAll(() => sb.from("lobby_donor_pool")
-          .select("donor_id,names").overlaps("names", pgArray(part)))) {
-        for (const n of r.names || []) if (wanted.has(n) && !out.has(n)) out.set(n, r.donor_id);
-      }
+    for (const key of keys) {
+      const matches = rows.filter(r => (r.names || []).some(n => labelKey(n) === key));
+      const exact = matches.filter(r => labelKey(r.display_name) === key);
+      const ids = [...new Set((exact.length ? exact : matches).map(r => r.donor_id))];
+      if (exact.length || ids.length === 1) out.set(key, ids);
     }
     return out;
+  }
+
+  async function _poolIdsForLabels(keys) {
+    const sb = await getSupabase();
+    const rows = [];
+    for (let i = 0; i < keys.length; i += 80) {
+      const part = keys.slice(i, i + 80);
+      rows.push(...await fetchAll(() => sb.from("lobby_donor_pool")
+        .select("donor_id,display_name,names").overlaps("names", pgArray(part))));
+    }
+    return poolIdsForLabels(rows, keys);
   }
 
   /**
@@ -261,10 +273,11 @@ const LOB = (() => {
         .select("donor_id,display_name,names").overlaps("names", pgArray(part))));
     }
     const donorToLabels = new Map();
-    const wanted = new Set(keys);
-    for (const r of poolRows) {
-      const hits = (r.names || []).filter(n => wanted.has(n));
-      if (hits.length) donorToLabels.set(r.donor_id, hits);
+    for (const [label, ids] of poolIdsForLabels(poolRows, keys)) {
+      for (const id of ids) {
+        if (!donorToLabels.has(id)) donorToLabels.set(id, []);
+        donorToLabels.get(id).push(label);
+      }
     }
     const donorIds = new Map();
     for (const [donorId, hits] of donorToLabels) {
@@ -319,5 +332,5 @@ const LOB = (() => {
 
   return { fetchAll, fetchIn, normOrg, labelKey, pgArray, loadLobbyists, loadClients,
            loadPartners, loadDonorContacts, loadBookTypes, loadBookTypesByName,
-           planAttribution, attributionForLabels, describeMethod };
+           planAttribution, attributionForLabels, describeMethod, poolIdsForLabels };
 })();

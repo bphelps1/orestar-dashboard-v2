@@ -198,14 +198,14 @@ function renderRecipients(rows) {
 async function loadTxns() {
   const sb = await getSupabase();
   const { data, error } = await sb.from("transactions")
-    .select("tran_date, tran_type, amount, filer_canonical, purpose")
+    .select("tran_date, tran_type, amount, filer_canonical, filer, filer_id, purpose")
     .eq("donor_id", currentDonor.donor_id)
     .order("tran_date", { ascending: false, nullsFirst: false })
     .range(txnPage * PAGE, txnPage * PAGE + PAGE - 1);
   if (error) { console.warn(error.message); return; }
   $("dn-txns").querySelector("tbody").innerHTML = (data || []).map(r => `
     <tr><td>${esc(r.tran_date || "")}</td><td>${esc(r.tran_type)}</td>
-    <td class="num">${fmt$(r.amount)}</td><td>${esc(r.filer_canonical || "")}</td>
+    <td class="num">${fmt$(r.amount)}</td><td>${esc(r.filer_canonical?.trim() || r.filer?.trim() || (r.filer_id ? `Committee ${r.filer_id}` : "Committee name unavailable"))}</td>
     <td>${esc(r.purpose || "")}</td></tr>`).join("");
   $("dn-prev").disabled = txnPage === 0;
   $("dn-next").disabled = (data || []).length < PAGE;

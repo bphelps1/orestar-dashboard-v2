@@ -20,9 +20,10 @@ who already gave to a *comparable* committee.
                                                   in seats as close as this one
 ```
 
-Two lists come out: **Donor Targets** (people who already gave to this
-committee and could give more) and **New Donor Prospects** (people who gave to
-comparables but not to this committee).
+**Donor Targets** includes both prior donors and first-time prospects.
+**New Donor Prospects** remains a separate view of the first-time subset.
+Lobbyist Plan uses the same recommendations, restricted to organizations.
+The Donor Targets export includes both groups as well.
 
 ---
 
@@ -71,7 +72,7 @@ Each donor starts at 0, accumulates the factors below, and is clamped to
 | 7 | **One-time donor** (1 committee, 1 year) | **−5** | |
 | 8 | **Single-cycle donor** — all giving inside one election cycle | **−25** | the largest penalty: a donor who appeared once is weak evidence of habit |
 
-Prospects whose computed ask lands **below $1,000** are dropped from the list.
+Prospects whose computed ask lands **below $500** are dropped from the list.
 
 ---
 
@@ -86,6 +87,24 @@ base  = midpoint(median, 75th percentile) of peers   ← all their giving if
                                                        too few peer gifts
 ask   = min(base, largest single gift)   ← never above what they have ever given
 ```
+
+### First-time asks
+
+For someone who has never given to the selected candidate, the ask is the
+smaller of (a) the median first observed cash contribution to comparable
+candidates and (b) **50% of the established-giving benchmark** above. The 50%
+cap is an explicit conservative policy for a new relationship, not an
+empirically fitted coefficient. It can be tuned independently of seat matching.
+The same seat-margin selection applies when there are at least three first
+gifts to nearby seats. One observation per recipient is used, and future
+contributions are excluded.
+
+Migration `019_recommendation_first_gifts.sql` supplies actual first observed
+positive cash transactions, excluding in-kind contributions. If that endpoint
+is unavailable, the engine uses earliest observed **annual totals** and says
+so in the calculation details. Neither source proves a first-ever gift outside
+our dataset. Details are also included in the workbook. The prospect floor is
+$500 so the introductory reduction does not retain the old $1,000 cutoff.
 
 ### Competitiveness is a benchmark, not a multiplier
 
@@ -202,6 +221,14 @@ found is kept: dropping a real PAC is worse than listing one person.
 
 ### One donor, however it is spelled
 
+If a cached profile has name-only rows, Recommend reloads its scoped donor
+history through `donor_leaderboard` before scoring. That prevents a raw-label
+cache rebuild from splitting repeat donors and export history. The explicitly
+confirmed Amazon/Amazon.com/Services and Genentech/Genentech USA families share
+one planning ask, including all member identities' contact evidence and giving
+history; their legal entities and transactions remain separate. Other recorded
+entity merges flow through the resolver's identity keys.
+
 Everything here keys on the **donor's identity** (`donor_key`, the resolver's
 id), never on the label. ORESTAR records the same company under many spellings
 — "FamilyCare", "FamilyCare, Inc", "Familycare, Inc." — and a merge recorded at
@@ -215,6 +242,19 @@ transaction labels: a committee files as "Oregon Health Care Association PAC
 donors — $62.9M of giving, including most of the large PACs — showed "no
 lobbyist on file"** despite being attributed and confirmed. The pool now stores
 the resolved name alongside the raw labels, and the plan asks by id first.
+
+Name-only attribution prefers an exact canonical name over another donor's
+raw alias. Ambiguous alias-only matches are left unattributed. This matters for
+OBRC: the pool also contains its name under Oregon Beverage PAC (126), whose
+lobbyists are Romain and Freese. Taking the first pool hit attributed the wrong
+organization. The canonical OBRC records lead to Thorn Run and Dan Bates.
+
+Display labels normalize whitespace, all-upper/all-lower labels, common
+acronyms, and Cooperative's casing without using spelling changes as identity
+merges.
+
+Lobbyist Plan groups start collapsed with an accessible expand button. The
+Excel Call list starts expanded, retaining outline controls for collapsing.
 
 ### The Excel export
 
@@ -330,8 +370,8 @@ next sweep finished.
 - **No donor invented from nothing** — every suggestion has a giving history
   with a comparable committee.
 - **No ask above a donor's largest observed gift.**
-- **No ask scaled by a coefficient** — competitiveness selects which of a
-  donor's gifts count, and the gifts set the number.
+- **No competitiveness multiplier** — seat matching selects the evidence.
+  First-time asks have the explicit 50% introductory cap described above.
 - **No primary-margin influence**, by design.
 
 ## Tuning it
@@ -344,9 +384,18 @@ next sweep finished.
 | Peer-margin windows and the 3-gift minimum | `PEER_WINDOWS` / `MIN_PEER_GIFTS` |
 | Lobbyist tier thresholds and weights | `TIER_RULES` / `lobbyistTier()` |
 | The export's sheets and columns | `planSheetAoa()` / `lobbyistSheetRows()` |
-| $1,000 prospect floor | end of `scoreDonors()` |
+| $500 prospect floor | end of `scoreDonors()` |
 | Exclude or flag a committee | `/admin` tags (`exclude`, `prolific`) |
 | Lobbyist attribution | `/admin/lobbyists`; matching rules in `scraper/match_lobbyists.py` |
 
 All weights are plain constants — there is no trained model and no hidden
 state, so a change here is fully predictable in the output.
+
+## Entity merge admin
+
+Entity A is the destination group. Entity B supports multiple selections across
+searches in a scrollable list (up to 50 matches; refine the search for more).
+Selected entities remain visible and individually removable. One atomic upsert
+records all pairs, with each human label attached to its sorted alias key.
+A failed save retains the selection; duplicate submissions and self merges are
+blocked. Decisions take effect on the next resolver run, as before.

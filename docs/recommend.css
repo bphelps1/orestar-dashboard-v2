@@ -564,3 +564,6 @@
 }
 .lob-also { font-size: 0.75rem; color: var(--color-text-muted); cursor: help; }
 .lob-none, .lob-pending { color: var(--color-text-light); }
+
+.plan-group-toggle { border: 1px solid #cbd5e0; border-radius: 4px; padding: 5px 8px; background: white; color: inherit; cursor: pointer; white-space: nowrap; }
+.plan-donor[hidden] { display: none; }

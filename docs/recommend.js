@@ -211,6 +211,73 @@ async function loadFilerProfile(slug) {
   return filerCache[slug];
 }
 
+async function loadRecommendationIdentities(profiles, filers) {
+  const pending = profiles.map((profile, i) => ({ profile, filer: filers[i] })).filter(({ profile }) =>
+    Object.values(profile.top_donors_by_year || {}).some(rows => rows.some(d => !d.donor_key)));
+  await Promise.all(Array.from({ length: Math.min(4, pending.length) }, async () => {
+    while (pending.length) {
+      const { profile, filer } = pending.shift();
+      const ids = profile.filer_ids?.length ? profile.filer_ids : [filer.filer_id];
+      const data = await DL.getDonors({ filerIds: ids });
+      profile.top_donors_by_year = data.by_year || {};
+      profile.top_donors = data.all_time || [];
+    }
+  }));
+}
+
+async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
+  window._firstGifts = null;
+  window._planIdentityIds = new Map();
+  const keysById = new Map();
+  for (const profile of profiles) for (const rows of Object.values(profile.top_donors_by_year || {})) {
+    for (const d of rows) if (d.donor_id) {
+      const key = donorKey(d);
+      if (!window._planIdentityIds.has(key)) window._planIdentityIds.set(key, new Set());
+      window._planIdentityIds.get(key).add(d.donor_id);
+      keysById.set(d.donor_id, key);
+    }
+  }
+  const filers = new Map();
+  comparables.forEach((c, i) => {
+    if (c.committee_type && c.committee_type !== "Candidate Committee") return;
+    const ids = compProfiles[i].filer_ids?.length ? compProfiles[i].filer_ids : [c.filer_id];
+    ids.filter(Boolean).forEach(id => filers.set(String(id), c));
+  });
+  try {
+    const sb = await getSupabase();
+    const earliest = new Map();
+    const existing = new Set(Object.values(profiles[0].top_donors_by_year || {}).flat().map(donorKey));
+    const breadth = new Map();
+    for (const profile of compProfiles) {
+      const keys = new Set(cycleYears(cycle).flatMap(year => profile.top_donors_by_year?.[year] || []).map(donorKey));
+      for (const key of keys) breadth.set(key, (breadth.get(key) || 0) + 1);
+    }
+    const ids = [...keysById.keys()].filter(id => !existing.has(keysById.get(id)) && breadth.get(keysById.get(id)) > 1);
+    for (let i = 0; i < ids.length; i += 150) {
+      const data = await LOB.fetchAll(() => sb.rpc("recommendation_first_gifts", {
+        p_donor_ids: ids.slice(i, i + 150), p_filer_ids: [...filers.keys()], p_through: `${cycle}-12-31`,
+      }));
+      for (const r of data || []) {
+        const key = keysById.get(r.donor_id), comp = filers.get(String(r.filer_id));
+        if (!comp) continue;
+        const pair = `${key}|${comp.slug}`;
+        const prior = earliest.get(pair);
+        if (!prior || r.first_date < prior.first_date || (r.first_date === prior.first_date && Number(r.amount) < prior.amount)) {
+          earliest.set(pair, { key, first_date: r.first_date, amount: Number(r.amount),
+            filer: comp.name, marginPts: comp.seat?.margin_pts ?? null });
+        }
+      }
+    }
+    window._firstGifts = new Map();
+    for (const gift of earliest.values()) {
+      if (!window._firstGifts.has(gift.key)) window._firstGifts.set(gift.key, []);
+      window._firstGifts.get(gift.key).push(gift);
+    }
+  } catch (error) {
+    console.warn("First-contribution lookup unavailable; using explicitly labeled annual proxy:", error.message);
+  }
+}
+
 // ── Status helpers ─────────────────────────────────────────────────────────
 function showStatus(msg, type) {
   const el = document.getElementById("status-msg");
@@ -261,6 +328,13 @@ async function runRecommendations() {
     const compProfiles = await Promise.all(
       comparables.map(c => loadFilerProfile(c.slug))
     );
+
+    // Cached profiles may be rebuilt from raw labels between resolver runs.
+    // Repair missing identities from the same scoped donor query as Donor Lookup
+    // before scoring, classifying repeat donors, or building export history.
+    await loadRecommendationIdentities([targetProfile, ...compProfiles], [filer, ...comparables]);
+
+    await loadFirstGifts([targetProfile, ...compProfiles], comparables, compProfiles, cycle);
 
     // 4. Build repeat donor targets (existing donors to THIS filer)
     showStatus("Analyzing repeat donors…", "loading");
@@ -656,7 +730,64 @@ function yearToCycle(yr) { return yr % 2 === 0 ? yr : yr + 1; }
  * splits one donor into several and loses whatever the admin merged, so
  * everything here keys on donor_key and only shows the name.
  */
+// User-confirmed corporate families for one fundraising ask. This does not
+// merge the underlying legal entities or their transaction records.
+const PLAN_DONOR_FAMILIES = new Map([
+  ["amazon", "Amazon"], ["amazon com", "Amazon"],
+  ["amazon services", "Amazon"], ["amazon com services", "Amazon"],
+  ["genentech", "Genentech"], ["genentech usa", "Genentech"],
+]);
+function planDonorFamily(name) {
+  const core = String(name || "").toLowerCase().replace(/[.,]/g, " ")
+    .replace(/\b(?:incorporated|inc|llc|corporation|corp)\b/g, " ")
+    .replace(/\s+/g, " ").trim();
+  return PLAN_DONOR_FAMILIES.get(core) || null;
+}
+
+function donorDisplayName(name) {
+  let label = (planDonorFamily(name) || String(name || "")).trim().replace(/\s+/g, " ");
+  const acronyms = new Set(["PAC", "LLC", "USA", "IBM", "AT&T", "SEIU", "AFSCME", "AFT", "UFCW", "OBRC", "NW"]);
+  if (label === label.toUpperCase() || label === label.toLowerCase()) {
+    label = label.replace(/[A-Za-z]+/g, word => acronyms.has(word.toUpperCase())
+      ? word.toUpperCase() : word[0].toUpperCase() + word.slice(1).toLowerCase());
+  }
+  return label
+    .replace(/cooperative/gi, "Cooperative")
+    .replace(/amazon\.com/gi, "Amazon.com")
+    .replace(/\b(pac|llc|usa)\b/gi, word => word.toUpperCase());
+}
+
+/** Earliest observed annual giving is a proxy, not a claimed first transaction.
+ * Use one observation per comparable recipient, excluding future years.
+ */
+function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
+  const actual = window._firstGifts?.get(key);
+  if (actual?.length) {
+    const peers = peerMarginGifts(actual, seat?.margin_pts ?? null);
+    const sample = peers?.gifts || actual;
+    return { amount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length, actual: true };
+  }
+  const gifts = [];
+  profiles.forEach((profile, i) => {
+    if (comparables[i].committee_type && comparables[i].committee_type !== "Candidate Committee") return;
+    const years = Object.keys(profile.top_donors_by_year || {}).map(Number).filter(y => y <= cycle).sort((a,b) => a-b);
+    for (const year of years) {
+      const amount = (profile.top_donors_by_year[year] || []).filter(d => donorKey(d) === key)
+        .reduce((sum, d) => sum + Number(d.total || 0), 0);
+      if (amount > 0) {
+        gifts.push({ amount, filer: comparables[i].name, marginPts: comparables[i].seat?.margin_pts ?? null, year });
+        break;
+      }
+    }
+  });
+  const peer = peerMarginGifts(gifts, seat?.margin_pts ?? null);
+  const sample = peer?.gifts || gifts;
+  return { amount: percentile(sample.map(g => g.amount).sort((a,b) => a-b), 0.5), n: sample.length };
+}
+
 function donorKey(d) {
+  const family = planDonorFamily(d.name || d.donor);
+  if (family) return `family:${family.toLowerCase()}`;
   return d.donor_key || d.donor_id || `name:${String(d.name || "").trim().toLowerCase()}`;
 }
 
@@ -717,7 +848,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     for (const d of donors) {
       const key = donorKey(d);
       if (!donorHistory.has(key)) {
-        donorHistory.set(key, { name: d.name, donor_id: d.donor_id || null, cycles: {}, totalGifts: 0 });
+        donorHistory.set(key, { name: donorDisplayName(d.name), donor_id: d.donor_id || null, cycles: {}, totalGifts: 0 });
       }
       const entry = donorHistory.get(key);
       entry.cycles[cy] = (entry.cycles[cy] || 0) + d.total;
@@ -966,7 +1097,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       const key = donorKey(d);
       if (!donorMap.has(key)) {
         donorMap.set(key, {
-          name: d.name,
+          name: donorDisplayName(d.name),
           donor_id: d.donor_id || null,
           compGifts: [],
           totalToComps: 0,
@@ -1058,6 +1189,10 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     const maxGift = Math.max(...compAmounts);
     let targetAsk = Math.min(Math.round(((median + p75) / 2) * 100) / 100, maxGift);
 
+    const firstGiving = firstGivingBenchmark(key, compProfiles, comparables, cycle, targetSeat);
+    // A new relationship should not start at an established donor's ask.
+    // Annual aggregates cannot identify a single first gift: label that limit.
+    targetAsk = Math.round(Math.min(targetAsk * 0.5, firstGiving.amount || targetAsk * 0.5) * 100) / 100;
     const remainingAsk = Math.max(0, targetAsk - alreadyGiven);
 
     // Comparable giving range
@@ -1067,6 +1202,11 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
     // ── Explainable score components ──────────────────────────────────
     let score = 0;
     const factors = [];
+
+    factors.push(`First-time ask: ${fmt$(targetAsk)} — capped at 50% of the established-giving benchmark`);
+    if (firstGiving.n) factors.push(firstGiving.actual
+      ? `Median first observed cash contribution to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.amount)}`
+      : `Median earliest observed annual giving to ${firstGiving.n} comparable recipients: ${fmt$(firstGiving.amount)}; annual totals are a proxy, not individual first gifts`);
 
     // Show what the ask was measured against, so the number is traceable to
     // real gifts rather than to a rule.
@@ -1186,7 +1326,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
   }
 
   // Filter out prospects with target ask below $1,000
-  const filtered = results.filter(r => r.target_ask >= 1000).sort((a, b) => b.score - a.score);
+  const filtered = results.filter(r => r.target_ask >= 500).sort((a, b) => b.score - a.score);
   return { prospects: filtered, notRecommended };
 }
 
@@ -1264,7 +1404,7 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
   `;
 
   // Update tab badges with counts
-  document.querySelectorAll(".tab-btn[data-tab='tab-repeat'] .tab-badge").forEach(el => el.textContent = repeatTargets.length);
+  document.querySelectorAll(".tab-btn[data-tab='tab-repeat'] .tab-badge").forEach(el => el.textContent = repeatTargets.length + recommendations.length);
   document.querySelectorAll(".tab-btn[data-tab='tab-prospects'] .tab-badge").forEach(el => el.textContent = recommendations.length);
   document.querySelectorAll(".tab-btn[data-tab='tab-not-recommended'] .tab-badge").forEach(el => el.textContent = (allNotRecommended || []).length);
 
@@ -1289,7 +1429,7 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
   window._allNotRecommended = allNotRecommended || [];
 
   // Render repeat donors section
-  renderRepeatDonors(repeatTargets);
+  renderRepeatDonors(allDonorTargets());
 
   // Render new donor recommendations table
   renderRecTable(recommendations);
@@ -1431,12 +1571,19 @@ function lobbyistTier(rows, isPartner) {
   };
 }
 
+function allDonorTargets() {
+  return [...(window._repeatTargets || []), ...(window._recommendations || []).map(r => ({
+    ...r, target: r.target_ask, current_cycle_amt: r.already_given, remaining: r.remaining_ask,
+    last_cycle_amt: 0, prev_cycles: 0, consistency: "new", history: ["First-time prospect"], cycles: {},
+  }))];
+}
+
 function renderRepeatDonors(repeatTargets) {
   const container = document.getElementById("repeat-donors-section");
   if (!container) return;
 
   // Show/hide container based on whether original data exists
-  const allRepeat = window._repeatTargets || [];
+  const allRepeat = allDonorTargets();
   if (!allRepeat.length) {
     container.hidden = true;
     return;
@@ -1454,7 +1601,9 @@ function renderRepeatDonors(repeatTargets) {
   }
 
   tbody.innerHTML = repeatTargets.map((r, i) => {
-    const consistencyBadge = r.consistency === "high"
+    const consistencyBadge = r.consistency === "new"
+      ? '<span class="consistency-badge">New</span>'
+      : r.consistency === "high"
       ? '<span class="consistency-badge high">High</span>'
       : r.consistency === "medium"
       ? '<span class="consistency-badge medium">Med</span>'
@@ -1534,7 +1683,7 @@ function sortRows(rows, col, dir) {
 
 function renderFilteredRepeat() {
   const q = (document.getElementById("repeat-search").value || "").trim().toLowerCase();
-  let rows = window._repeatTargets || [];
+  let rows = allDonorTargets();
   if (q) rows = rows.filter(r => r.donor.toLowerCase().includes(q));
 
   const col = window._repeatSortCol || "target";
@@ -1697,11 +1846,11 @@ async function loadLobbyistPlan() {
   const runFiler = window._targetProfile;
   try {
     if (!lobbyistsById) {
-      lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, l]));
+      lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, { ...l, name: donorDisplayName(l.name) }]));
     }
     if (!partnersById) partnersById = await LOB.loadPartners();
     const rows = [...(window._repeatTargets || []), ...(window._recommendations || [])]
-      .map(r => ({ name: r.donor, donor_id: r.donor_id, key: r.donor_key }));
+      .flatMap(r => [...(window._planIdentityIds?.get(r.donor_key) || [r.donor_id])].map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
     const { byKey, contacts, bookTypes } = await LOB.planAttribution(rows, lobbyistsById);
     // A newer run may have started while this one was loading.
     if (window._cycle !== runCycle || window._targetProfile !== runFiler) return;
@@ -1779,12 +1928,12 @@ function planGroups() {
       donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
       type: "Donor Target", target: r.target, given: r.current_cycle_amt,
       remaining: r.remaining, last_cycle: r.last_cycle_amt, comp_max: r.comp_max || 0,
-      cycles: r.cycles || {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
+      factors: r.factors || [], cycles: r.cycles || {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
     ...(window._recommendations || []).map(r => ({
       donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
       type: "New Prospect", target: r.target_ask, given: r.already_given,
       remaining: r.remaining_ask, last_cycle: null, comp_max: r.comp_max,
-      cycles: {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
+      factors: r.factors || [], cycles: {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
   ];
   const groups = new Map();
   const none = { lobbyist: null, rows: [] };
@@ -1897,7 +2046,7 @@ function renderLobbyistPlan() {
     tbody.innerHTML = '<tr><td colspan="9" class="plan-empty">No donors match.</td></tr>';
     return;
   }
-  tbody.innerHTML = groups.map(g => {
+  tbody.innerHTML = groups.map((g, groupIndex) => {
     const l = g.lobbyist;
     const head = l
       ? lobbyistHeader(l)
@@ -1906,14 +2055,14 @@ function renderLobbyistPlan() {
     const header = `<tr class="plan-group">
       <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
       <td>${head}</td>
-      <td class="plan-count">${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}</td>
+      <td class="plan-count"><button type="button" class="plan-group-toggle" data-group="${groupIndex}" aria-expanded="false">▸ ${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}</button></td>
       <td class="num">${fmt$(g.target)}</td>
       <td class="num">${fmt$(g.given)}</td>
       <td class="num">${fmt$(g.remaining)}</td>
       <td></td><td></td>
       <td class="plan-why">${l ? esc(g.tier.why) : ""}</td>
     </tr>`;
-    const rows = g.rows.map(r => `<tr class="plan-donor">
+    const rows = g.rows.map(r => `<tr class="plan-donor" data-group="${groupIndex}" hidden>
       <td></td>
       <td>${esc(r.donor)}${contactsCell(r)}${r.also.length ? `<div class="plan-also">also: ${esc(r.also.map(a => a.lobbyist.name).join(", "))}</div>` : ""}</td>
       <td><span class="plan-type ${r.type === "Donor Target" ? "is-target" : "is-prospect"}">${r.type === "Donor Target" ? "Target" : "Prospect"}</span></td>
@@ -1928,6 +2077,12 @@ function renderLobbyistPlan() {
     </tr>`).join("");
     return header + rows;
   }).join("");
+  tbody.querySelectorAll(".plan-group-toggle").forEach(button => button.addEventListener("click", () => {
+    const open = button.getAttribute("aria-expanded") !== "true";
+    button.setAttribute("aria-expanded", String(open));
+    button.textContent = (open ? "▾" : "▸") + button.textContent.slice(1);
+    tbody.querySelectorAll(`.plan-donor[data-group="${button.dataset.group}"]`).forEach(row => { row.hidden = !open; });
+  }));
 }
 
 // ── Lobbyist plan export ───────────────────────────────────────────────────
@@ -2035,7 +2190,7 @@ function planSheetAoa(groups, cycle) {
     : "No general-election margin on record for this seat.";
   push(sub, "note");
   const method = blank();
-  method[0] = "Each ask is what that donor has given candidates in seats about as close as this one. "
+  method[0] = "Prior-donor asks use giving history and comparable seats. First-time asks use initial giving, capped at half the established benchmark. "
     + "The columns on the right show that giving.";
   push(method, "note");
   push(blank(), "blank");
@@ -2073,7 +2228,7 @@ function planSheetAoa(groups, cycle) {
       row[3] = r.type === "Donor Target" ? "Gave before" : "New prospect";
       const dc = donorContact(r);
       row[4] = dc.name; row[5] = dc.email; row[6] = dc.phone;
-      row[7] = plainAttribution(r.attribution);
+      row[7] = [plainAttribution(r.attribution), ...(r.factors || []).filter(f => /First-time ask|first observed|earliest observed/.test(f))].filter(Boolean).join(" · ");
       for (const b of bands) {
         b.cols.forEach((c, i) => {
           const at = b.start + i;
@@ -2184,6 +2339,7 @@ function lobbyistPlanExportRows() {
         "Last Cycle": r.last_cycle ?? "",
         "Comparable Max": r.comp_max || "",
         "Benchmark": r.benchmark ? `${r.benchmark.n} gifts to seats within ${r.benchmark.window} pts` : "all comparable giving",
+        "Ask calculation": (r.factors || []).join("; "),
         "Attribution": attributionText(r.attribution),
         "Also Lobbied By": r.also.map(a => a.lobbyist.name).join("; "),
       });
@@ -2209,10 +2365,12 @@ function methodSheetRows(groups, cycle) {
       rows.push({ Item: "  peer", Value: p.name, Detail: `${p.seat.margin_pts.toFixed(1)} pt margin · ${fmt$(p.total)} this cycle` });
     }
   }
-  rows.push({ Item: "Ask", Value: "benchmarked, not scaled",
+  rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
       + `Under ${MIN_PEER_GIFTS} such gifts, all comparable giving is used and the donor row says so.` });
+  rows.push({ Item: "First-time ask", Value: "lower introductory ask",
+    Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
   for (const t of TIER_RULES) {
     rows.push({ Item: t.label, Value: `score ≥ ${t.min === -Infinity ? "0" : t.min}`,
       Detail: "6 × donors in plan (max 30) + 2 × like candidates supported (max 30) + giving to them ÷ 5,000 (max 20) + 15 if they have given here before + 5 if they have given this cycle" });
@@ -2271,7 +2429,7 @@ function writeCallList(wb, groups, cycle) {
   const { rows, roles, merges, cols, moneyFrom, headerRows } = planSheetAoa(groups, cycle);
   const ws = wb.addWorksheet("Call list", {
     views: [{ state: "frozen", xSplit: 3, ySplit: headerRows }],
-    properties: { defaultRowHeight: 16 },
+    properties: { defaultRowHeight: 16, outlineLevelRow: 2, outlineProperties: { summaryBelow: false } },
   });
   rows.forEach(r => ws.addRow(r));
   ws.columns.forEach((col, i) => { col.width = cols[i]?.wch || 12; });
@@ -2303,6 +2461,7 @@ function writeCallList(wb, groups, cycle) {
       });
     } else if (role === "donor") {
       row.outlineLevel = 1;
+      row.hidden = false;
       row.getCell(3).alignment = { indent: 1 };
     }
     if (role === "donor" || role === "lobbyist" || role === "lobbyist-partner" || role === "total") {
@@ -2486,7 +2645,7 @@ function exportData(format, scope = "new") {
     exportRows = lobbyistPlanExportRows();
     fileLabel = "lobbyist_plan";
   } else if (scope === "repeat") {
-    exportRows = repeatRows;
+    exportRows = [...repeatRows, ...newRows];
     fileLabel = "donor_targets";
   } else if (scope === "new") {
     exportRows = newRows;

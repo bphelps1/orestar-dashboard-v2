@@ -146,7 +146,7 @@ test("the sheet is banded by cycle, with the candidate and its comparables", () 
   assert.match(String(rows[0][0]), /Friends of A — who to ask/);
   assert.match(String(rows[1][0]), /35\.5|3\.2 points/);
   const [cycleRow, nameRow, kindRow] = [rows[4], rows[5], rows[6]];
-  assert.deepEqual(cycleRow.filter(Boolean).slice(-3),
+  assert.deepEqual(Array.from(cycleRow.filter(Boolean).slice(-3)),
                    ["This cycle (2025–2026)", "2023–2024", "2021–2022"]);
   assert.equal(nameRow.filter(Boolean)[0], "Friends of A");
   assert.ok(nameRow.includes("Fahey"));
@@ -154,7 +154,7 @@ test("the sheet is banded by cycle, with the candidate and its comparables", () 
   assert.equal(merges.length, 3);          // one per cycle band
   // Roles drive the formatting, so every row must carry one.
   assert.equal(roles.length, rows.length);
-  assert.deepEqual(roles.slice(0, 8),
+  assert.deepEqual(Array.from(roles.slice(0, 8)),
     ["title", "note", "note", "blank", "head-band", "head-name", "head-kind", "total"]);
 });
 
@@ -214,5 +214,130 @@ test("only the five comparables this plan's donors gave most to get columns", ()
                     rows: [{ donor: "d", donor_key: "d", type: "Donor Target", target: 0, given: 0,
                              cycles: {}, contacts: [], attribution: null, also: [] }] }];
   const { comps } = ctx.planCycleColumns(groups, 2026);
-  assert.deepEqual(comps, ["F7", "F6", "F5", "F4", "F3"]);
+  assert.deepEqual(Array.from(comps), ["F7", "F6", "F5", "F4", "F3"]);
+});
+
+// ── First-time asks and shared identity ──────────────────────────────────
+function scoringContext(extra = {}) {
+  const ctx = context({ filerIndex: [], isDonorExcluded: () => false, ...extra });
+  vm.runInContext(slice('function _getAllYearGifts(', '// ── Step 6: Display results'), ctx);
+  return ctx;
+}
+
+test('first-time targets use observed first gifts and stay below established giving', () => {
+  const ctx = scoringContext();
+  const comps = ['A', 'B', 'C'].map(slug => ({ slug, name: slug, similarity: 100 }));
+  const profiles = comps.map(() => ({ top_donors_by_year: {
+    2022: [{ name: 'Northwest Grocery Assoc. PAC (152)', donor_id: 'c152', total: 1000 }],
+    2026: [{ name: 'Northwest Grocery Assoc. PAC (152)', donor_id: 'c152', total: 10500 }],
+  } }));
+  ctx.window._firstGifts = new Map([['c152', [{ amount: 500 }, { amount: 1000 }, { amount: 1500 }]]]);
+  const { prospects } = ctx.scoreDonors({ top_donors_by_year: {} }, comps, profiles, ['2026'], 2026, null);
+  assert.equal(prospects.length, 1);
+  assert.equal(prospects[0].target_ask, 1000);
+  assert.ok(prospects[0].factors.some(f => f.includes('first observed cash contribution')));
+});
+
+test('annual fallback uses earliest years, combines aliases, and excludes future years', () => {
+  const ctx = scoringContext();
+  const profiles = [{ top_donors_by_year: {
+    2022: [{ name: 'Genentech', total: 200 }, { name: 'Genentech USA', total: 300 }],
+    2024: [{ name: 'Genentech', total: 10000 }],
+    2028: [{ name: 'Genentech', total: 50000 }],
+  } }];
+  const result = ctx.firstGivingBenchmark('family:genentech', profiles, [{ name: 'A' }], 2026, null);
+  assert.equal(result.amount, 500);
+  assert.equal(result.n, 1);
+  assert.ok(!result.actual);
+});
+
+test('Amazon and Genentech variants combine before scoring and export history', () => {
+  const ctx = scoringContext();
+  const variants = ['Amazon.Com', 'Amazon.Com Services LLC', 'Amazon Services LLC'];
+  const profiles = [{ top_donors_by_year: { 2026: variants.map((name, i) => ({ name, donor_id: `id${i}`, total: 1000 })) } }];
+  const merged = ctx.mergeDonorsByYear(profiles[0].top_donors_by_year, ['2026']);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].total, 3000);
+  assert.equal(ctx.donorKey({ name: 'Genentech USA', donor_id: 'other' }), ctx.donorKey({ name: 'Genentech' }));
+  assert.notEqual(ctx.donorKey({ name: 'Amazon Web Services', donor_id: 'aws' }), merged[0].donor_key);
+  const idx = ctx.buildCompCycleIndex([{ name: 'A' }], profiles);
+  assert.equal(idx.get('family:amazon').get('A')[2026], 3000);
+  // A different spelling already giving to the candidate must not become a new prospect.
+  const result = ctx.scoreDonors({ top_donors_by_year: { 2024: [{ name: 'Amazon Services LLC', total: 100 }] } },
+    [{ name: 'A', similarity: 100 }, { name: 'B', similarity: 100 }], [profiles[0], profiles[0]], ['2026'], 2026, null);
+  assert.equal(result.prospects.length, 0);
+});
+
+test('display spelling preserves acronyms and corrects Cooperative', () => {
+  const ctx = context();
+  assert.equal(ctx.donorDisplayName('Oregon Beverage Recycling CoOperative'), 'Oregon Beverage Recycling Cooperative');
+  assert.equal(ctx.donorDisplayName('NORTHWEST GROCERY ASSOC. PAC (152)'), 'Northwest Grocery Assoc. PAC (152)');
+  assert.equal(ctx.donorDisplayName('SEIU Local 503'), 'SEIU Local 503');
+});
+
+test('Donor Targets includes prospects without changing the plan source lists', () => {
+  const ctx = context();
+  vm.runInContext(slice('function allDonorTargets()', 'function renderRepeatDonors('), ctx);
+  ctx.window._repeatTargets = [{ donor: 'Repeat', target: 2000 }];
+  ctx.window._recommendations = [{ donor: 'New', target_ask: 500, already_given: 0, remaining_ask: 500 }];
+  const rows = ctx.allDonorTargets();
+  assert.equal(rows.length, 2);
+  assert.equal(rows[1].target, 500);
+  assert.equal(rows[1].consistency, 'new');
+  assert.equal(ctx.window._repeatTargets.length, 1);
+});
+
+test('OBRC canonical name wins over Beverage PAC raw alias regardless of pool order', () => {
+  const code = fs.readFileSync(path.join(root, 'docs/lib/lobbyists.js'), 'utf8');
+  const ctx = vm.createContext({});
+  vm.runInContext(code + '\nthis.lob = LOB;', ctx);
+  const rows = [
+    { donor_id: 'c126', display_name: 'Oregon Beverage PAC', names: ['oregon beverage recycling cooperative'] },
+    { donor_id: 'obrc1', display_name: 'Oregon Beverage Recycling Cooperative', names: ['oregon beverage recycling cooperative'] },
+    { donor_id: 'obrc2', display_name: 'Oregon Beverage Recycling Cooperative', names: ['oregon beverage recycling cooperative'] },
+  ];
+  const ids = ctx.lob.poolIdsForLabels(rows, ['oregon beverage recycling cooperative']).get('oregon beverage recycling cooperative');
+  assert.deepEqual(Array.from(ids).sort(), ['obrc1', 'obrc2']);
+  assert.equal(ctx.lob.poolIdsForLabels([
+    { donor_id: 'a', display_name: 'A', names: ['ambiguous'] },
+    { donor_id: 'b', display_name: 'B', names: ['ambiguous'] },
+  ], ['ambiguous']).size, 0);
+});
+
+test('name-only cached profiles are repaired by scoped identity queries before scoring', async () => {
+  const calls = [];
+  const ctx = context({ DL: { async getDonors(args) {
+    calls.push(args);
+    return { by_year: { 2026: [{ name: 'Resolved', donor_id: 'd1', donor_key: 'd1', total: 500 }] } };
+  } } });
+  vm.runInContext(slice('async function loadRecommendationIdentities(', '// ── Status helpers'), ctx);
+  const old = { filer_ids: ['1', '2'], top_donors_by_year: { 2026: [{ name: 'Alias', total: 500 }] } };
+  const current = { top_donors_by_year: { 2026: [{ name: 'Resolved', donor_key: 'd2' }] } };
+  await ctx.loadRecommendationIdentities([old, current], [{ filer_id: '1' }, { filer_id: '3' }]);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].filerIds, ['1', '2']);
+  assert.equal(old.top_donors_by_year[2026][0].donor_key, 'd1');
+});
+
+test('first-gift requests exclude repeat donors and pool family identities per recipient', async () => {
+  const calls = [];
+  const ctx = context({ cycleYears: c => [c - 1, c], getSupabase: async () => ({ rpc: async (name, params) => {
+    calls.push(params);
+    return { data: [
+      { donor_id: 'amazon1', filer_id: '1', first_date: '2020-01-01', amount: '500' },
+      { donor_id: 'amazon2', filer_id: '1', first_date: '2022-01-01', amount: '5000' },
+      { donor_id: 'amazon2', filer_id: '2', first_date: '2021-01-01', amount: '1000' },
+    ] };
+  } }), LOB: { fetchAll: async build => (await build()).data } });
+  vm.runInContext(slice('async function loadRecommendationIdentities(', '// ── Status helpers'), ctx);
+  const donor = (name, donor_id) => ({ name, donor_id, total: 1000 });
+  const target = { top_donors_by_year: { 2024: [donor('Repeat', 'repeat')] } };
+  const profile = { top_donors_by_year: { 2026: [donor('Repeat', 'repeat'), donor('Amazon.Com', 'amazon1'), donor('Amazon Services LLC', 'amazon2')] } };
+  const comps = ['1', '2'].map(filer_id => ({ filer_id, name: filer_id, slug: filer_id }));
+  await ctx.loadFirstGifts([target, profile, profile], comps, [profile, profile], 2026);
+  assert.deepEqual(Array.from(calls[0].p_donor_ids).sort(), ['amazon1', 'amazon2']);
+  const gifts = ctx.window._firstGifts.get('family:amazon');
+  assert.equal(gifts.length, 2);
+  assert.deepEqual(Array.from(gifts, g => g.amount), [500, 1000]);
+  assert.equal(ctx.window._planIdentityIds.get('family:amazon').size, 2);
 });
