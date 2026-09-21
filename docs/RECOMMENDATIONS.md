@@ -398,4 +398,22 @@ searches in a scrollable list (up to 50 matches; refine the search for more).
 Selected entities remain visible and individually removable. One atomic upsert
 records all pairs, with each human label attached to its sorted alias key.
 A failed save retains the selection; duplicate submissions and self merges are
-blocked. Decisions take effect on the next resolver run, as before.
+blocked. Saved merges take effect immediately on database reads after migration 021. Refresh other open pages to load the new identity. Entity A supplies the combined display name; search, donor profiles, rankings, recommendation evidence, lobbyist attribution, and exports use the combined group without waiting for the weekly resolver.
+
+
+### Immediate entity merge rollout
+
+Merge the Top Recipients PR first and apply migrations `020_donor_profile_recipients.sql`
+and `021_immediate_entity_merges.sql` before deploying the associated frontend.
+Both are registered in `scraper/db_admin.py`. No resolver or cache rebuild is needed
+when an admin subsequently saves a merge. Existing open pages refresh their cached
+identity mapping when reloaded.
+
+Raw transaction identities remain intact until normal resolution. Stable alias
+anchors retain access to reviewed lobbyist links and contacts when that resolution
+changes donor IDs. The resolver now also replaces stale non-null transaction IDs,
+while preserving authoritative ORESTAR committee IDs. Removing a merge decision
+splits read-through groups immediately before physical resolution; undoing a group
+already physically consolidated requires a resolver run to split its source IDs.
+Cached chart tooltip lists combine the entries already present in each cached list;
+full donor rankings and affected candidate donor histories are queried live.

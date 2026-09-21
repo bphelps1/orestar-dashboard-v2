@@ -286,7 +286,7 @@ test('Donor Lookup uses original committee names when canonical names are blank'
     { filer_canonical: 'Friends of Julie Fahey', filer: 'Raw name', amount: 2500 },
     { filer_canonical: null, filer: null, filer_id: '99', amount: 500 },
   ];
-  const query = { select() { return this; }, eq() { return this; }, order() { return this; },
+  const query = { select() { return this; }, in() { return this; }, eq() { return this; }, order() { return this; },
     async range() { return { data }; } };
   const ctx = vm.createContext({ $: element, esc: String, fmt$: String, PAGE: 25, txnPage: 0,
     currentDonor: { donor_id: 'uber' }, getSupabase: async () => ({ from: () => query }) });

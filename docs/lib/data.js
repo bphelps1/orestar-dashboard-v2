@@ -19,6 +19,7 @@ const DL = (() => {
 
   /** Fetch a whole-dashboard aggregate blob by key from dashboard_cache. */
   async function getBlob(key) {
+    if (key === "top_donors" && typeof ID !== "undefined" && await ID.hasMerges()) return getDonors();
     const sb = await getSupabase();
     const { data, error } = await sb
       .from("dashboard_cache")
@@ -26,7 +27,8 @@ const DL = (() => {
       .eq("key", key)
       .single();
     if (error) throw new Error(`Failed to load '${key}': ${error.message}`);
-    return data.data;
+    return typeof ID !== "undefined" && ["by_contributor_type", "activity_snapshot"].includes(key)
+      ? ID.rekeyBlob(data.data) : data.data;
   }
 
   /** Fetch a single filer's detail blob by slug from filer_detail. */
@@ -34,11 +36,17 @@ const DL = (() => {
     const sb = await getSupabase();
     const { data, error } = await sb
       .from("filer_detail")
-      .select("detail")
+      .select("detail,filer_id")
       .eq("slug", slug)
       .single();
     if (error) throw new Error(`Failed to load filer '${slug}': ${error.message}`);
-    return data.detail;
+    const detail = data.detail;
+    const ids = detail.filer_ids?.length ? detail.filer_ids : [data.filer_id].filter(Boolean);
+    if (typeof ID !== "undefined" && await ID.affectsFilers(ids)) {
+      const donors = await getDonors({ filerIds: ids });
+      return { ...detail, top_donors: donors.all_time, top_donors_by_year: donors.by_year };
+    }
+    return detail;
   }
 
   /** Rank donors using inclusive transaction dates, rather than calendar totals. */

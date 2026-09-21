@@ -817,6 +817,8 @@ async function emRecord(decision) {
       merge_key: `${ka}|||${kb}`,
       alias_a: ka, alias_b: kb,
       decision,
+      keep_alias_key: a.rep_alias_key,
+      decided_at: new Date().toISOString(),
       label_a: ka === a.rep_alias_key ? a.display_name : b.display_name,
       label_b: kb === b.rep_alias_key ? b.display_name : a.display_name,
       decided_by: session?.user?.email || null,
@@ -825,7 +827,7 @@ async function emRecord(decision) {
     const { error } = await sb.from("donor_merge_overrides").upsert(records);
     if (error) throw new Error(error.message);
     status.textContent = decision === "merged"
-      ? "Merge recorded — applied on the next resolver run."
+      ? "Merge applied. Refresh other pages to see the combined donor."
       : "Marked as separate — they will not be merged.";
     emState.a = null;
     emState.selected.clear();

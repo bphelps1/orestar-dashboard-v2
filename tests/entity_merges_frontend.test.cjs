@@ -24,13 +24,15 @@ function harness(error = null) {
   return { ctx, writes, element };
 }
 test('bulk merge is a single atomic upsert with labels matching sorted keys', async () => {
-  const { ctx, writes } = harness();
+  const { ctx, writes, element } = harness();
   await ctx.emRecord('merged');
   assert.equal(writes.length, 1);
   assert.equal(writes[0].length, 2);
   assert.equal(writes[0][0].alias_a, 'b|a');
   assert.equal(writes[0][0].label_a, 'Alias B');
   assert.equal(writes[0][0].label_b, 'Keep');
+  assert.ok(writes[0].every(row => row.keep_alias_key === 'z|a'));
+  assert.match(element('em-status').textContent, /Merge applied/);
   assert.equal(ctx.state.selected.size, 0);
   assert.equal(ctx.state.saving, false);
 });

@@ -117,13 +117,19 @@ const LOB = (() => {
     const unresolved = new Map();        // labelKey → donorKey, for the fallback
     for (const d of donors) {
       const key = d.key || labelKey(d.name);
-      if (d.donor_id) add(key, d.donor_id);
+      if (d.donor_id) {
+        const ids = typeof ID === "undefined" ? [d.donor_id] : await ID.members(d.donor_id);
+        for (const id of ids) add(key, id);
+      }
       else unresolved.set(labelKey(d.name), key);
       if (!idsByKey.has(key)) idsByKey.set(key, new Set());
     }
     if (unresolved.size) {
       for (const [label, ids] of await _poolIdsForLabels([...unresolved.keys()])) {
-        for (const id of ids) add(unresolved.get(label), id);
+        for (const sourceId of ids) {
+          const members = typeof ID !== "undefined" ? await ID.members(sourceId) : [sourceId];
+          for (const id of members) add(unresolved.get(label), id);
+        }
       }
     }
 
@@ -274,9 +280,12 @@ const LOB = (() => {
     }
     const donorToLabels = new Map();
     for (const [label, ids] of poolIdsForLabels(poolRows, keys)) {
-      for (const id of ids) {
-        if (!donorToLabels.has(id)) donorToLabels.set(id, []);
-        donorToLabels.get(id).push(label);
+      for (const sourceId of ids) {
+        const members = typeof ID !== "undefined" ? await ID.members(sourceId) : [sourceId];
+        for (const id of members) {
+          if (!donorToLabels.has(id)) donorToLabels.set(id, []);
+          if (!donorToLabels.get(id).includes(label)) donorToLabels.get(id).push(label);
+        }
       }
     }
     const donorIds = new Map();

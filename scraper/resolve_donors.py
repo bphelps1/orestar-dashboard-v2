@@ -563,9 +563,30 @@ def resolve(df: pd.DataFrame, ns: dict, must: dict, cannot: set,
 
 # ── Write-back ───────────────────────────────────────────────────────────────
 
+def stamp_resolved_batch(cur, start, end):
+    """Reassign existing cluster IDs too; committee IDs remain authoritative."""
+    cur.execute("""update transactions t set donor_id = m.donor_id
+                       from _dmap m
+                       where t.tran_id >= %s and t.tran_id < %s
+                         and coalesce(t.contributor_payee_committee_id,'') = ''
+                         and t.donor_id is distinct from m.donor_id
+                         and t.contributor_payee = m.raw_name
+                         and coalesce(t.addr_line1,'') = m.addr
+                         and coalesce(t.zip,'') = m.zip""", (start, end))
+    return cur.rowcount
+
+
 def write_back(conn, df, assign, donors, aliases):
     cur = conn.cursor()
     log.info("Write-back: donors + aliases…")
+    # Preserve the identities used by reviewed contacts/attributions before
+    # cluster hashes change. The read-through map follows these stable aliases.
+    cur.execute("""insert into donor_identity_anchors(donor_id,alias_key)
+                   select donor_id,min(alias_key) from donor_aliases
+                   where donor_id in (select donor_id from donor_lobbyist_links
+                     union select donor_id from donor_client_links
+                     union select donor_id from donor_contacts)
+                   group by donor_id on conflict(donor_id) do nothing""")
     cur.execute("truncate donor_aliases, donors")
 
     dbuf = io.StringIO()
@@ -642,14 +663,7 @@ def write_back(conn, df, assign, donors, aliases):
     start = lo
     while start <= hi:
         end = start + BATCH
-        cur.execute("""update transactions t set donor_id = m.donor_id
-                       from _dmap m
-                       where t.tran_id >= %s and t.tran_id < %s
-                         and t.donor_id is null
-                         and t.contributor_payee = m.raw_name
-                         and coalesce(t.addr_line1,'') = m.addr
-                         and coalesce(t.zip,'') = m.zip""", (start, end))
-        done += cur.rowcount
+        done += stamp_resolved_batch(cur, start, end)
         conn.commit()
         log.info("  stamped %s rows (tran_id < %s)", f"{done:,}", f"{end:,}")
         start = end
