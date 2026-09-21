@@ -1,0 +1,29 @@
+name: Primary Campaign Baselines
+on:
+  schedule:
+    - cron: '30 16 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  refresh:
+    if: github.event_name == 'workflow_dispatch' || vars.PIPELINE_SCHEDULES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install psycopg2-binary pandas
+      - run: python scraper/refresh_primary_campaigns.py
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: codex/refresh-primary-campaigns
+          add-paths: docs/assets/primary_campaign_exclusions.json
+          commit-message: Update primary campaign exclusions
+          title: Update primary campaign exclusions
+          body: Review detected unusually large contested primaries and their receipt evidence. These periods are excluded from donor ask baselines for candidates and their comparison references; actual contribution history stays intact.

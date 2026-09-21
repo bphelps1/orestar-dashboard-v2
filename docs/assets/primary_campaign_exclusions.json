@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "rule": {
+    "minimum_opposition_pct": 20,
+    "minimum_cash": 25000,
+    "minimum_increase": 10000,
+    "historical_multiple": 1.5,
+    "prior_periods": 2
+  },
+  "source": "ORESTAR cash contributions and Oregon legislative primary election_results",
+  "latest_primary_year": 2026,
+  "exclusions": [
+    {
+      "slug": "friends_of_rod_monroe",
+      "filer_ids": [
+        "5319"
+      ],
+      "name": "Friends of Rod Monroe",
+      "year": 2018,
+      "start": "2017-01-01",
+      "through": "2018-05-15",
+      "resume": "2018-05-16",
+      "primary_cash": 306810.0,
+      "previous_primary_cash": [
+        23925.0,
+        14950.0
+      ],
+      "historical_median": 19437.5,
+      "opposition_pct": 61.88,
+      "office": "State Senator",
+      "district": "24th District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "friends_of_rob_nosse",
+      "filer_ids": [
+        "16459"
+      ],
+      "name": "Friends of Rob Nosse",
+      "year": 2020,
+      "start": "2019-01-01",
+      "through": "2020-05-19",
+      "resume": "2020-05-20",
+      "primary_cash": 211924.0,
+      "previous_primary_cash": [
+        90906.96,
+        73590.21
+      ],
+      "historical_median": 82248.59,
+      "opposition_pct": 34.67,
+      "office": "State Representative",
+      "district": "42nd District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "committee_to_elect_daniel_bonham",
+      "filer_ids": [
+        "18925"
+      ],
+      "name": "Committee to Elect Daniel Bonham",
+      "year": 2022,
+      "start": "2021-01-01",
+      "through": "2022-05-17",
+      "resume": "2022-05-18",
+      "primary_cash": 234352.42,
+      "previous_primary_cash": [
+        29725.0,
+        87732.4
+      ],
+      "historical_median": 58728.7,
+      "opposition_pct": 20.38,
+      "office": "State Senator",
+      "district": "26th District",
+      "party": "Republican"
+    },
+    {
+      "slug": "ken_helm_for_oregon",
+      "filer_ids": [
+        "16738"
+      ],
+      "name": "Ken Helm for Oregon",
+      "year": 2022,
+      "start": "2021-01-01",
+      "through": "2022-05-17",
+      "resume": "2022-05-18",
+      "primary_cash": 96076.0,
+      "previous_primary_cash": [
+        12825.0,
+        18025.0
+      ],
+      "historical_median": 15425.0,
+      "opposition_pct": 39.59,
+      "office": "State Representative",
+      "district": "27th District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "mark_gamba_for_oregon",
+      "filer_ids": [
+        "16015"
+      ],
+      "name": "Mark Gamba for Oregon",
+      "year": 2022,
+      "start": "2021-01-01",
+      "through": "2022-05-17",
+      "resume": "2022-05-18",
+      "primary_cash": 70866.93,
+      "previous_primary_cash": [
+        150.0,
+        30.0
+      ],
+      "historical_median": 90.0,
+      "opposition_pct": 28.61,
+      "office": "State Representative",
+      "district": "41st District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "stout_for_state_rep",
+      "filer_ids": [
+        "19073"
+      ],
+      "name": "Stout for State Rep",
+      "year": 2022,
+      "start": "2021-01-01",
+      "through": "2022-05-17",
+      "resume": "2022-05-18",
+      "primary_cash": 74700.0,
+      "previous_primary_cash": [
+        5600.0,
+        11799.25
+      ],
+      "historical_median": 8699.62,
+      "opposition_pct": 36.21,
+      "office": "State Representative",
+      "district": "31st District",
+      "party": "Republican"
+    },
+    {
+      "slug": "committee_to_re_elect_greg_smith",
+      "filer_ids": [
+        "3420"
+      ],
+      "name": "Committee to Re-Elect Greg Smith",
+      "year": 2024,
+      "start": "2023-01-01",
+      "through": "2024-05-21",
+      "resume": "2024-05-22",
+      "primary_cash": 116152.9,
+      "previous_primary_cash": [
+        70650.0,
+        80100.0
+      ],
+      "historical_median": 75375.0,
+      "opposition_pct": 24.77,
+      "office": "State Representative",
+      "district": "57th District",
+      "party": "Republican"
+    },
+    {
+      "slug": "friends_of_david_brock_smith",
+      "filer_ids": [
+        "15377"
+      ],
+      "name": "Friends of David Brock Smith",
+      "year": 2024,
+      "start": "2023-01-01",
+      "through": "2024-05-21",
+      "resume": "2024-05-22",
+      "primary_cash": 272725.0,
+      "previous_primary_cash": [
+        44557.4,
+        34518.26
+      ],
+      "historical_median": 39537.83,
+      "opposition_pct": 29.79,
+      "office": "State Senator",
+      "district": "1st District",
+      "party": "Republican"
+    },
+    {
+      "slug": "friends_of_lisa_fragala",
+      "filer_ids": [
+        "19751"
+      ],
+      "name": "Friends of Lisa Fragala",
+      "year": 2024,
+      "start": "2023-01-01",
+      "through": "2024-05-21",
+      "resume": "2024-05-22",
+      "primary_cash": 184285.4,
+      "previous_primary_cash": [
+        13172.0,
+        25.0
+      ],
+      "historical_median": 6598.5,
+      "opposition_pct": 27.73,
+      "office": "State Representative",
+      "district": "8th District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "committee_to_re_elect_greg_smith",
+      "filer_ids": [
+        "3420"
+      ],
+      "name": "Committee to Re-Elect Greg Smith",
+      "year": 2026,
+      "start": "2025-01-01",
+      "through": "2026-05-19",
+      "resume": "2026-05-20",
+      "primary_cash": 175927.9,
+      "previous_primary_cash": [
+        80100.0,
+        116152.9
+      ],
+      "historical_median": 98126.45,
+      "opposition_pct": 44.7,
+      "office": "State Representative",
+      "district": "57th District",
+      "party": "Republican"
+    },
+    {
+      "slug": "friends_for_denise_krause",
+      "filer_ids": [
+        "22066"
+      ],
+      "name": "Friends for Denise Krause",
+      "year": 2026,
+      "start": "2025-01-01",
+      "through": "2026-05-19",
+      "resume": "2026-05-20",
+      "primary_cash": 59320.63,
+      "previous_primary_cash": [
+        6100.0,
+        3809.6
+      ],
+      "historical_median": 4954.8,
+      "opposition_pct": 34.05,
+      "office": "State Senator",
+      "district": "3rd District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "friends_of_daniel_nguyen",
+      "filer_ids": [
+        "19463"
+      ],
+      "name": "Friends of Daniel Nguyen",
+      "year": 2026,
+      "start": "2025-01-01",
+      "through": "2026-05-19",
+      "resume": "2026-05-20",
+      "primary_cash": 262989.0,
+      "previous_primary_cash": [
+        129370.0,
+        36750.0
+      ],
+      "historical_median": 83060.0,
+      "opposition_pct": 27.16,
+      "office": "State Representative",
+      "district": "38th District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "friends_of_janeen_sollman",
+      "filer_ids": [
+        "13654",
+        "17890"
+      ],
+      "name": "Friends of Janeen Sollman",
+      "year": 2026,
+      "start": "2025-01-01",
+      "through": "2026-05-19",
+      "resume": "2026-05-20",
+      "primary_cash": 465156.8,
+      "previous_primary_cash": [
+        74887.88,
+        60362.0
+      ],
+      "historical_median": 67624.94,
+      "opposition_pct": 51.95,
+      "office": "State Senator",
+      "district": "15th District",
+      "party": "Democrat"
+    },
+    {
+      "slug": "friends_of_susan_mclain",
+      "filer_ids": [
+        "16812"
+      ],
+      "name": "Friends of Susan McLain",
+      "year": 2026,
+      "start": "2025-01-01",
+      "through": "2026-05-19",
+      "resume": "2026-05-20",
+      "primary_cash": 45636.0,
+      "previous_primary_cash": [
+        24475.0,
+        28650.0
+      ],
+      "historical_median": 26562.5,
+      "opposition_pct": 23.8,
+      "office": "State Representative",
+      "district": "29th District",
+      "party": "Democrat"
+    }
+  ]
+}
