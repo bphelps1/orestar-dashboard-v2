@@ -282,10 +282,16 @@ def load_alias_constraints(conn) -> tuple[list, set]:
     except Exception:
         conn.rollback()          # table not migrated yet — no overrides to apply
         return must, cannot
-    for a, b, decision in cur.fetchall():
+    decisions = cur.fetchall()
+    cur.execute("select to_regclass('public.donor_identity_redirects') is not null")
+    stored_identities = cur.fetchone()[0]
+    for a, b, decision in decisions:
         if not a or not b or a == b:
             continue
-        if decision == "merged":
+        if decision == "merged" and not stored_identities:
+            # Legacy databases physically combine clusters. Migration 027 owns
+            # manual merges in canonical_entity_id, preserving source entities
+            # across full rebuilds so admin decisions stay separate from imports.
             must.append((a, b))
         elif decision == "separate":
             cannot.add(frozenset((a, b)))

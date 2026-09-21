@@ -39,6 +39,8 @@ MIGRATIONS = [
     "023_lobbyist_client_editor.sql",
     "024_donor_profile_lookup_performance.sql",
     "025_recommendation_first_gift_performance.sql",
+    "026_donor_filer_index.sql",
+    "027_stored_donor_identities.sql",
 ]
 
 
@@ -69,6 +71,12 @@ def apply(only: str | None = None):
                 "In-Kind/Forgiven Personal Expenditures",
             ))):
                 cur.execute("drop index concurrently public.idx_txn_cash_donor_dates")
+            sql = sql.replace("create index if not exists", "create index concurrently if not exists")
+        if name == "026_donor_filer_index.sql":
+            cur.execute("select indisvalid from pg_index where indexrelid=to_regclass('public.idx_txn_donor_filer')")
+            row = cur.fetchone()
+            if row and not row[0]:
+                cur.execute("drop index concurrently public.idx_txn_donor_filer")
             sql = sql.replace("create index if not exists", "create index concurrently if not exists")
         cur.execute(sql)
         print(f"  ✓ {name}")
