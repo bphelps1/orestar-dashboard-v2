@@ -36,6 +36,8 @@ def test_immediate_merges_across_reads_and_undo(stored):
         if stored:
             migration += '\n' + (ROOT/'supabase/migrations/026_donor_filer_index.sql').read_text()
             migration += '\n' + (ROOT/'supabase/migrations/027_stored_donor_identities.sql').read_text()
+            migration += '\n' + (ROOT/'supabase/migrations/028_donor_identity_label_indexes.sql').read_text()
+            migration += '\n' + (ROOT/'supabase/migrations/029_stored_donor_identity_labels.sql').read_text()
         # All tables/functions/views/policies and grants stay in this schema.
         sql = (normalize + migration).replace('public.', schema + '.').replace('search_path = public', 'search_path = '+schema).replace('search_path=public', 'search_path='+schema)
         sql = sql.replace('pg_advisory_xact_lock(726027)', 'pg_advisory_xact_lock(726027000000 + pg_backend_pid())')

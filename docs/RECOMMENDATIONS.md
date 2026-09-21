@@ -479,6 +479,22 @@ source IDs before an undo can separate them. Other recommendation queries and
 large initial migration work can still be expensive: this removes the merge
 check's transaction scans, not all database work.
 
+### Stored name-only labels (migrations 028–029)
+
+Migration 027 stores canonical IDs, but older chart blobs also need label-only
+identity matching. The original `donor_identity_labels` view normalized every
+donor/alias during reads and could still exceed the API timeout. Migration 028
+adds expression indexes (built separately and concurrently by `db_admin.py`),
+and 029 stores the unambiguous labels at the same commit boundary as donor IDs.
+Checks include unrelated donors that share a normalized name; ambiguous labels
+are never merged automatically. Alias imports, undo, and donor display-name
+edits refresh the stored labels atomically. Public reads only join this small
+label cache to the canonical donor's current display name.
+
+Deploy 028 then 029. The frontend additionally skips label reads for ID-bearing
+chart rows and loads statewide contributor-type charts only for the statewide
+overview. Candidate and multi-candidate overviews use their own profile data.
+
 ### Lobbyist plan follow-up (September 2026)
 
 The app opens donor groups and firm members expanded. Excel Call list donor
