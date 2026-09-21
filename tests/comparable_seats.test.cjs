@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-function harness(){const c=vm.createContext({window:{},document:{addEventListener(){}},console:{log(){}},setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(__dirname,'../docs/recommend.js'),'utf8'),c);return c;}
+function harness(realMembership=false){const c=vm.createContext({window:{},document:{addEventListener(){}},console:{log(){}},setTimeout,clearTimeout});vm.runInContext(fs.readFileSync(path.join(__dirname,'../docs/recommend.js'),'utf8'),c);if(!realMembership)vm.runInContext("loadCurrentLegislators=async()=>{};isCurrentLegislator=()=>true",c);return c;}
 const unopposed={band:'unopposed',margin_pts:100,year:2024,label:'unopposed last cycle'};
 test('unopposed is categorical and never participates in numeric margin windows',()=>{
  const c=harness(),gifts=[1,2,3].map(i=>({filer:`U${i}`,seatBand:'unopposed',marginPts:100,amount:1000}));
@@ -16,7 +16,7 @@ test('comparison pool excludes stale, unknown, future, closed and noncandidate c
  const candidate={name:'Candidate',slug:'target',committee_type:'Candidate Committee',office:'State Representative',party:'Democrat',total_in:1000,election:'2026 Primary Election'};
  c.target=candidate;c.filers=[{...candidate,slug:'recent',election:'2024 General Election'}, {...candidate,slug:'old',election:'2014 General Election'}, {...candidate,slug:'missing',election:''}, {...candidate,slug:'future',election:'2028 Primary Election'}, {...candidate,slug:'closed',closed:true}, {...candidate,slug:'pac',committee_type:'Political Committee'}, {...candidate,slug:'senator',office:'State Senator',election:'2022 General Election'}, {...candidate,slug:'old-senator',office:'State Senator',election:'2020 General Election'}];
  const r=await vm.runInContext('filerIndex=filers;findComparables({},target,2026)',c);
- assert.deepEqual(Array.from(r,x=>x.slug).sort(),['recent','senator']);
+ assert.deepEqual(Array.from(r,x=>x.slug).sort(),['recent']);
 });
 test('seat summary and spreadsheet describe unopposed peers without a synthetic margin',()=>{
  const c=harness(),comps=[1,2,3].map(i=>({name:`Peer${i}`,seat:unopposed}));
@@ -70,4 +70,36 @@ test('exclusive pair supports single-counterpart prospects and discounts benchma
  assert.ok(result[0].factors.some(f=>f.includes('10% below')));
  const repeat=c.buildRepeatDonorTargets({top_donors_by_year:{2024:[{donor_id:'a',name:'Acme',total:5000}]}},comps,profiles,['2025','2026'],2026,null).targets[0];
  assert.equal(repeat.target,6500);assert.equal(repeat.comp_max,10000);assert.equal(repeat.last_cycle_amt,5000);
+});
+
+test('current-member filter removes Holvey and excludes Taylor from House comparisons',async()=>{
+ const c=harness(true);
+ c.roster=JSON.parse(fs.readFileSync(path.join(__dirname,'../docs/assets/current_legislators.json'),'utf8')).members;
+ c.filers=[candidate('target',{name:'Jason for Bend',candidate_name:'Jason Kropf'}),
+ candidate('holvey',{name:'Friends of Paul Holvey',candidate_name:'Paul Richard Holvey'}),
+ candidate('taylor',{name:'Kathleen Taylor for Senate',candidate_name:'Kathleen Taylor',office:'State Senator'}),
+ candidate('fragala',{name:'Friends of Lisa Fragala',candidate_name:'Lisa Fragala'}),
+ candidate('unknown',{name:'Unknown Candidate'}),candidate('missing-office',{name:'Friends of Lisa Fragala',office:''})];
+ vm.runInContext('currentLegislators=roster;filerIndex=filers;raceMarginIndex=new Map();adminTags={}',c);
+ assert.equal(c.isCurrentLegislator(c.filers[1]),false);
+ assert.equal(c.isCurrentLegislator(c.filers[2]),true);
+ assert.deepEqual(Array.from(await c.findComparables({},c.filers[0],2026),f=>f.slug),['fragala']);
+ assert.deepEqual(Array.from(await c.findComparables({},c.filers[2],2026),f=>f.slug),[]);
+ assert.equal(c.isOfficeComparable('state_rep','state_senate'),false);
+ assert.equal(c.isOfficeComparable('state_senate','state_rep'),false);
+});
+test('membership matches accents, initials, and full committee names without surname-only matches',()=>{
+ const c=harness(true);vm.runInContext('currentLegislators={house:["Lesly Muñoz","Tawna D. Sanchez","Ben Bowman","Ricki Ruiz"],senate:[]}',c);
+ assert.equal(c.isCurrentLegislator(candidate('munoz',{candidate_name:'Lesly Munoz'})),true);
+ assert.equal(c.isCurrentLegislator(candidate('sanchez',{candidate_name:'Tawna Sanchez'})),true);
+ assert.equal(c.isCurrentLegislator(candidate('bowman',{candidate_name:'Benjamin W Bowman',name:'Friends of Ben Bowman'})),true);
+ assert.equal(c.isCurrentLegislator(candidate('ruiz',{candidate_name:'Ricardo Ruiz'})),true);
+ assert.equal(c.isCurrentLegislator(candidate('other',{candidate_name:'Other Bowman'})),false);
+});
+test('roster failure stops recommendations instead of admitting former legislators',async()=>{
+ const c=harness(true);c.fetch=async()=>({ok:false});
+ vm.runInContext('raceMarginIndex=new Map()',c);
+ await assert.rejects(c.findComparables({},candidate('target'),2026),/Could not verify current legislators/);
+ c.fetch=async()=>({ok:true,json:async()=>({members:{house:[],senate:[]}})});
+ await assert.rejects(c.loadCurrentLegislators(),/roster is unavailable/);
 });

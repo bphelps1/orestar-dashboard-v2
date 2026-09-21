@@ -31,6 +31,20 @@ The Donor Targets export includes both groups as well.
 
 Only candidate committees with a known election in the selected cycle or previous cycle are scored. Senate and statewide executive committees get a four-year lookback. Future elections, missing election metadata, noncandidate committees, and closed committees are excluded. Closed flags from detail profiles are checked before any scoring or export.
 
+Legislative peers must be current members of the **same chamber**: House only
+compares with House, and Senate only with Senate. The official Legislature rosters
+in `assets/current_legislators.json` establish membership, not an open committee
+or a recent election date. Whole-name tokens match candidate or committee names
+(accent and middle-initial tolerant); unverified names are excluded. This also
+excludes challengers who have not served yet. Membership reflects today's roster,
+including when an older fundraising cycle is selected.
+
+`scraper/refresh_legislators.py` refreshes both rosters together. The weekly
+Current Legislator Roster workflow proposes changes by PR when pipeline schedules
+are enabled; membership updates take effect after that PR is merged and deployed.
+A missing or unreadable roster stops recommendations rather than silently allowing
+former members. The existing recent-election and closed-committee checks still apply.
+
 Every eligible committee is scored for similarity. Anything scoring **≤ 20 is
 discarded**; the top **20** survive.
 
@@ -55,7 +69,7 @@ incompatible candidates just to reach the 20-comparable cap.
 | Signal | Weight |
 |---|---|
 | Same office | **+40** |
-| Related office (State Rep ↔ State Senate, legislative → statewide) | **+30** |
+| Related office (legislative → statewide) | **+30** |
 | Same party | **+15** |
 | Similar fundraising size | **+0 … 15** (ratio of the smaller total to the larger, × 15) |
 | Both in leadership | **+25** |

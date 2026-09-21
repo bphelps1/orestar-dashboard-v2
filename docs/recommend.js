@@ -398,7 +398,7 @@ const STATEWIDE_OFFICES = new Set(["governor", "sos", "ag", "treasurer"]);
 
 /**
  * Check if fOffice is comparable to targetOffice.
- * - state_rep ↔ state_senate: always comparable (bidirectional)
+ * - state_rep ↔ state_senate: never comparable
  * - legislative → statewide: comparable (donors flow up)
  * - statewide → legislative: NOT comparable (donors don't flow down)
  * - same office: always comparable
@@ -406,8 +406,8 @@ const STATEWIDE_OFFICES = new Set(["governor", "sos", "ag", "treasurer"]);
 function isOfficeComparable(targetOffice, fOffice) {
   if (!targetOffice || !fOffice) return false;
   if (targetOffice === fOffice) return true;
-  // state_rep ↔ state_senate: bidirectional
-  if (LEGISLATIVE_OFFICES.has(targetOffice) && LEGISLATIVE_OFFICES.has(fOffice)) return true;
+  // Different legislative chambers never share a comparison pool.
+  if (LEGISLATIVE_OFFICES.has(targetOffice) && LEGISLATIVE_OFFICES.has(fOffice)) return false;
   // Legislative → statewide: filer is legislative, target is statewide
   if (STATEWIDE_OFFICES.has(targetOffice) && LEGISLATIVE_OFFICES.has(fOffice)) return true;
   // Statewide ↔ statewide: comparable
@@ -522,6 +522,43 @@ function peerGiftLabel(g) {
   return `${g.filer} (${seatDescription({ band: g.seatBand, margin_pts: g.marginPts })}): ${fmt$(g.amount)}`;
 }
 
+// Membership is separate from committee status: former members can keep open PACs.
+let currentLegislators = null;
+async function loadCurrentLegislators() {
+  if (currentLegislators) return currentLegislators;
+  const response = await fetch("assets/current_legislators.json", { cache: "no-cache" });
+  if (!response.ok) throw new Error("Could not verify current legislators. Please retry.");
+  const roster = await response.json();
+  if (!["house", "senate"].every(c => Array.isArray(roster.members?.[c]) && roster.members[c].length)) {
+    throw new Error("Current legislator roster is unavailable. Please retry.");
+  }
+  currentLegislators = roster.members;
+  return currentLegislators;
+}
+function memberNameTokens(name) {
+  return String(name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/[^a-z]+/g, " ").trim().split(/\s+/)
+    .filter(t => t.length > 1 && !["jr", "sr", "ii", "iii"].includes(t));
+}
+// Reviewed ORESTAR/legal-name variants; never match on surname alone.
+const CURRENT_MEMBER_NAME_ALIASES = {
+  "Ricki Ruiz": ["Ricardo Ruiz"],
+  "Vikki Breese-Iverson": ["Vikki Iverson"],
+  "Courtney Neron Misslin": ["Courtney Neron"],
+};
+function isCurrentLegislator(filer) {
+  const chamber = getChamber(filer);
+  if (!chamber || !currentLegislators) return false;
+  // Whole tokens accommodate middle initials and committee labels without fuzzy surname matches.
+  const candidates = [filer.candidate_name, filer.name].map(n => new Set(memberNameTokens(n)));
+  return currentLegislators[chamber].some(name => {
+    return [name, ...(CURRENT_MEMBER_NAME_ALIASES[name] || [])].some(variant => {
+      const tokens = memberNameTokens(variant);
+      return tokens.length >= 2 && candidates.some(candidate => tokens.every(t => candidate.has(t)));
+    });
+  });
+}
+
 /** Only known, recent candidate elections can establish candidate comparability.
  * Senate and statewide executive candidates have four-year terms. Other offices use the previous cycle.
  * Missing election metadata is not evidence of a current candidacy.
@@ -576,7 +613,7 @@ function seatCompetitiveness(filer) {
 }
 
 async function findComparables(targetProfile, targetFiler, cycle) {
-  await loadRaceMargins();
+  await Promise.all([loadRaceMargins(), loadCurrentLegislators()]);
   const targetSeat = seatCompetitiveness(targetFiler);
   if (targetSeat) {
     console.log(`[recommend] target seat: ${targetSeat.label} (${targetSeat.year})`);
@@ -601,6 +638,10 @@ async function findComparables(targetProfile, targetFiler, cycle) {
     const fOffice = getOffice(f);
     const fParty = getParty(f);
     const fChamber = getChamber(f);
+    // Legislative benchmarks require current officeholders; chamber is eligibility, not a bonus.
+    if (fChamber && !isCurrentLegislator(f)) continue;
+    if (chamber && (fChamber !== chamber || !isCurrentLegislator(f))) continue;
+    if (officeType && !isOfficeComparable(officeType, fOffice)) continue;
     const fTier = f.leadership_tier || 0;
     const peerHouseRole = houseTopRole(f);
     if (targetHouseRole || peerHouseRole) {
@@ -618,7 +659,7 @@ async function findComparables(targetProfile, targetFiler, cycle) {
       if (officeType === fOffice) {
         similarity += 40;  // Exact same office
       } else if (isOfficeComparable(officeType, fOffice)) {
-        similarity += 30;  // state_rep ↔ state_senate or legislative → statewide
+        similarity += 30;  // legislative → statewide
       }
     }
 
@@ -2535,7 +2576,7 @@ function methodSheetRows(groups, cycle) {
   rows.push({ Item: "Established giving benchmark", Value: "comparable seats",
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
-      + `Unopposed seats are matched only to other unopposed seats, never numeric margins. Speaker and House Majority Leader only compare with each other, with a 10% benchmark discount for the Majority Leader. Other comparisons exclude mismatched unopposed seats, unknown peer margins when the target margin is known, and seats more than 20 points apart. Under ${MIN_PEER_GIFTS} such gifts, only eligible comparable giving is used and the donor row says so.` });
+      + `Legislative comparisons use only current members of the same chamber, verified against the official roster. Unopposed seats are matched only to other unopposed seats, never numeric margins. Speaker and House Majority Leader only compare with each other, with a 10% benchmark discount for the Majority Leader. Other comparisons exclude mismatched unopposed seats, unknown peer margins when the target margin is known, and seats more than 20 points apart. Under ${MIN_PEER_GIFTS} such gifts, only eligible comparable giving is used and the donor row says so.` });
   rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
     Detail: "The greater of summed client asks or last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. The floor rounds up to $250 to avoid falling below actual giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",
