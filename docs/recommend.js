@@ -225,6 +225,24 @@ async function loadRecommendationIdentities(profiles, filers) {
   }));
 }
 
+/** Combine exact organizational display names before scoring, never personal names.
+ * Distinct underlying IDs remain available for attribution and first-gift queries. */
+async function loadPlanningKeys(profiles) {
+  window._planningKeys = new Map();
+  const ids = [...new Set(profiles.flatMap(p => Object.values(p.top_donors_by_year || {}).flat())
+    .map(d => d.donor_id).filter(Boolean))];
+  const donors = await LOB.fetchIn("donors", "donor_id,display_name,book_type", "donor_id", ids);
+  const byName = new Map();
+  for (const d of donors) {
+    if (!d.book_type || PERSON_BOOK_TYPES.has(d.book_type)) continue;
+    const name = donorDisplayName(d.display_name).toLowerCase();
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(d.donor_id);
+  }
+  for (const [name, members] of byName) if (members.length > 1)
+    for (const id of members) window._planningKeys.set(id, `organization:${name}`);
+}
+
 async function loadFirstGifts(profiles, comparables, compProfiles, cycle) {
   window._firstGifts = null;
   window._planIdentityIds = new Map();
@@ -333,6 +351,8 @@ async function runRecommendations() {
     // Repair missing identities from the same scoped donor query as Donor Lookup
     // before scoring, classifying repeat donors, or building export history.
     await loadRecommendationIdentities([targetProfile, ...compProfiles], [filer, ...comparables]);
+
+    await loadPlanningKeys([targetProfile, ...compProfiles]);
 
     await loadFirstGifts([targetProfile, ...compProfiles], comparables, compProfiles, cycle);
 
@@ -745,16 +765,10 @@ function planDonorFamily(name) {
 }
 
 function donorDisplayName(name) {
-  let label = (planDonorFamily(name) || String(name || "")).trim().replace(/\s+/g, " ");
-  const acronyms = new Set(["PAC", "LLC", "USA", "IBM", "AT&T", "SEIU", "AFSCME", "AFT", "UFCW", "OBRC", "NW"]);
-  if (label === label.toUpperCase() || label === label.toLowerCase()) {
-    label = label.replace(/[A-Za-z]+/g, word => acronyms.has(word.toUpperCase())
-      ? word.toUpperCase() : word[0].toUpperCase() + word.slice(1).toLowerCase());
-  }
-  return label
-    .replace(/cooperative/gi, "Cooperative")
-    .replace(/amazon\.com/gi, "Amazon.com")
-    .replace(/\b(pac|llc|usa)\b/gi, word => word.toUpperCase());
+  const label = planDonorFamily(name) || String(name || "");
+  return typeof DN !== "undefined" ? DN.display(label) : label.trim().replace(/\s+/g, " ")
+    .replace(/\bat\s*&\s*t\b/gi, "AT&T").replace(/cooperative/gi, "Cooperative")
+    .replace(/\b(pac|llc|usa)\b/gi, w => w.toUpperCase());
 }
 
 /** Earliest observed annual giving is a proxy, not a claimed first transaction.
@@ -788,7 +802,7 @@ function firstGivingBenchmark(key, profiles, comparables, cycle, seat) {
 function donorKey(d) {
   const family = planDonorFamily(d.name || d.donor);
   if (family) return `family:${family.toLowerCase()}`;
-  return d.donor_key || d.donor_id || `name:${String(d.name || "").trim().toLowerCase()}`;
+  return window._planningKeys?.get(d.donor_id || d.donor_key) || d.donor_key || d.donor_id || `name:${String(d.name || "").trim().toLowerCase()}`;
 }
 
 /**
@@ -1062,6 +1076,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       last_cycle_amt: lastCycleAmt,
       avg_prev: Math.round(avgPrev * 100) / 100,
       comp_max: compRef,
+      comp_max_filers: refGifts.filter(g => g.amount === compRef).map(g => g.filer),
       target,
       current_cycle_amt: currentCycleAmt,
       remaining,
@@ -1314,6 +1329,7 @@ function scoreDonors(targetProfile, comparables, compProfiles, years, cycle, tar
       remaining_ask: remainingAsk,
       comp_min: compMin,
       comp_max: compMax,
+      comp_max_filers: donor.compGifts.filter(g => g.amount === compMax).map(g => g.filer),
       comp_range: `${fmt$(compMin)}–${fmt$(compMax)}`,
       distinct_comps: donor.distinctComps,
       total_to_comps: donor.totalToComps,
@@ -1754,7 +1770,7 @@ function renderRecTable(rows) {
       <td class="num">${fmt$(r.already_given)}</td>
       <td class="num">${fmt$(r.target_ask)}</td>
       <td class="num">${fmt$(r.remaining_ask)}</td>
-      <td class="num" style="font-size:0.8rem">${r.comp_range}</td>
+      <td class="num" style="font-size:0.8rem">${r.comp_range}${comparableMaxCitation(r)}</td>
       <td>
         <div class="why-text">${esc(r.why_summary)}</div>
         <button class="why-toggle" data-donor-idx="${i}">Show details ▸</button>
@@ -1846,15 +1862,16 @@ async function loadLobbyistPlan() {
   const runFiler = window._targetProfile;
   try {
     if (!lobbyistsById) {
-      lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, { ...l, name: donorDisplayName(l.name) }]));
+      lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, { ...l, name: String(l.name || "").trim().replace(/\s+/g, " ") }]));
     }
     if (!partnersById) partnersById = await LOB.loadPartners();
     const rows = [...(window._repeatTargets || []), ...(window._recommendations || [])]
       .flatMap(r => [...(window._planIdentityIds?.get(r.donor_key) || [r.donor_id])].map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
-    const { byKey, contacts, bookTypes } = await LOB.planAttribution(rows, lobbyistsById);
+    const { byKey, contacts, bookTypes, rejected } = await LOB.planAttribution(rows, lobbyistsById);
     // A newer run may have started while this one was loading.
     if (window._cycle !== runCycle || window._targetProfile !== runFiler) return;
     window._lobbyAttr = byKey;
+    window._rejectedFirmIds = rejected;
     window._donorContacts = contacts;
     window._donorTypes = bookTypes;
     status.textContent = "";
@@ -1922,33 +1939,41 @@ function isOrganization(row) {
   return !PERSON_BOOK_TYPES.has(type);
 }
 
+/** A member's primary donor belongs under the firm's lead. Only an
+ * unambiguous recorded membership can promote a person to a firm. */
+function owningFirm(lobbyist) { return LOB.owningFirm(lobbyist, lobbyistsById); }
+
 function planGroups() {
   const donorRows = [
     ...(window._repeatTargets || []).map(r => ({
       donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
       type: "Donor Target", target: r.target, given: r.current_cycle_amt,
-      remaining: r.remaining, last_cycle: r.last_cycle_amt, comp_max: r.comp_max || 0,
+      remaining: r.remaining, last_cycle: (r.cycles ? r.cycles[window._cycle - 2] || 0 : r.last_cycle_amt || 0), comp_max_filers: r.comp_max_filers || [], comp_max: r.comp_max || 0,
       factors: r.factors || [], cycles: r.cycles || {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
     ...(window._recommendations || []).map(r => ({
       donor: r.donor, donor_id: r.donor_id, donor_key: r.donor_key,
       type: "New Prospect", target: r.target_ask, given: r.already_given,
-      remaining: r.remaining_ask, last_cycle: null, comp_max: r.comp_max,
+      remaining: r.remaining_ask, last_cycle: 0, comp_max: r.comp_max, comp_max_filers: r.comp_max_filers || [],
       factors: r.factors || [], cycles: {}, comp_gifts: r.comp_gifts || [], benchmark: r.benchmark || null })),
   ];
   const groups = new Map();
   const none = { lobbyist: null, rows: [] };
   for (const row of donorRows.filter(isOrganization)) {
     const list = lobbyistsFor(row);
+    let groupLobbyist = list[0] ? owningFirm(list[0].lobbyist) : null;
+    if (groupLobbyist && window._rejectedFirmIds?.get(row.donor_key)?.has(groupLobbyist.lobbyist_id))
+      groupLobbyist = list[0].lobbyist;
     // People reachable through the firm the donor is filed under are already
     // on its row; "also" is for anyone else.
-    const firm = list[0] ? firmContacts(list[0].lobbyist) : { primary: null, others: [] };
+    const firm = list[0] ? firmContacts(groupLobbyist) : { primary: null, others: [] };
     const atFirm = new Set([firm.primary, ...firm.others].filter(Boolean).map(m => m.lobbyist_id));
+    if (groupLobbyist) atFirm.add(groupLobbyist.lobbyist_id);
     const entry = { ...row, attribution: list[0] || null,
                     contacts: window._donorContacts?.get(row.donor_key) || [],
                     also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
     if (!list.length) { none.rows.push(entry); continue; }
-    const id = list[0].lobbyist.lobbyist_id;
-    if (!groups.has(id)) groups.set(id, { lobbyist: list[0].lobbyist, rows: [] });
+    const id = groupLobbyist.lobbyist_id;
+    if (!groups.has(id)) groups.set(id, { lobbyist: groupLobbyist, rows: [] });
     groups.get(id).rows.push(entry);
   }
   const q = (document.getElementById("plan-search")?.value || "").trim().toLowerCase();
@@ -1965,6 +1990,7 @@ function planGroups() {
   }
   for (const g of out) {
     g.rows.sort((a, b) => b.remaining - a.remaining || b.target - a.target);
+    g.last_cycle = g.rows.reduce((s, r) => s + Number(r.last_cycle || 0), 0);
     g.target = g.rows.reduce((s, r) => s + r.target, 0);
     g.given = g.rows.reduce((s, r) => s + r.given, 0);
     g.remaining = g.rows.reduce((s, r) => s + r.remaining, 0);
@@ -2010,7 +2036,7 @@ function lobbyistHeader(l) {
     : own ? `<div class="plan-contact">${esc(own)}</div>` : "";
   const item = m => `<li>${esc(m.name)}${contactLine(m) ? ` <span>${esc(contactLine(m))}</span>` : ""}</li>`;
   const more = others.length
-    ? `<details class="plan-members"><summary>${others.length} other${others.length === 1 ? "" : "s"} at the firm</summary>
+    ? `<details class="plan-members" open><summary>${others.length} other${others.length === 1 ? "" : "s"} at the firm</summary>
          <ul>${others.map(item).join("")}</ul></details>`
     : "";
   return `<div class="plan-lobbyist">${esc(l.name)} <span class="plan-firm">firm</span></div>${lead}${more}`;
@@ -2030,6 +2056,14 @@ function contactsCell(r) {
   const more = rest.length
     ? `<div class="plan-also">also: ${esc(rest.map(c => c.name).join(", "))}</div>` : "";
   return `<div class="plan-donor-contact">${first.is_primary ? "★ " : ""}${esc(line(first))}</div>${more}`;
+}
+
+function comparableMaxCitation(row) {
+  const names = [...new Set(row.comp_max_filers || [])];
+  return names.map(name => {
+    const filer = (window._comparables || []).find(f => f.name === name);
+    return `<div class="plan-comp-source">${esc(name)}${filer?.filer_id ? ` (filer ${esc(filer.filer_id)})` : ""}</div>`;
+  }).join("");
 }
 
 function renderLobbyistPlan() {
@@ -2055,14 +2089,14 @@ function renderLobbyistPlan() {
     const header = `<tr class="plan-group">
       <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
       <td>${head}</td>
-      <td class="plan-count"><button type="button" class="plan-group-toggle" data-group="${groupIndex}" aria-expanded="false">▸ ${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}</button></td>
+      <td class="plan-count"><button type="button" class="plan-group-toggle" data-group="${groupIndex}" aria-expanded="true">▾ ${g.rows.length} donor${g.rows.length === 1 ? "" : "s"}</button></td>
       <td class="num">${fmt$(g.target)}</td>
       <td class="num">${fmt$(g.given)}</td>
       <td class="num">${fmt$(g.remaining)}</td>
-      <td></td><td></td>
+      <td class="num">${fmt$(g.last_cycle)}</td><td></td>
       <td class="plan-why">${l ? esc(g.tier.why) : ""}</td>
     </tr>`;
-    const rows = g.rows.map(r => `<tr class="plan-donor" data-group="${groupIndex}" hidden>
+    const rows = g.rows.map(r => `<tr class="plan-donor" data-group="${groupIndex}">
       <td></td>
       <td>${esc(r.donor)}${contactsCell(r)}${r.also.length ? `<div class="plan-also">also: ${esc(r.also.map(a => a.lobbyist.name).join(", "))}</div>` : ""}</td>
       <td><span class="plan-type ${r.type === "Donor Target" ? "is-target" : "is-prospect"}">${r.type === "Donor Target" ? "Target" : "Prospect"}</span></td>
@@ -2070,7 +2104,7 @@ function renderLobbyistPlan() {
       <td class="num">${fmt$(r.given)}</td>
       <td class="num">${fmt$(r.remaining)}</td>
       <td class="num">${r.last_cycle === null ? "—" : fmt$(r.last_cycle)}</td>
-      <td class="num">${r.comp_max ? fmt$(r.comp_max) : "—"}</td>
+      <td class="num">${r.comp_max ? fmt$(r.comp_max) : "—"}${comparableMaxCitation(r)}</td>
       <td class="plan-attr">${r.attribution
         ? `${r.attribution.status === "confirmed" ? "" : '<span class="lob-unreviewed" title="Suggested match, not yet reviewed">?</span> '}${esc(attributionText(r.attribution))}`
         : ""}</td>
@@ -2244,6 +2278,7 @@ function planSheetAoa(groups, cycle) {
       body.push(row); bodyRoles.push("donor");
     }
     for (let i = 0; i < width; i++) if (groupSums[i]) lead[i] = Math.round(groupSums[i]);
+    for (const b of bands.filter(b => !b.current)) lead[b.start] = Math.round(groupSums[b.start]);
   }
   for (let i = 0; i < width; i++) if (totals[i]) totalsRow[i] = Math.round(totals[i]);
   push(totalsRow, "total");
@@ -2308,6 +2343,7 @@ function lobbyistSheetRows(groups, cycle) {
       "Suggested ask": Math.round(g.target),
       [`Given ${cycle - 1}–${cycle}`]: Math.round(g.given),
       "Remaining": Math.round(g.remaining),
+      "Last Cycle": Math.round(g.last_cycle || 0),
       "Given to this committee to date": Math.round(g.tier.lifetime),
       "Like candidates supported": g.tier.likeComps,
       "Given to like candidates": Math.round(g.tier.likeTotal),
@@ -2429,7 +2465,7 @@ function writeCallList(wb, groups, cycle) {
   const { rows, roles, merges, cols, moneyFrom, headerRows } = planSheetAoa(groups, cycle);
   const ws = wb.addWorksheet("Call list", {
     views: [{ state: "frozen", xSplit: 3, ySplit: headerRows }],
-    properties: { defaultRowHeight: 16, outlineLevelRow: 2, outlineProperties: { summaryBelow: false } },
+    properties: { defaultRowHeight: 16, outlineLevelRow: 1, outlineProperties: { summaryBelow: false } },
   });
   rows.forEach(r => ws.addRow(r));
   ws.columns.forEach((col, i) => { col.width = cols[i]?.wch || 12; });
@@ -2461,7 +2497,7 @@ function writeCallList(wb, groups, cycle) {
       });
     } else if (role === "donor") {
       row.outlineLevel = 1;
-      row.hidden = false;
+      row.hidden = true;
       row.getCell(3).alignment = { indent: 1 };
     }
     if (role === "donor" || role === "lobbyist" || role === "lobbyist-partner" || role === "total") {
@@ -2572,7 +2608,7 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
   const lobRows = lobbyistSheetRows(groups, cycle);
   if (lobRows.length) {
     writeTable(wb, "Lobbyists", lobRows, {
-      money: ["Suggested ask", `Given ${cycle - 1}–${cycle}`, "Remaining",
+      money: ["Suggested ask", `Given ${cycle - 1}–${cycle}`, "Remaining", "Last Cycle",
               "Given to this committee to date", "Given to like candidates"],
       widths: { "Lobbyist / Firm": 30, "Firm / Title": 24, Contact: 24, Email: 30,
                 "Other contacts": 44, Clients: 60, "Why this tier": 60 },

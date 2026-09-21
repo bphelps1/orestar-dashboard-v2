@@ -117,23 +117,37 @@ const LOB = (() => {
     const unresolved = new Map();        // labelKey → donorKey, for the fallback
     for (const d of donors) {
       const key = d.key || labelKey(d.name);
-      if (d.donor_id) add(key, d.donor_id);
+      if (d.donor_id) {
+        const ids = typeof ID === "undefined" ? [d.donor_id] : await ID.members(d.donor_id);
+        for (const id of ids) add(key, id);
+      }
       else unresolved.set(labelKey(d.name), key);
       if (!idsByKey.has(key)) idsByKey.set(key, new Set());
     }
     if (unresolved.size) {
       for (const [label, ids] of await _poolIdsForLabels([...unresolved.keys()])) {
-        for (const id of ids) add(unresolved.get(label), id);
+        for (const sourceId of ids) {
+          const members = typeof ID !== "undefined" ? await ID.members(sourceId) : [sourceId];
+          for (const id of members) add(unresolved.get(label), id);
+        }
       }
     }
 
     const ids = [...keysById.keys()];
-    const [attr, contactsByDonor, bookTypes] = await Promise.all([
+    const [attr, contactsByDonor, bookTypes, directLinks] = await Promise.all([
       fetchIn("donor_lobbyists", "*", "donor_id", ids),
       loadDonorContacts(ids),
       loadBookTypes(ids),
+      fetchIn("donor_lobbyist_links", "donor_id,lobbyist_id,status", "donor_id", ids),
     ]);
 
+    const rejected = new Map();
+    for (const link of directLinks) if (link.status === "rejected") {
+      for (const key of keysById.get(link.donor_id) || []) {
+        if (!rejected.has(key)) rejected.set(key, new Set());
+        rejected.get(key).add(link.lobbyist_id);
+      }
+    }
     const byKey = new Map();
     for (const a of attr) {
       const lob = lobbyistsById.get(a.lobbyist_id);
@@ -182,7 +196,7 @@ const LOB = (() => {
         if (hit) types.set(d.key || labelKey(d.name), hit);
       }
     }
-    return { byKey, contacts, bookTypes: types };
+    return { byKey, contacts, bookTypes: types, rejected };
   }
 
   function sortAttribution(list) {
@@ -274,9 +288,12 @@ const LOB = (() => {
     }
     const donorToLabels = new Map();
     for (const [label, ids] of poolIdsForLabels(poolRows, keys)) {
-      for (const id of ids) {
-        if (!donorToLabels.has(id)) donorToLabels.set(id, []);
-        donorToLabels.get(id).push(label);
+      for (const sourceId of ids) {
+        const members = typeof ID !== "undefined" ? await ID.members(sourceId) : [sourceId];
+        for (const id of members) {
+          if (!donorToLabels.has(id)) donorToLabels.set(id, []);
+          if (!donorToLabels.get(id).includes(label)) donorToLabels.get(id).push(label);
+        }
       }
     }
     const donorIds = new Map();
@@ -330,7 +347,17 @@ const LOB = (() => {
     return client ? `client (${text})` : text;
   }
 
-  return { fetchAll, fetchIn, normOrg, labelKey, pgArray, loadLobbyists, loadClients,
+function owningFirm(lobbyist, lobbyistsById) {
+  if (!lobbyist) return lobbyist;
+  if (lobbyist.kind === "firm") return lobbyist;
+  const firms = [...(lobbyistsById?.values() || [])].filter(l => l.kind === "firm"
+    && (l.firm_member_ids || []).includes(lobbyist.lobbyist_id));
+  if (firms.length === 1) return firms[0];
+  const named = firms.filter(f => [f.name, f.firm].some(n => n && n.toLowerCase() === String(lobbyist.firm || '').toLowerCase()));
+  return named.length === 1 ? named[0] : lobbyist;
+}
+
+  return { owningFirm, fetchAll, fetchIn, normOrg, labelKey, pgArray, loadLobbyists, loadClients,
            loadPartners, loadDonorContacts, loadBookTypes, loadBookTypesByName,
            planAttribution, attributionForLabels, describeMethod, poolIdsForLabels };
 })();

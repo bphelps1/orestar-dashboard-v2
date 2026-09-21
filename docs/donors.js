@@ -25,12 +25,13 @@ let highlightIdx = -1;
 let results = [];
 
 async function runSearch(q) {
+  if (typeof DN !== "undefined") await DN.load();
   const sb = await getSupabase();
   // RPC rather than a display_name filter: it searches aliases too, so a raw
   // spelling ("Phillip H Knight") finds the resolved entity.
   const { data, error } = await sb.rpc("search_donors", { p_q: q, p_limit: 12 });
   if (error) { console.warn(error.message); return; }
-  results = data || [];
+  results = typeof DN === "undefined" ? data || [] : DN.tree(data || []);
   const ul = $("dn-results");
   highlightIdx = -1;
   if (!results.length) {
@@ -95,14 +96,18 @@ async function loadProfile(donorId) {
   $("dn-profile").hidden = true;
   $("dn-loading").hidden = false;
   try {
+    if (typeof DN !== "undefined") await DN.load();
     const sb = await getSupabase();
-    const [{ data: donor, error: e1 }, { data: prof, error: e2 }, { data: aliases }] = await Promise.all([
-      sb.from("donors").select("*").eq("donor_id", donorId).single(),
-      sb.rpc("donor_profile", { p_donor_id: donorId }),
-      sb.from("donor_aliases").select("raw_name").eq("donor_id", donorId).limit(40),
-    ]);
+    const { data: donor, error: e1 } = await sb.rpc("donor_identity", { p_donor_id: donorId });
     if (e1) throw new Error(e1.message);
+    if (!donor) throw new Error("This donor could not be found. Search again for its current identity.");
+    const memberIds = donor.member_ids || [donor.donor_id];
+    const [{ data: prof, error: e2 }, { data: aliases }] = await Promise.all([
+      sb.rpc("donor_profile", { p_donor_id: donor.donor_id }),
+      sb.from("donor_aliases").select("raw_name").in("donor_id", memberIds).limit(40),
+    ]);
     if (e2) throw new Error(e2.message);
+    if (typeof DN !== "undefined") donor.display_name = DN.display(donor.display_name);
     currentDonor = donor;
 
     $("dn-name").textContent = donor.display_name;
@@ -200,7 +205,7 @@ async function loadTxns() {
   const sb = await getSupabase();
   const { data, error } = await sb.from("transactions")
     .select("tran_date, tran_type, amount, filer_canonical, filer, filer_id, purpose")
-    .eq("donor_id", currentDonor.donor_id)
+    .in("donor_id", currentDonor.member_ids || [currentDonor.donor_id])
     .order("tran_date", { ascending: false, nullsFirst: false })
     .range(txnPage * PAGE, txnPage * PAGE + PAGE - 1);
   if (error) { console.warn(error.message); return; }

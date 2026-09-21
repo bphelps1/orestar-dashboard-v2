@@ -38,7 +38,7 @@ function context(extra = {}) {
     window: {},
     ...extra,
   });
-  vm.runInContext(keyCode + peerCode + tierCode + exportCode, ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, "docs/lib/donor-names.js"), "utf8") + keyCode + peerCode + tierCode + exportCode, ctx);
   return ctx;
 }
 

@@ -84,6 +84,7 @@ async function runSearch() {
   showError("xp-error", "");
   $("xp-status").textContent = "Loading…";
   try {
+    await DN.load();
     const f = readFilters();
     // A one-character substring matches millions of rows and can't be sorted
     // inside any sane timeout. Two characters is also what the donor
@@ -137,7 +138,7 @@ function renderTable(rows) {
     `<th class="${c.num ? "num" : ""}" data-col="${c.key}">${c.label}${sortCol === c.key ? (sortDir ? " ▲" : " ▼") : ""}</th>`
   ).join("") + "</tr>";
   $("xp-tbody").innerHTML = rows.map(r => "<tr>" + COLS.map(c =>
-    `<td class="${c.num ? "num" : ""}">${c.num ? fmtAmount(r[c.key]) : esc(r[c.key])}</td>`
+    `<td class="${c.num ? "num" : ""}">${c.num ? fmtAmount(r[c.key]) : esc(c.key === "contributor_payee_canonical" ? DN.display(r[c.key]) : r[c.key])}</td>`
   ).join("") + "</tr>").join("");
   $("xp-thead").querySelectorAll("th").forEach(th => {
     th.onclick = () => {
@@ -268,18 +269,19 @@ function initDonorAutocomplete() {
     if (q.length < 2) { ul.hidden = true; return; }
     donorSearchTimer = setTimeout(async () => {
       try {
+        await DN.load();
         const sb = await getSupabase();
         // Alias-aware, same as /donors: a raw spelling finds the entity.
         const { data } = await sb.rpc("search_donors", { p_q: q, p_limit: 8 });
         if (!data || !data.length) { ul.hidden = true; return; }
         ul.innerHTML = data.map((d, i) =>
-          `<li data-idx="${i}">${esc(d.display_name)}
+          `<li data-idx="${i}">${esc(DN.display(d.display_name))}
              <div class="sub">${esc([d.book_type, [d.city, d.state].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}
              · ${Number(d.total_given || 0).toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}</div></li>`).join("");
         ul.hidden = false;
         ul.querySelectorAll("li").forEach((li, i) => li.addEventListener("mousedown", () => {
           selectedDonor = data[i];
-          input.value = data[i].display_name;
+          input.value = DN.display(data[i].display_name);
           ul.hidden = true;
           page = 0;
           runSearch();
