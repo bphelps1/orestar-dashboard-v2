@@ -60,10 +60,17 @@ function readFilters() {
 }
 
 /** Apply the current filters to a supabase query builder. */
+function nameFilter(canonical, raw, value) {
+  // PostgREST quotes protect commas/parentheses in literal organization names.
+  const pattern = '"%' + value.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '%"';
+  return `${canonical}.ilike.${pattern},${raw}.ilike.${pattern}`;
+}
 function applyFilters(q, f) {
-  if (f.filer)     q = q.ilike("filer_canonical", `%${f.filer}%`);
-  if (f.donorId)   q = q.eq("donor_id", f.donorId);
-  else if (f.payee) q = q.ilike("contributor_payee_canonical", `%${f.payee}%`);
+  const names = [];
+  if (f.filer) names.push(`or(${nameFilter("filer_canonical", "filer", f.filer)})`);
+  if (f.donorId) q = q.in("donor_id", f.donorIds || [f.donorId]);
+  else if (f.payee) names.push(`or(${nameFilter("contributor_payee_canonical", "contributor_payee", f.payee)})`);
+  if (names.length) q = q.or(`and(${names.join(",")})`);
   if (f.type)      q = q.eq("tran_type", f.type);
   if (f.ctype)     q = q.ilike("book_type", `%${f.ctype}%`);
   if (f.dateStart) q = q.gte("tran_date", f.dateStart);
@@ -202,6 +209,11 @@ async function downloadFiltered() {
     const sb = await getSupabase();
     const filters = readFilters();
     const donor = selectedDonor;
+    if (filters.donorId) {
+      const { data, error } = await sb.rpc("donor_group_ids", { p_donor_id: filters.donorId });
+      if (error) throw new Error(`Could not resolve selected donor: ${error.message}`);
+      filters.donorIds = data?.length ? data : [filters.donorId];
+    }
     if (typeof DN !== "undefined") await DN.load();
     let rows = [];
     let truncated = false;
