@@ -2482,17 +2482,20 @@ function lobbyistHeaderText(l) {
     return `<div class="plan-lobbyist">${esc(l.name)}</div>
             <div class="plan-contact">${esc(lobbyistContact(l))}</div>`;
   }
-  const { primary, others } = firmContacts(l);
-  const own = contactLine(l);
-  const lead = primary
-    ? `<div class="plan-contact"><span class="plan-primary">${esc(primary.name)}</span>${own || contactLine(primary) ? " · " : ""}${esc(own || contactLine(primary))}</div>`
-    : own ? `<div class="plan-contact">${esc(own)}</div>` : "";
+  const primary = portraitPerson(l);
+  const others = (l.firm_member_ids || []).map(id => lobbyistsById?.get(id))
+    .filter(m => m && m.lobbyist_id !== primary?.lobbyist_id);
+  const contact = contactLine(l) || (primary ? contactLine(primary) : "");
+  const lead = contact ? `<div class="plan-contact">${esc(contact)}</div>` : "";
   const item = m => `<li>${portraitMarkup(m, true)}${esc(m.name)}${contactLine(m) ? ` <span>${esc(contactLine(m))}</span>` : ""}</li>`;
   const more = others.length
     ? `<details class="plan-members" open><summary>${others.length} other${others.length === 1 ? "" : "s"} at the firm</summary>
          <ul>${others.map(item).join("")}</ul></details>`
     : "";
-  return `<div class="plan-lobbyist">${esc(l.name)} <span class="plan-firm">firm</span></div>${lead}${more}`;
+  const title = primary
+    ? `<div class="plan-lobbyist">${esc(primary.name)}</div><div class="plan-contact">${esc(l.name)}</div>`
+    : `<div class="plan-lobbyist">${esc(l.name)} <span class="plan-firm">firm</span></div>`;
+  return `${title}${lead}${more}`;
 }
 
 /** The tier chip in front of a lobbyist: PARTNER, Tier 1 … Tier 4. */
@@ -2994,7 +2997,10 @@ async function writeCallList(wb, groups, cycle, imageCache = new Map()) {
   ws.getColumn(1).width = 24;
   const headers = roles.flatMap((role,i) => role === "lobbyist" || role === "lobbyist-partner" ? [i+1] : []);
   for (let i = 0; i < headers.length; i++) {
-    if (groups[i]?.lobbyist) await addPortrait(wb, ws, portraitPerson(groups[i].lobbyist), headers[i], 2, imageCache);
+    if (groups[i]?.lobbyist) {
+      writeFirmName(ws, groups[i].lobbyist, headers[i], 3);
+      await addPortrait(wb, ws, portraitPerson(groups[i].lobbyist), headers[i], 2, imageCache);
+    }
   }
   return ws;
 }
@@ -3084,6 +3090,20 @@ function writeCover(wb, groups, cycle) {
   return ws;
 }
 
+// Keep identity/grouping data intact; only the visible Excel label changes.
+function writeFirmName(ws, lobbyist, rowNumber, columnNumber) {
+  if (lobbyist.kind !== "firm") return;
+  const primary = portraitPerson(lobbyist);
+  if (!primary) return;
+  const row = ws.getRow(rowNumber), cell = row.getCell(columnNumber);
+  cell.value = {richText:[
+    {font:{bold:true},text:primary.name},
+    {font:{bold:false},text:"\n" + lobbyist.name},
+  ]};
+  cell.alignment = {wrapText:true,vertical:"middle"};
+  row.height = Math.max(row.height || 16, 36);
+}
+
 async function addPortrait(wb, ws, person, rowNumber, columnNumber, imageCache) {
   const cell = ws.getRow(rowNumber).getCell(columnNumber);
   const image = typeof LP !== "undefined" ? await LP.image(person) : null;
@@ -3146,7 +3166,10 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
       note: "One line per lobbyist. Firm portraits show the designated lead. Photos are embedded for offline viewing.",
     });
     const named = groups.filter(g => g.lobbyist);
-    for (let i=0;i<named.length;i++) await addPortrait(wb,lobbyistSheet,portraitPerson(named[i].lobbyist),i+4,1,imageCache);
+    for (let i=0;i<named.length;i++) {
+      writeFirmName(lobbyistSheet,named[i].lobbyist,i+4,3);
+      await addPortrait(wb,lobbyistSheet,portraitPerson(named[i].lobbyist),i+4,1,imageCache);
+    }
   }
   const flat = lobbyistPlanExportRows();
   if (flat.length) {
