@@ -25,6 +25,11 @@ test('firm portrait uses only its designated lead and app escapes photo labels',
  assert.equal(c.portraitPerson({kind:'firm',firm_primary_id:7}).name,'Jane Example');
  assert.equal(c.portraitPerson({kind:'firm',firm_member_ids:[7]}),null);
  assert.match(c.portraitMarkup(null),/Photo unavailable/);
+ const header=c.lobbyistHeaderText({kind:'firm',name:'Example & Partners',firm_primary_id:7,firm_member_ids:[7]});
+ assert.match(header,/<div class="plan-lobbyist">Jane Example<\/div><div class="plan-contact">Example &amp; Partners<\/div>/);
+ const noLead=c.lobbyistHeaderText({kind:'firm',name:'No lead firm',firm_member_ids:[7]});
+ assert.match(noLead,/<div class="plan-lobbyist">No lead firm/);
+
 });
 let ExcelJS;try{ExcelJS=require(process.env.EXCELJS_MODULE||'exceljs')}catch{}
 test('Excel embeds a portrait without moving totals incorrectly or expanding donor groups', {skip:!ExcelJS}, async()=>{
@@ -46,4 +51,15 @@ test('Excel embeds a portrait without moving totals incorrectly or expanding don
  assert.equal(saved.getImages().length,1);assert.equal(saved.getRow(10).hidden,true);assert.equal(saved.getCell('K8').value,1000);
  assert.equal(saved.getRow(9).height,84);
  await c.writeContactPhotos(wb,[g],new Map());assert.equal(wb.getWorksheet('Contact photos').getImages().length,1);
+ const firm={kind:'firm',name:'Example Firm',firm_primary_id:1,firm_member_ids:[1]};
+ const firmBook=new BrowserExcelJS.Workbook();
+ const firmSheet=await c.writeCallList(firmBook,[{...g,lobbyist:firm}],2026,new Map());
+ assert.equal(firmSheet.getCell('C9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
+ assert.equal(firmSheet.getImages().length,1);
+ const savedFirm=new BrowserExcelJS.Workbook();await savedFirm.xlsx.load(await firmBook.xlsx.writeBuffer());
+ assert.equal(savedFirm.getWorksheet('Call list').getCell('C9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
+ const flat=c.writeTable(firmBook,'Lobbyists',[{Photo:'',Tier:'Tier 1','Lobbyist / Firm':firm.name}],{note:'fixture'});
+ c.writeFirmName(flat,firm,4,3);
+ assert.equal(flat.getCell('C4').value.richText[0].text,person.name);
+
 });
