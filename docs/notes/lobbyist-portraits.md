@@ -2,7 +2,7 @@
 
 The app and Excel exports use public, named portraits from the Oregon Capitol Club member directory: https://oregoncapitolclub.org/user/.
 
-The Call list and Lobbyists sheets place an embedded photo beside the lobbyist's name. Firm rows use the designated lead, never an arbitrarily chosen member. The Contact photos sheet includes other firm members and profile source links. Donor groups remain collapsed, and financial calculations and source columns are unchanged.
+The Call list and Lobbyists sheets place an embedded photo beside the lobbyist's name. Firm rows show the designated primary contact's photo and name first, with the firm name beneath. A firm without a designated primary retains its firm name and a photo placeholder. The Contact photos sheet includes other firm members and profile source links. Donor groups remain collapsed, and financial calculations and source columns are unchanged.
 
 Portraits match the lobbyist's Capitol Club ID. A manual contact without an ID can match only a unique exact full name or recorded alias. Missing or ambiguous matches display “Photo unavailable.” This is directory matching, not face recognition.
 

@@ -41,3 +41,19 @@ test('filtered CSV fills display columns while retaining original transaction na
  assert.equal(downloaded.name,'orestar_filtered.csv');assert.equal(source.filer_canonical,null);
  assert.equal(document.getElementById('xp-status').textContent,'Downloaded 1 rows.');
 });
+test('CSV matches recorded and canonical names together, safely quoting punctuation',()=>{
+ const {c}=harness();const calls=[];const q={or(v){calls.push(['or',v]);return this;},in(k,v){calls.push(['in',k,v]);return this;}};
+ const base={amtMin:'',amtMax:''};
+ c.applyFilters(q,{...base,filer:'Daniel Nguyen',payee:'Acme, "Inc." (PAC)'});
+ assert.equal(calls.length,1);assert.equal(calls[0][0],'or');
+ assert.match(calls[0][1],/and\(or\(filer_canonical/);assert.match(calls[0][1],/contributor_payee\.ilike/);assert.ok(calls[0][1].includes('\\"Inc.\\"'));
+ calls.length=0;c.applyFilters(q,{...base,donorId:'a',donorIds:['a','b'],payee:'ignored'});
+ assert.deepEqual(calls,[['in','donor_id',['a','b']]]);
+});
+test('selected donor CSV resolves saved merge members before reading transactions',async()=>{
+ const {c}=harness();let used;
+ vm.runInContext('selectedDonor={donor_id:"a",display_name:"Merged PAC"}',c);
+ const query={select(){return this;},in(key,ids){used={key,ids};return this;},order(){return this;},range:async()=>({data:[]})};
+ c.getSupabase=async()=>({rpc:async(name,params)=>{assert.equal(name,'donor_group_ids');assert.equal(params.p_donor_id,'a');return {data:['a','b']};},from:()=>query});
+ await c.downloadFiltered();assert.equal(used.key,'donor_id');assert.deepEqual(Array.from(used.ids),['a','b']);
+});
