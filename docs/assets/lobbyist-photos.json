@@ -2,143 +2,203 @@
   "version": 1,
   "source": "https://oregoncapitolclub.org/user/",
   "photos": {
-    "user-1156": {
-      "name": "Kirsten Larson Adams",
-      "path": "assets/lobbyist-photos/user-1156-3a6167827dbf.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/K-headshot.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kirsten Larson Adams"
+    "lobbyist-495": {
+      "name": "Timothy Bernasek",
+      "path": "assets/lobbyist-photos/lobbyist-495-a51cf5552e5b.jpg",
+      "source": "https://www.dunncarney.com/wp-content/uploads/2022/03/tim-bernasek-770x433-1.jpg",
+      "profile": "https://www.dunncarney.com/people/timothy-j-bernasek"
     },
-    "user-784": {
-      "name": "Jessica Adamson",
-      "path": "assets/lobbyist-photos/user-784-c25a3c375faf.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Jessica-2024.1.png",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jessica Adamson"
+    "lobbyist-629": {
+      "name": "Dana Hepper",
+      "path": "assets/lobbyist-photos/lobbyist-629-cbfa277f1e33.jpg",
+      "source": "https://childinst.org/wp-content/uploads/2018/09/Dana-Hepper_web.jpg",
+      "profile": "https://childinst.org/about-us/our-staff-team/dana-hepper/"
     },
-    "user-1838": {
-      "name": "Alexander Aghdaei",
-      "path": "assets/lobbyist-photos/user-1838-3e050b5afb32.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/Alexander-Aghdaei-scaled.jpeg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alexander Aghdaei"
+    "lobbyist-651": {
+      "name": "Sristi Kamal",
+      "path": "assets/lobbyist-photos/lobbyist-651-97b665becf99.jpg",
+      "source": "https://westernlaw.org/wp-content/uploads/2025/09/Sristi-Kamal-2025.jpg",
+      "profile": "https://westernlaw.org/about-us/staff/"
     },
-    "user-1727": {
-      "name": "Odalis Aguilar",
-      "path": "assets/lobbyist-photos/user-1727-e7ce3a1d8b10.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1887-Odalis-Aguilar-2.9.23.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Odalis Aguilar"
+    "lobbyist-677": {
+      "name": "Abby Lee",
+      "path": "assets/lobbyist-photos/lobbyist-677-f5266fabb6db.jpg",
+      "source": "https://occa17.com/wp-content/uploads/elementor/thumbs/Staff-Photos_AbbyLee-new2025-r56df5em990xkjnup3y89566hfi7vyu0krcl2cy0z4.jpg",
+      "profile": "https://occa17.com/about/contact-us/"
     },
-    "user-1920": {
-      "name": "Marris Alden",
-      "path": "assets/lobbyist-photos/user-1920-a36852c3d474.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/Marris-Alden-Cropped.png",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marris Alden"
+    "lobbyist-708": {
+      "name": "Olivia Mannon",
+      "path": "assets/lobbyist-photos/lobbyist-708-ffc35e89b0aa.jpg",
+      "source": "https://www.ohsu.edu/sites/default/files/2025-12/olivia-mannon.jpg",
+      "profile": "https://www.ohsu.edu/government-relations/government-and-community-relations-team"
     },
-    "user-1452": {
-      "name": "Greg Alderson",
-      "path": "assets/lobbyist-photos/user-1452-f2c4766d6cf9.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/02/GA_headshot2.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Alderson"
+    "lobbyist-752": {
+      "name": "Emielle Nischik",
+      "path": "assets/lobbyist-photos/lobbyist-752-f1941849b696.jpg",
+      "source": "https://www.osba.org/wp-content/uploads/Nischik-headshot-2-scaled.jpg",
+      "profile": "https://www.osba.org/our-team/"
     },
-    "user-1674": {
-      "name": "Susan Allen",
-      "path": "assets/lobbyist-photos/user-1674-0b964f033696.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1847-Susan-Allen-2.6.23.jpeg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Susan Allen"
+    "lobbyist-759": {
+      "name": "Amanda Orozco",
+      "path": "assets/lobbyist-photos/lobbyist-759-632d5813aa25.jpg",
+      "source": "https://oregonhunger.org/wp-content/uploads/2026/01/ee241cf6-2872-4ac3-bf6c-dd246f22b6ab.jpg",
+      "profile": "https://oregonhunger.org/team-biographies/#amanda"
     },
-    "user-1233": {
-      "name": "Morgan Allen",
-      "path": "assets/lobbyist-photos/user-1233-d0650abc3e7e.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1049-Morgan-Allen-2018.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Morgan Allen"
+    "lobbyist-868": {
+      "name": "Ryan Tuthill",
+      "path": "assets/lobbyist-photos/lobbyist-868-3a5ecfc71afd.jpg",
+      "source": "https://oregonbusinessindustry.com/wp-content/uploads/Ryan-2026-crop-scaled.jpg",
+      "profile": "https://oregonbusinessindustry.com/team/"
     },
-    "user-1902": {
-      "name": "Rachel Alpert",
-      "path": "assets/lobbyist-photos/user-1902-c821d9b80849.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/RA-Headshot.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rachel Alpert"
+    "lobbyist-876": {
+      "name": "Eliza Walton",
+      "path": "assets/lobbyist-photos/lobbyist-876-516b3abbcb45.jpg",
+      "source": "https://oeconline.org/wp-content/uploads/2026/06/Eliza-Headshot-Web-Resize-.jpg",
+      "profile": "https://oeconline.org/about/staff/"
     },
-    "user-1821": {
-      "name": "Adrienne Anderson",
-      "path": "assets/lobbyist-photos/user-1821-a382b085cdd5.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Edited-281-of-292-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Adrienne Anderson"
+    "lobbyist-907": {
+      "name": "Ryan Tribbett",
+      "path": "assets/lobbyist-photos/lobbyist-907-7bb152d74450.jpg",
+      "source": "https://pwlobby.b-cdn.net/wp-content/uploads/2021/01/pwl-rtribbett-500.png",
+      "profile": "https://pwlobby.com/blog/our-team/ryan-tribbett/"
     },
-    "user-797": {
-      "name": "Evyan Jarvis Andries",
-      "path": "assets/lobbyist-photos/user-797-d0be1fc8e278.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/12/IMG_3803-1-scaled.jpeg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Evyan Jarvis Andries"
+    "lobbyist-910": {
+      "name": "Ted Case",
+      "path": "assets/lobbyist-photos/lobbyist-910-51e93bc7a3ed.jpg",
+      "source": "https://www.oreca.org/wp-content/uploads/6-Ted-Case_ORECA_4x5-272x340-1.jpg",
+      "profile": "https://www.oreca.org/staff-directory/ted-case/"
     },
-    "user-493": {
-      "name": "Richard Angstrom",
-      "path": "assets/lobbyist-photos/user-493-839739483a27.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/11/D3gdOw9I-1.jpeg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Richard Angstrom"
+    "lobbyist-911": {
+      "name": "Inga Deckert",
+      "path": "assets/lobbyist-photos/lobbyist-911-1744c05b143a.jpg",
+      "source": "https://images.squarespace-cdn.com/content/v1/5ce311cc41dd5d0001dbb6ea/1561086214191-QUUZFUZSTAQ83GJ7VXL2/Inga+Headshot+COLOR.jpg?format=500w",
+      "profile": "https://www.proxygr.com/inga-deckert"
     },
-    "user-1888": {
-      "name": "Jenna App",
-      "path": "assets/lobbyist-photos/user-1888-c27c39d4fa27.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Jenna-Headshot2-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jenna App"
+    "lobbyist-917": {
+      "name": "Kathryn Williams",
+      "path": "assets/lobbyist-photos/lobbyist-917-f5342253a3eb.jpg",
+      "source": "https://iccbusiness.org/people/thumbs/55-kw-headshot-3.jpg",
+      "profile": "https://www.iccbusiness.org/leaders/"
     },
-    "user-1803": {
-      "name": "Jennifer Arguinzoni-Ward",
-      "path": "assets/lobbyist-photos/user-1803-9e5a727c1458.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/05/JAW-Hwadshot.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Arguinzoni-Ward"
+    "lobbyist-918": {
+      "name": "Roger Beyer",
+      "path": "assets/lobbyist-photos/lobbyist-918-5552413f86f3.jpg",
+      "source": "https://naifaoregon.org/Resources/Pictures/Roger%20Beyer%20photo%202009.JPG",
+      "profile": "https://naifaoregon.org/Advocacy"
     },
-    "user-1173": {
-      "name": "Greg Astley",
-      "path": "assets/lobbyist-photos/user-1173-44f53cf09b88.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/05/Astley-head.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Astley"
+    "lobbyist-922": {
+      "name": "Jeff Stone",
+      "path": "assets/lobbyist-photos/lobbyist-922-3404657856b7.jpg",
+      "source": "https://i0.wp.com/www.diggermagazine.com/wp-content/uploads/2017/12/JeffStone.png?resize=211%2C211",
+      "profile": "https://diggermagazine.com/success-is-the-sum-of-many-parts/"
     },
-    "user-1886": {
-      "name": "Lizzy Atwood Wills",
-      "path": "assets/lobbyist-photos/user-1886-e4c42124ffc5.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/LIZZY-69-3-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lizzy Atwood Wills"
+    "lobbyist-925": {
+      "name": "Lindsey Scholten",
+      "path": "assets/lobbyist-photos/lobbyist-925-655dad8c2385.jpg",
+      "source": "https://www.olcvscorecard.org/media/uploads/2023/olcv.exdir.jpg",
+      "profile": "https://www.olcvscorecard.org/2025/note/"
     },
-    "user-1345": {
-      "name": "John Audley",
-      "path": "assets/lobbyist-photos/user-1345-b893e7dbd86f.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/John-Audley-4.25.20.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John Audley"
+    "lobbyist-928": {
+      "name": "Melissa Unger",
+      "path": "assets/lobbyist-photos/lobbyist-928-2af634b76111.jpg",
+      "source": "https://seiu503.org/wp-content/uploads/2018/05/Melissa-Unger-Headshot-cropped.jpg",
+      "profile": "https://seiu503.org/board_member/melissa-unger/"
     },
-    "user-1480": {
-      "name": "Chris Baker",
-      "path": "assets/lobbyist-photos/user-1480-6fd1c115c29c.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/CBprofile.jpeg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chris Baker"
+    "lobbyist-948": {
+      "name": "Jon Isaacs",
+      "path": "assets/lobbyist-photos/lobbyist-948-5dee0a28f9a0.jpg",
+      "source": "https://portlandmetrochamber.com/wp-content/uploads/2025/07/JonIsaac-cropped-2025-aspect-ratio-3-2.jpg",
+      "profile": "https://portlandmetrochamber.com/team/jon-isaacs/"
     },
-    "user-1744": {
-      "name": "Jennifer Baker",
-      "path": "assets/lobbyist-photos/user-1744-7853ee04283a.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/Jennifer-R-Baker-9.1.23-p2.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Baker"
+    "user-1004": {
+      "name": "Dale Penn ll",
+      "path": "assets/lobbyist-photos/user-1004-af8824d39493.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1078-Dale-Penn-ll-1.19.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dale Penn ll"
     },
-    "user-1795": {
-      "name": "Thomas Baker",
-      "path": "assets/lobbyist-photos/user-1795-7ab804cad9af.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/08/Head-Shot.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Thomas Baker"
+    "user-1018": {
+      "name": "Drew Hagedorn",
+      "path": "assets/lobbyist-photos/user-1018-d2e77d9add60.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Drew-Hagedorn.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Drew Hagedorn"
     },
-    "user-437": {
-      "name": "Gwenn Baldwin",
-      "path": "assets/lobbyist-photos/user-437-7cd2745caaa3.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/11/SunJnKg-cropped-2.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Gwenn Baldwin"
+    "user-103": {
+      "name": "David Walls",
+      "path": "assets/lobbyist-photos/user-103-5a7fa567792c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/01/WallsDavid-Head.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=David Walls"
     },
-    "user-1412": {
-      "name": "Josh Balloch",
-      "path": "assets/lobbyist-photos/user-1412-30e94311bc24.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/josh-balloch-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Josh Balloch"
+    "user-1035": {
+      "name": "Karla Hackney",
+      "path": "assets/lobbyist-photos/user-1035-1afdee1be27a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Karla-Hackney.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Karla Hackney"
     },
-    "user-1813": {
-      "name": "Hayley Banyai-Becker",
-      "path": "assets/lobbyist-photos/user-1813-227227ab34d5.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/09/IMG_7270-1-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Hayley Banyai-Becker"
+    "user-1041": {
+      "name": "Kevin Campbell",
+      "path": "assets/lobbyist-photos/user-1041-cb2bd46f2610.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/03/Kevin-Campbell_HAO-2025-Headshot_by-KLiK-Concepts_CROP-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kevin Campbell"
+    },
+    "user-1043": {
+      "name": "Danelle Romain",
+      "path": "assets/lobbyist-photos/user-1043-0826a8e2f0e0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/636-Danelle-Romain-2019.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Danelle Romain"
+    },
+    "user-1044": {
+      "name": "Tess Milio",
+      "path": "assets/lobbyist-photos/user-1044-19511a6cdb4d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/Facetune_07-02-2019-18-37-43.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tess Milio"
+    },
+    "user-1056": {
+      "name": "Dan Jarman",
+      "path": "assets/lobbyist-photos/user-1056-6f777d426411.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/09/CrossWater_001-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dan Jarman"
+    },
+    "user-1057": {
+      "name": "Justen Rainey",
+      "path": "assets/lobbyist-photos/user-1057-c4ff47b767de.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/11/Justen-small-002.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Justen Rainey"
+    },
+    "user-1061": {
+      "name": "Jack Dempsey",
+      "path": "assets/lobbyist-photos/user-1061-517f16f89de7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/04/JMD-New.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jack Dempsey"
+    },
+    "user-1066": {
+      "name": "Nels Johnson",
+      "path": "assets/lobbyist-photos/user-1066-3503723b2483.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Nels-Johnson-1280.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nels Johnson"
+    },
+    "user-1067": {
+      "name": "Lara Smith",
+      "path": "assets/lobbyist-photos/user-1067-14a21c53ef24.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Capture2-1.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lara Smith"
+    },
+    "user-1069": {
+      "name": "Thomas Cuomo",
+      "path": "assets/lobbyist-photos/user-1069-dfe93b7db475.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Profile-pic-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Thomas Cuomo"
+    },
+    "user-107": {
+      "name": "Alec Shebiel",
+      "path": "assets/lobbyist-photos/user-107-56b1a7bf6402.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/01/1274.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alec Shebiel"
+    },
+    "user-1079": {
+      "name": "Hasina Wittenberg",
+      "path": "assets/lobbyist-photos/user-1079-738382850ce0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/HWH241023_07ac-2capclub-4.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Hasina Wittenberg"
     },
     "user-1080": {
       "name": "Seth Barnes",
@@ -146,35 +206,41 @@
       "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Seth-Barnes-2023-scaled.jpg",
       "profile": "https://oregoncapitolclub.org/user/?type=user&search=Seth Barnes"
     },
-    "user-375": {
-      "name": "Fawn Barrie",
-      "path": "assets/lobbyist-photos/user-375-f0cf39b04849.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/IMG_4881_Facetune_10-12-2018-15-00-04.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Fawn Barrie"
+    "user-1095": {
+      "name": "Louis De Sitter",
+      "path": "assets/lobbyist-photos/user-1095-4510768d7792.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/LD-013-min-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Louis De Sitter"
     },
-    "user-778": {
-      "name": "Scott Barrie",
-      "path": "assets/lobbyist-photos/user-778-c06cabdff38c.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/08/Scott-Barrie-992.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Scott Barrie"
+    "user-1100": {
+      "name": "APRIL SNELL",
+      "path": "assets/lobbyist-photos/user-1100-88cfed065186.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/April-headshot-2022-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=APRIL SNELL"
     },
-    "user-631": {
-      "name": "David F. Barrows",
-      "path": "assets/lobbyist-photos/user-631-ab1e6b155672.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/09/David-F.-Barrows.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=David F. Barrows"
+    "user-1104": {
+      "name": "Shawn Miller",
+      "path": "assets/lobbyist-photos/user-1104-cfeb77ebbee0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/230-Shawn-Miller-1.8.23.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Shawn Miller"
     },
-    "user-298": {
-      "name": "Tom Barrows",
-      "path": "assets/lobbyist-photos/user-298-575ff551faf8.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/03/Tom-Barrows-1.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tom Barrows"
+    "user-1105": {
+      "name": "G. Harvey Gail",
+      "path": "assets/lobbyist-photos/user-1105-3a7145a5a043.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/127-Harvey-Gail-2019.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=G. Harvey Gail"
     },
-    "user-1956": {
-      "name": "James Barta",
-      "path": "assets/lobbyist-photos/user-1956-52e65c38a791.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/James-Barta-headshot-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=James Barta"
+    "user-1115": {
+      "name": "Genoa Ingram",
+      "path": "assets/lobbyist-photos/user-1115-7b2fd35a9436.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/159-Genoa-Ingram-2016.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Genoa Ingram"
+    },
+    "user-1129": {
+      "name": "David Hunnicutt",
+      "path": "assets/lobbyist-photos/user-1129-fc6c798e0b01.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/156-David-Hunnicutt-2016.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=David Hunnicutt"
     },
     "user-1137": {
       "name": "Dan Bates",
@@ -182,53 +248,41 @@
       "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/03/Dan-Bates-1.jpg",
       "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dan Bates"
     },
-    "user-667": {
-      "name": "Libby Batlan",
-      "path": "assets/lobbyist-photos/user-667-edad71ca1a9e.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/10/Libby-Batlan-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Libby Batlan"
+    "user-1142": {
+      "name": "Jon Eames",
+      "path": "assets/lobbyist-photos/user-1142-4654fcc4121d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Jonathan-Eames-12.8.16-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jon Eames"
     },
-    "user-1733": {
-      "name": "Samantha Bayer",
-      "path": "assets/lobbyist-photos/user-1733-50d8d44ef3d7.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/Headshot-jpeg-1.jpeg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Samantha Bayer"
+    "user-1150": {
+      "name": "Parasa Chanramy",
+      "path": "assets/lobbyist-photos/user-1150-1d8942c21ef5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Parasas2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Parasa Chanramy"
     },
-    "user-1954": {
-      "name": "Samantha Bebout",
-      "path": "assets/lobbyist-photos/user-1954-ed99dcf62d85.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/06/IMG_6614-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Samantha Bebout"
+    "user-1154": {
+      "name": "Alyson Kraus",
+      "path": "assets/lobbyist-photos/user-1154-bcf84683e31a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/10/AK-Headshot.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alyson Kraus"
     },
-    "user-1493": {
-      "name": "Chloe Becker",
-      "path": "assets/lobbyist-photos/user-1493-0786c2a4151f.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Cropped-pge-5410-Copy-2-scaled.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chloe Becker"
+    "user-1156": {
+      "name": "Kirsten Larson Adams",
+      "path": "assets/lobbyist-photos/user-1156-3a6167827dbf.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/K-headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kirsten Larson Adams"
     },
-    "user-1950": {
-      "name": "Daysi Bedolla Sotelo",
-      "path": "assets/lobbyist-photos/user-1950-39c4a6136d5b.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/08/32006-1.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Daysi Bedolla Sotelo"
+    "user-116": {
+      "name": "Vern Saboe",
+      "path": "assets/lobbyist-photos/user-116-d79d56d7ca8b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/qdt2vyyp.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Vern Saboe"
     },
-    "user-1444": {
-      "name": "Jacob Bell",
-      "path": "assets/lobbyist-photos/user-1444-9d316fc3ef1e.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1676-Jacob-Bell-9.23.19.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jacob Bell"
-    },
-    "user-118": {
-      "name": "Jo Bell",
-      "path": "assets/lobbyist-photos/user-118-d08d82013469.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/02/Jo-Bell.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jo Bell"
-    },
-    "user-1619": {
-      "name": "Johnell Bell",
-      "path": "assets/lobbyist-photos/user-1619-5e5589d31bd3.jpg",
-      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Johnell-Bell-Headshot-1.jpg",
-      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Johnell Bell"
+    "user-1173": {
+      "name": "Greg Astley",
+      "path": "assets/lobbyist-photos/user-1173-44f53cf09b88.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/05/Astley-head.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Astley"
     },
     "user-1178": {
       "name": "Trevor Beltz",
@@ -236,11 +290,2309 @@
       "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/02/IMG_4092.jpg",
       "profile": "https://oregoncapitolclub.org/user/?type=user&search=Trevor Beltz"
     },
+    "user-118": {
+      "name": "Jo Bell",
+      "path": "assets/lobbyist-photos/user-118-d08d82013469.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/02/Jo-Bell.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jo Bell"
+    },
+    "user-1181": {
+      "name": "Robert Camarillo",
+      "path": "assets/lobbyist-photos/user-1181-4cee00598a11.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Robert-Camarillo-2-2-2023-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Robert Camarillo"
+    },
+    "user-1190": {
+      "name": "Karl Koenig",
+      "path": "assets/lobbyist-photos/user-1190-eecfcedbba2a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/08/Karl-Koenig-1482.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Karl Koenig"
+    },
+    "user-1205": {
+      "name": "Cassie Bruske",
+      "path": "assets/lobbyist-photos/user-1205-ff914be98185.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/Bruske-1-scaled-e1731367008320.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cassie Bruske"
+    },
+    "user-1209": {
+      "name": "Art Suchorzewski",
+      "path": "assets/lobbyist-photos/user-1209-84aeebc8a33a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Profile-Picture-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Art Suchorzewski"
+    },
+    "user-1212": {
+      "name": "Mike Eliason",
+      "path": "assets/lobbyist-photos/user-1212-aaff476443da.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Mike-Eliason-2023-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mike Eliason"
+    },
+    "user-1218": {
+      "name": "Richard Donovan",
+      "path": "assets/lobbyist-photos/user-1218-b492cf0c9447.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Richard-Donovan-1.25.17.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Richard Donovan"
+    },
+    "user-1219": {
+      "name": "Dan Cushing",
+      "path": "assets/lobbyist-photos/user-1219-64e0085ea3c0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Dan-Cushing-2023-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dan Cushing"
+    },
+    "user-1220": {
+      "name": "Tim Seydel",
+      "path": "assets/lobbyist-photos/user-1220-bf051ca81b1d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/01/TS-Profile-photo2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tim Seydel"
+    },
+    "user-1222": {
+      "name": "Katie Fast",
+      "path": "assets/lobbyist-photos/user-1222-2246c1344ecb.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/02/367-Katie-Fast.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Katie Fast"
+    },
+    "user-1226": {
+      "name": "Alicia Givens",
+      "path": "assets/lobbyist-photos/user-1226-120952e9a9b8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/11/Alicia-small-002.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alicia Givens"
+    },
+    "user-1233": {
+      "name": "Morgan Allen",
+      "path": "assets/lobbyist-photos/user-1233-d0650abc3e7e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1049-Morgan-Allen-2018.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Morgan Allen"
+    },
+    "user-1236": {
+      "name": "Miles Pengilly",
+      "path": "assets/lobbyist-photos/user-1236-63b07ff2cf33.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/06/Miles-Pengilly-Headshot-low-res.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Miles Pengilly"
+    },
+    "user-1237": {
+      "name": "Rachael Wiggins Emory",
+      "path": "assets/lobbyist-photos/user-1237-4632fe47857d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/02/Rachael-Wiggins-Emory-1.26.17.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rachael Wiggins Emory"
+    },
+    "user-1249": {
+      "name": "Michelle Giguere",
+      "path": "assets/lobbyist-photos/user-1249-c937d5d52d7c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/Giguere-Michelle-E-300.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michelle Giguere"
+    },
+    "user-1256": {
+      "name": "Catie Theisen",
+      "path": "assets/lobbyist-photos/user-1256-aa8c62876a06.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/06/1498-Catie-Theisen-1.29.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Catie Theisen"
+    },
+    "user-1263": {
+      "name": "Paul Grove",
+      "path": "assets/lobbyist-photos/user-1263-2caca475bf52.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Paul-Grove.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Paul Grove"
+    },
+    "user-1269": {
+      "name": "Joe Esmonde",
+      "path": "assets/lobbyist-photos/user-1269-fe8a15a7da23.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1071-Joe-Esmonde-1017.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Joe Esmonde"
+    },
+    "user-1272": {
+      "name": "Iris Maria Ch\u00e1vez",
+      "path": "assets/lobbyist-photos/user-1272-b054947262c2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/09/2018-headshots-8797.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Iris Maria Ch\u00e1vez"
+    },
+    "user-1275": {
+      "name": "Hans Bernard",
+      "path": "assets/lobbyist-photos/user-1275-4b02c9d51bb2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/10/25-1024Bernard-030-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Hans Bernard"
+    },
+    "user-1281": {
+      "name": "Christina Bodamer",
+      "path": "assets/lobbyist-photos/user-1281-8ece8660e09a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1548-Christina-Bodamer-6.25.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Christina Bodamer"
+    },
+    "user-1291": {
+      "name": "Daniel Hauser",
+      "path": "assets/lobbyist-photos/user-1291-c41de8c5ed8d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/03/HauserD-2015-08-300x200.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Daniel Hauser"
+    },
+    "user-1292": {
+      "name": "Jennifer Joly",
+      "path": "assets/lobbyist-photos/user-1292-b4330c16a055.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1559-Jennifer-Joly-7.3.17-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Joly"
+    },
+    "user-1293": {
+      "name": "Jennifer Lewis-Goff",
+      "path": "assets/lobbyist-photos/user-1293-0eca93d8c6cb.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1562-Jennifer-Lewis-Goff-11.27.18.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Lewis-Goff"
+    },
+    "user-1295": {
+      "name": "Stacy Michaelson",
+      "path": "assets/lobbyist-photos/user-1295-e8f6138e4fe1.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/MichaelsonHeadShot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Stacy Michaelson"
+    },
+    "user-1296": {
+      "name": "Mary Kyle McCurdy",
+      "path": "assets/lobbyist-photos/user-1296-ce550f8e4e98.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/1563-Mary-Kyle-McCurdy-12.17.20.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mary Kyle McCurdy"
+    },
+    "user-1300": {
+      "name": "Brian Worley",
+      "path": "assets/lobbyist-photos/user-1300-8b3b8eee3603.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/11/Worley2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brian Worley"
+    },
+    "user-1301": {
+      "name": "Chris Coughlin",
+      "path": "assets/lobbyist-photos/user-1301-8794e1c3b326.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/04/2022_OCJ_Spring-78-Copy1-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chris Coughlin"
+    },
+    "user-1327": {
+      "name": "Sarah Lochner",
+      "path": "assets/lobbyist-photos/user-1327-35cb156f81de.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/SarahLochnerSquare150-1-2023.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sarah Lochner"
+    },
+    "user-133": {
+      "name": "Marshall Coba",
+      "path": "assets/lobbyist-photos/user-133-a35f9c5dd932.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/73-Marshall-Coba-2019-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marshall Coba"
+    },
+    "user-1336": {
+      "name": "Ivo Trummer",
+      "path": "assets/lobbyist-photos/user-1336-049fd3e54c23.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Ivo-Trummer_2023-CC.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ivo Trummer"
+    },
+    "user-1344": {
+      "name": "Jordan Bice",
+      "path": "assets/lobbyist-photos/user-1344-36d5c1e2cc3b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/Bice-Jordan_Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jordan Bice"
+    },
+    "user-1345": {
+      "name": "John Audley",
+      "path": "assets/lobbyist-photos/user-1345-b893e7dbd86f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/John-Audley-4.25.20.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John Audley"
+    },
+    "user-1351": {
+      "name": "Harlan Levy",
+      "path": "assets/lobbyist-photos/user-1351-595706e07123.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/11/Harlan.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Harlan Levy"
+    },
+    "user-1353": {
+      "name": "Alberto Gallegos",
+      "path": "assets/lobbyist-photos/user-1353-4c5171b779f1.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Alberto-Gallegos-2019-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alberto Gallegos"
+    },
+    "user-1354": {
+      "name": "Yasmin Ibarra",
+      "path": "assets/lobbyist-photos/user-1354-8d473b4563bc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/YASMIN-HEADSHOT-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Yasmin Ibarra"
+    },
+    "user-1355": {
+      "name": "Preston Mann",
+      "path": "assets/lobbyist-photos/user-1355-f31f7f40e2c4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/1721321994450.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Preston Mann"
+    },
+    "user-1364": {
+      "name": "Paul Rainey",
+      "path": "assets/lobbyist-photos/user-1364-00269f8c3d3f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/August-24-2018-414h-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Paul Rainey"
+    },
+    "user-1369": {
+      "name": "Courtney Graham",
+      "path": "assets/lobbyist-photos/user-1369-53b7bab006ad.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/2023-Headshot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Courtney Graham"
+    },
+    "user-1375": {
+      "name": "Ellen Miller Kudszus",
+      "path": "assets/lobbyist-photos/user-1375-e8a436048325.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/409A7B30-A497-4950-8BAA-B54AAA83ECB5-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ellen Miller Kudszus"
+    },
+    "user-1378": {
+      "name": "Alan Ferschweiler",
+      "path": "assets/lobbyist-photos/user-1378-3ceffa3bb4db.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/1639-Alan-Ferschweiler-2018.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alan Ferschweiler"
+    },
+    "user-1379": {
+      "name": "Waylon Buchan",
+      "path": "assets/lobbyist-photos/user-1379-792bc29a7a6d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/1634-Waylon-Buchan-2021.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Waylon Buchan"
+    },
+    "user-1384": {
+      "name": "Greg Lemhouse",
+      "path": "assets/lobbyist-photos/user-1384-53ef4cd4a9f1.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Greg-KOBI-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Lemhouse"
+    },
+    "user-1393": {
+      "name": "Chris Edwards",
+      "path": "assets/lobbyist-photos/user-1393-a7b88fa6f202.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Chris-Edwards-2023-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chris Edwards"
+    },
+    "user-1394": {
+      "name": "Mia Noren",
+      "path": "assets/lobbyist-photos/user-1394-8195bfdaff9a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/Headshot-Mia.Noren@Nike.com_.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mia Noren"
+    },
+    "user-140": {
+      "name": "Marcia Kelley",
+      "path": "assets/lobbyist-photos/user-140-2ee9b3122f01.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Marcia-Kelley-1089.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marcia Kelley"
+    },
+    "user-1404": {
+      "name": "John Wykoff",
+      "path": "assets/lobbyist-photos/user-1404-46920321c3f5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/John-Wykoff.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John Wykoff"
+    },
+    "user-1412": {
+      "name": "Josh Balloch",
+      "path": "assets/lobbyist-photos/user-1412-30e94311bc24.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/josh-balloch-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Josh Balloch"
+    },
+    "user-1417": {
+      "name": "Danielle Sobel",
+      "path": "assets/lobbyist-photos/user-1417-0774ef03053a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/R6A0944crop.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Danielle Sobel"
+    },
+    "user-1418": {
+      "name": "Marty Carty",
+      "path": "assets/lobbyist-photos/user-1418-a7f8e1deca71.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Marty-Carty.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marty Carty"
+    },
+    "user-1420": {
+      "name": "Andrea Meyer",
+      "path": "assets/lobbyist-photos/user-1420-cc889487a8ab.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/12/AARPhs22-019-Edit-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Andrea Meyer"
+    },
+    "user-1444": {
+      "name": "Jacob Bell",
+      "path": "assets/lobbyist-photos/user-1444-9d316fc3ef1e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1676-Jacob-Bell-9.23.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jacob Bell"
+    },
+    "user-1445": {
+      "name": "Stefan Shearer",
+      "path": "assets/lobbyist-photos/user-1445-5b54d32972b2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/10/PortraitBW-3.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Stefan Shearer"
+    },
+    "user-1447": {
+      "name": "Jenna Jones",
+      "path": "assets/lobbyist-photos/user-1447-61af51dbf326.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Updated-headshot-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jenna Jones"
+    },
+    "user-1448": {
+      "name": "Mark Gharst",
+      "path": "assets/lobbyist-photos/user-1448-3bde2e968ccd.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1687-Mark-Gharst-1.27.23-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mark Gharst"
+    },
+    "user-1451": {
+      "name": "Nicole Mann",
+      "path": "assets/lobbyist-photos/user-1451-e95aec89a8bc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Screenshot-2023-02-03-at-10.37.38-AM-2.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nicole Mann"
+    },
+    "user-1452": {
+      "name": "Greg Alderson",
+      "path": "assets/lobbyist-photos/user-1452-f2c4766d6cf9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/02/GA_headshot2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Alderson"
+    },
+    "user-1453": {
+      "name": "Shaun McCrea",
+      "path": "assets/lobbyist-photos/user-1453-df0b178560b0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/02/Shaun-McCrea.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Shaun McCrea"
+    },
+    "user-1454": {
+      "name": "Mae Lee Browning",
+      "path": "assets/lobbyist-photos/user-1454-b9071e62107d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/11/Web-size-4.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mae Lee Browning"
+    },
+    "user-1455": {
+      "name": "Taylor Sarman",
+      "path": "assets/lobbyist-photos/user-1455-edf3d0a37d8f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/08/tempImagerEn0VX-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Taylor Sarman"
+    },
+    "user-1464": {
+      "name": "Joe Justice",
+      "path": "assets/lobbyist-photos/user-1464-3d4a889d33f0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/PXL_20260616_160453831.PORTRAIT-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Joe Justice"
+    },
+    "user-1466": {
+      "name": "Tyler Ernst",
+      "path": "assets/lobbyist-photos/user-1466-ef1c91d77843.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Tyler-Ernst-2023-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tyler Ernst"
+    },
+    "user-1468": {
+      "name": "Madeline Do",
+      "path": "assets/lobbyist-photos/user-1468-7a90d1404a88.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/MD-Headshot-2023.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Madeline Do"
+    },
+    "user-1476": {
+      "name": "Christopher Hewitt",
+      "path": "assets/lobbyist-photos/user-1476-0e69bd1e224e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/03/Hewitt_Chris.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Christopher Hewitt"
+    },
+    "user-1477": {
+      "name": "Richard Blackwell",
+      "path": "assets/lobbyist-photos/user-1477-54e3a88de9e3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/291afc73-f195-4bbc-a8c7-a6f4fd46174e-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Richard Blackwell"
+    },
+    "user-1480": {
+      "name": "Chris Baker",
+      "path": "assets/lobbyist-photos/user-1480-6fd1c115c29c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/CBprofile.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chris Baker"
+    },
+    "user-1484": {
+      "name": "Ryan Chieffo",
+      "path": "assets/lobbyist-photos/user-1484-1306f1e4f51c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/02/Chieffo-Ryan_LinkedIn.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ryan Chieffo"
+    },
+    "user-1489": {
+      "name": "Sara Duncan",
+      "path": "assets/lobbyist-photos/user-1489-955cedabd326.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Sara-Duncan-2023-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sara Duncan"
+    },
+    "user-1490": {
+      "name": "Gina Firman Nikkel, Ph.D",
+      "path": "assets/lobbyist-photos/user-1490-19bcb54442d8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/08/Gina-Nikkel.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Gina Firman Nikkel, Ph.D"
+    },
+    "user-1492": {
+      "name": "Mallorie Roberts",
+      "path": "assets/lobbyist-photos/user-1492-1092ecaa160c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/M_Roberts-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mallorie Roberts"
+    },
+    "user-1493": {
+      "name": "Chloe Becker",
+      "path": "assets/lobbyist-photos/user-1493-0786c2a4151f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Cropped-pge-5410-Copy-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chloe Becker"
+    },
+    "user-1494": {
+      "name": "Anna Richter Taylor",
+      "path": "assets/lobbyist-photos/user-1494-27d1b193c6e3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/11/Anna-Richter-Taylor-2020.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anna Richter Taylor"
+    },
+    "user-1502": {
+      "name": "Anthony Castaneda",
+      "path": "assets/lobbyist-photos/user-1502-d724476d8474.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/AC-headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anthony Castaneda"
+    },
+    "user-1506": {
+      "name": "Brock Nation",
+      "path": "assets/lobbyist-photos/user-1506-18707339bd90.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/BNation-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brock Nation"
+    },
+    "user-1507": {
+      "name": "Tyler Janzen",
+      "path": "assets/lobbyist-photos/user-1507-ffabaa301b88.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/11/TJ-Square.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tyler Janzen"
+    },
+    "user-1519": {
+      "name": "Katie Murray",
+      "path": "assets/lobbyist-photos/user-1519-b1cb1c3c9948.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/katie-capitol-picture.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Katie Murray"
+    },
+    "user-1520": {
+      "name": "Scott Bruun",
+      "path": "assets/lobbyist-photos/user-1520-f14b32420f0e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Bruun-photo-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Scott Bruun"
+    },
+    "user-1527": {
+      "name": "Evyn Mitchell",
+      "path": "assets/lobbyist-photos/user-1527-153e117ed35d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/12/EM_Headshot.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Evyn Mitchell"
+    },
+    "user-1535": {
+      "name": "Eric Lohnes",
+      "path": "assets/lobbyist-photos/user-1535-40162126c58a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Eric-Lohnes-2021.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Eric Lohnes"
+    },
+    "user-1537": {
+      "name": "Russell Lum",
+      "path": "assets/lobbyist-photos/user-1537-c9a4e159c4b3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/20190920_200007_587.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Russell Lum"
+    },
+    "user-1551": {
+      "name": "Claudia Black",
+      "path": "assets/lobbyist-photos/user-1551-f254daa9abc8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/01/Second-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Claudia Black"
+    },
+    "user-1554": {
+      "name": "Debbie Dorris Koreski",
+      "path": "assets/lobbyist-photos/user-1554-f13760aba35b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/Debbie-Headshot1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Debbie Dorris Koreski"
+    },
+    "user-1556": {
+      "name": "Mark Gibson",
+      "path": "assets/lobbyist-photos/user-1556-dc9ce456c132.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Mark-Gibson-headshot-2020-squared.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mark Gibson"
+    },
+    "user-1561": {
+      "name": "Jodi Hack",
+      "path": "assets/lobbyist-photos/user-1561-944e0037e32f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/1590-Jodi-Hack-2018.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jodi Hack"
+    },
+    "user-1562": {
+      "name": "Ira Cuello-Martinez",
+      "path": "assets/lobbyist-photos/user-1562-ac51bf287e93.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Ira-Cuello-Martinez-2021.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ira Cuello-Martinez"
+    },
+    "user-1567": {
+      "name": "Heather Rockwell",
+      "path": "assets/lobbyist-photos/user-1567-fadab78bf138.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/03/Heather-Headshot-full.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Heather Rockwell"
+    },
+    "user-157": {
+      "name": "Elise Brown",
+      "path": "assets/lobbyist-photos/user-157-fdb2d482100c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/02/Elise-H.-Brown.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elise Brown"
+    },
+    "user-1572": {
+      "name": "Matt Newell-Ching",
+      "path": "assets/lobbyist-photos/user-1572-ddeb96a3ad04.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/04/1410-Matt-Newell-Ching-1.31.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Matt Newell-Ching"
+    },
+    "user-1573": {
+      "name": "Sharla Moffett",
+      "path": "assets/lobbyist-photos/user-1573-5cd554eb6e9b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/04/ZoomPicture.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sharla Moffett"
+    },
+    "user-1579": {
+      "name": "Maureen McGee",
+      "path": "assets/lobbyist-photos/user-1579-b69223f0e4fc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/09/1776-Maureen-McGee.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Maureen McGee"
+    },
+    "user-1580": {
+      "name": "Tucker Billman",
+      "path": "assets/lobbyist-photos/user-1580-1c18f2f53d86.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/08/Tucker-Billman-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tucker Billman"
+    },
+    "user-1581": {
+      "name": "Joseph Gardner",
+      "path": "assets/lobbyist-photos/user-1581-41280180d828.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/08/Joe-Gardner-1780-8.3.21-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Joseph Gardner"
+    },
+    "user-1584": {
+      "name": "Rick Osborn",
+      "path": "assets/lobbyist-photos/user-1584-10b296fbbaf7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/09/1782-Rick-Osborn.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rick Osborn"
+    },
+    "user-1585": {
+      "name": "Paula Leslie",
+      "path": "assets/lobbyist-photos/user-1585-a68afff0b628.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/09/1294-Paula-Leslie-2019.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Paula Leslie"
+    },
+    "user-1586": {
+      "name": "Angela Wilhelms",
+      "path": "assets/lobbyist-photos/user-1586-1b80941fe07f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/09/1319-Angela-Wilhelms-9.15.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Angela Wilhelms"
+    },
+    "user-1587": {
+      "name": "Michael Martin",
+      "path": "assets/lobbyist-photos/user-1587-89d41631c237.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/Michael-1-edit-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michael Martin"
+    },
+    "user-1588": {
+      "name": "Ruth Miles",
+      "path": "assets/lobbyist-photos/user-1588-5136925d627b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/09/Lo-Res_About.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ruth Miles"
+    },
+    "user-1592": {
+      "name": "Jake Oken-Berg",
+      "path": "assets/lobbyist-photos/user-1592-08b30831f2af.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Jake-Headshot-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jake Oken-Berg"
+    },
+    "user-1593": {
+      "name": "Lauren Poor",
+      "path": "assets/lobbyist-photos/user-1593-e61fd36208ec.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/headshot.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lauren Poor"
+    },
+    "user-1594": {
+      "name": "James Creel",
+      "path": "assets/lobbyist-photos/user-1594-306f10b7220e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/11/James-Creel-10.12.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=James Creel"
+    },
+    "user-1597": {
+      "name": "Amy Patrick",
+      "path": "assets/lobbyist-photos/user-1597-f49709481412.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/0C745DDA-16E0-4CD1-8EA3-1292DFD8C87A_1_201_a.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Amy Patrick"
+    },
+    "user-160": {
+      "name": "Elizabeth Remley",
+      "path": "assets/lobbyist-photos/user-160-1b66db60b5c6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Elizabeth-Remley-2.13.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elizabeth Remley"
+    },
+    "user-1601": {
+      "name": "Elizabeth Edwards",
+      "path": "assets/lobbyist-photos/user-1601-0a366c6b4be6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/11/Elizabeth-Edwards-11.23.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elizabeth Edwards"
+    },
+    "user-1602": {
+      "name": "Leah Navarro",
+      "path": "assets/lobbyist-photos/user-1602-b539eb9e9c17.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/Navarro-Leah_v-e1694186728349-1024x972-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Leah Navarro"
+    },
+    "user-1606": {
+      "name": "Amanda Sullivan-Astor",
+      "path": "assets/lobbyist-photos/user-1606-5b403064755f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/31-g-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Amanda Sullivan-Astor"
+    },
+    "user-1609": {
+      "name": "Meredith Coba",
+      "path": "assets/lobbyist-photos/user-1609-3a42451c54f6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/12/Meredith-Coba-Dec-2022.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Meredith Coba"
+    },
+    "user-1610": {
+      "name": "Ranfis Giannettino Villatoro",
+      "path": "assets/lobbyist-photos/user-1610-a0aeede579be.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Ranfis-Giannettino-Villatoro-1.10.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ranfis Giannettino Villatoro"
+    },
+    "user-1614": {
+      "name": "Alice Longley-Miller",
+      "path": "assets/lobbyist-photos/user-1614-98fc235a8ed1.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1806-Alice-Longley-Miller-2.16.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alice Longley-Miller"
+    },
+    "user-1615": {
+      "name": "Beth Cooke",
+      "path": "assets/lobbyist-photos/user-1615-0c3631dacb7f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Beth-Cooke-2x2-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Beth Cooke"
+    },
+    "user-1617": {
+      "name": "DJ Vogt",
+      "path": "assets/lobbyist-photos/user-1617-5dccf41796dc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/1219-DJ-Vogt-1.19.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=DJ Vogt"
+    },
+    "user-1619": {
+      "name": "Johnell Bell",
+      "path": "assets/lobbyist-photos/user-1619-5e5589d31bd3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Johnell-Bell-Headshot-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Johnell Bell"
+    },
+    "user-1620": {
+      "name": "Fiona Yau-Luu",
+      "path": "assets/lobbyist-photos/user-1620-87ea1d8947dd.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/image_6487327-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Fiona Yau-Luu"
+    },
+    "user-1621": {
+      "name": "Madison Walters",
+      "path": "assets/lobbyist-photos/user-1621-f4ee032d0ac9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/IMG_8130.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Madison Walters"
+    },
+    "user-1622": {
+      "name": "Christy Splitt",
+      "path": "assets/lobbyist-photos/user-1622-11ed858dadf5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/christy-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Christy Splitt"
+    },
+    "user-1623": {
+      "name": "Andrea Haverkamp",
+      "path": "assets/lobbyist-photos/user-1623-669846433139.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/haverkamp_headshot-1.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Andrea Haverkamp"
+    },
+    "user-1625": {
+      "name": "Karen Smith",
+      "path": "assets/lobbyist-photos/user-1625-a0b95315a85b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/04/981-Karen-Smith-4.21.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Karen Smith"
+    },
+    "user-1627": {
+      "name": "Samantha Shepherd",
+      "path": "assets/lobbyist-photos/user-1627-199e40333090.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1813-Samantha-Shepherd-2023.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Samantha Shepherd"
+    },
+    "user-1633": {
+      "name": "Chris Madden",
+      "path": "assets/lobbyist-photos/user-1633-8ec4055ff925.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/02/1392-Chris-Madden-2.8.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chris Madden"
+    },
+    "user-1643": {
+      "name": "Jessica Pratt",
+      "path": "assets/lobbyist-photos/user-1643-2e6d9c9d1d37.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/04/1824-Jessica-Pratt-4.14.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jessica Pratt"
+    },
+    "user-1648": {
+      "name": "Ryann Gleason",
+      "path": "assets/lobbyist-photos/user-1648-3d9ff3226e65.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/IMG_3245-Edit-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ryann Gleason"
+    },
+    "user-1649": {
+      "name": "Zakir Khan",
+      "path": "assets/lobbyist-photos/user-1649-6556c938bc3b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1828-Zakir-Khan-3.14.23-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Zakir Khan"
+    },
+    "user-1652": {
+      "name": "Nolan Ple\u0161e",
+      "path": "assets/lobbyist-photos/user-1652-37786322d8e3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/07/1830-Nolan-Plese-7.27.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nolan Ple\u0161e"
+    },
+    "user-1653": {
+      "name": "Branden Pursinger",
+      "path": "assets/lobbyist-photos/user-1653-2a42d51fcf02.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/08/Branden-Pursinger-8.4.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Branden Pursinger"
+    },
+    "user-1661": {
+      "name": "Maggie Gerlicher",
+      "path": "assets/lobbyist-photos/user-1661-0c1cce230cf6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/MaggieGerlicher-29142.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Maggie Gerlicher"
+    },
+    "user-1664": {
+      "name": "BethAnne Darby",
+      "path": "assets/lobbyist-photos/user-1664-2ad2cb1b85c5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/09/Darby.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=BethAnne Darby"
+    },
+    "user-1666": {
+      "name": "Nick Keough",
+      "path": "assets/lobbyist-photos/user-1666-50d8aba1d762.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/10/6FC8230E-1A05-4ED0-BAC3-B3118CB68331-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nick Keough"
+    },
+    "user-1668": {
+      "name": "Lisa Merrick",
+      "path": "assets/lobbyist-photos/user-1668-e57fa96a473c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/10/Lisa-Merrick-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lisa Merrick"
+    },
+    "user-1671": {
+      "name": "Amanda Kraus",
+      "path": "assets/lobbyist-photos/user-1671-2e8e9527df8b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/04/c6f1a115-9355-45c5-8171-e57a65efca1b-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Amanda Kraus"
+    },
+    "user-1672": {
+      "name": "Alec MacDonald-Factor",
+      "path": "assets/lobbyist-photos/user-1672-29e7f559c286.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/11/Alec-cropped-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alec MacDonald-Factor"
+    },
+    "user-1673": {
+      "name": "Tracey-Ann Nelson",
+      "path": "assets/lobbyist-photos/user-1673-de5503e002ae.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/11/1839-Tracey-Ann-Nelson-11.1.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tracey-Ann Nelson"
+    },
+    "user-1674": {
+      "name": "Susan Allen",
+      "path": "assets/lobbyist-photos/user-1674-0b964f033696.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1847-Susan-Allen-2.6.23.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Susan Allen"
+    },
+    "user-1676": {
+      "name": "Shirlene Gonzalez",
+      "path": "assets/lobbyist-photos/user-1676-7058f2f6bee3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/11/1849-Shirlene-Gonzalez-11.30.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Shirlene Gonzalez"
+    },
+    "user-1678": {
+      "name": "Tanner Lloyd",
+      "path": "assets/lobbyist-photos/user-1678-2e8af5ffcead.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/TannerLloyd-CClub-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tanner Lloyd"
+    },
+    "user-1680": {
+      "name": "Kristin Milligan",
+      "path": "assets/lobbyist-photos/user-1680-eec4374b7171.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Kristin-Headshot-1.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kristin Milligan"
+    },
+    "user-1681": {
+      "name": "Phillip Kennedy-Wong",
+      "path": "assets/lobbyist-photos/user-1681-ac0b9851059d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/05/20250407-DSC03270-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Phillip Kennedy-Wong"
+    },
+    "user-1682": {
+      "name": "Miranda Miller",
+      "path": "assets/lobbyist-photos/user-1682-f1044f4e46c6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/09/NEW-HEADSHOT.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Miranda Miller"
+    },
+    "user-1683": {
+      "name": "Courtney Lee",
+      "path": "assets/lobbyist-photos/user-1683-e5dbd9421cf7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/IMG_3623.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Courtney Lee"
+    },
+    "user-1686": {
+      "name": "Stacy Cowan",
+      "path": "assets/lobbyist-photos/user-1686-afa7a2733d7f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/fed05bd7-dbc1-4194-96d9-8f46a2e5096a-1_all_113410-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Stacy Cowan"
+    },
+    "user-1687": {
+      "name": "Colette Tipper",
+      "path": "assets/lobbyist-photos/user-1687-3e95a477c356.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/06/Colette-Tipper-2026-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Colette Tipper"
+    },
+    "user-1689": {
+      "name": "Trent Lutz",
+      "path": "assets/lobbyist-photos/user-1689-136fa3f8dcc4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/490-Trent-Lutz-2.28.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Trent Lutz"
+    },
+    "user-1690": {
+      "name": "Kimberly Koops-Wrabek",
+      "path": "assets/lobbyist-photos/user-1690-2162806928e9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/Kimberly.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kimberly Koops-Wrabek"
+    },
+    "user-1692": {
+      "name": "Jonathan Clay",
+      "path": "assets/lobbyist-photos/user-1692-b097d9316aba.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1000-Jonathan-Clay-1.9.23.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jonathan Clay"
+    },
+    "user-1693": {
+      "name": "Sammi Teo",
+      "path": "assets/lobbyist-photos/user-1693-3e8f803c7ff6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/09/IMG_1655-cropped-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sammi Teo"
+    },
+    "user-1695": {
+      "name": "Anna Braun",
+      "path": "assets/lobbyist-photos/user-1695-725c6c9b0dc4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/Casey-edited-Braun-Lae-LLC-png-1.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anna Braun"
+    },
+    "user-1697": {
+      "name": "Matt Swanson",
+      "path": "assets/lobbyist-photos/user-1697-be3d540cfd7e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/965-Matt-Swanson-2.15.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Matt Swanson"
+    },
+    "user-1698": {
+      "name": "Chloe Haller",
+      "path": "assets/lobbyist-photos/user-1698-00caf5e91005.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/Chloe-Headshot-1-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chloe Haller"
+    },
+    "user-1700": {
+      "name": "Bridger Lanning",
+      "path": "assets/lobbyist-photos/user-1700-1ae65d0fee1d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/Unknown.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Bridger Lanning"
+    },
+    "user-1710": {
+      "name": "Eugenia Liu",
+      "path": "assets/lobbyist-photos/user-1710-775c89cfa9f2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1873-Eugenia-Liu-1.17.23-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Eugenia Liu"
+    },
+    "user-1712": {
+      "name": "Cree Bort",
+      "path": "assets/lobbyist-photos/user-1712-87086ba3c181.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/A7400011-1-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cree Bort"
+    },
+    "user-1713": {
+      "name": "Lauren Kuenzi",
+      "path": "assets/lobbyist-photos/user-1713-72f36ae8ecbd.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Screenshot-2025-01-06-152611.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lauren Kuenzi"
+    },
+    "user-1714": {
+      "name": "Lindsay Tenes",
+      "path": "assets/lobbyist-photos/user-1714-68872e543bad.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/DSCF3123-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lindsay Tenes"
+    },
+    "user-1716": {
+      "name": "Kevin Sullivan",
+      "path": "assets/lobbyist-photos/user-1716-091c79c24fba.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1879-Kevin-Sullivan-1.19.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kevin Sullivan"
+    },
+    "user-1717": {
+      "name": "Derek Sangston",
+      "path": "assets/lobbyist-photos/user-1717-b9b84b703eb6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1880-Derek-Sangston-1.27.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Derek Sangston"
+    },
+    "user-1722": {
+      "name": "Kyung Park",
+      "path": "assets/lobbyist-photos/user-1722-a7e37d604a07.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1883-Kyung-Park-2.20.23.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kyung Park"
+    },
+    "user-1723": {
+      "name": "Nate Fisher, Jr",
+      "path": "assets/lobbyist-photos/user-1723-bd4ca131e8c5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1884-Nate-Fisher-3.14.23-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nate Fisher, Jr"
+    },
+    "user-1727": {
+      "name": "Odalis Aguilar",
+      "path": "assets/lobbyist-photos/user-1727-e7ce3a1d8b10.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1887-Odalis-Aguilar-2.9.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Odalis Aguilar"
+    },
+    "user-1733": {
+      "name": "Samantha Bayer",
+      "path": "assets/lobbyist-photos/user-1733-50d8d44ef3d7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/Headshot-jpeg-1.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Samantha Bayer"
+    },
+    "user-1734": {
+      "name": "Jared Wiener",
+      "path": "assets/lobbyist-photos/user-1734-113e367abd87.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/IMG_0015-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jared Wiener"
+    },
+    "user-1737": {
+      "name": "Tim Martinez",
+      "path": "assets/lobbyist-photos/user-1737-b63c27d7bf90.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/209-Tim-Martinez-1.25.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tim Martinez"
+    },
+    "user-1738": {
+      "name": "Britt Conroy",
+      "path": "assets/lobbyist-photos/user-1738-3d75d0745a06.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/04/1746-Britt-Conroy-2.12.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Britt Conroy"
+    },
+    "user-1739": {
+      "name": "Chuck Carpenter",
+      "path": "assets/lobbyist-photos/user-1739-84382d9980a8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/04/1061-Chuck-Carpenter-1.29.16.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chuck Carpenter"
+    },
+    "user-1741": {
+      "name": "Brian Shipley",
+      "path": "assets/lobbyist-photos/user-1741-174808b06037.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/DSC_7916-Edit-Edit-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brian Shipley"
+    },
+    "user-1743": {
+      "name": "Jeremy Rogers",
+      "path": "assets/lobbyist-photos/user-1743-ac51ba0df51c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/08/1673-Jeremy-Rogers-8.23.23-High-Res-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jeremy Rogers"
+    },
+    "user-1744": {
+      "name": "Jennifer Baker",
+      "path": "assets/lobbyist-photos/user-1744-7853ee04283a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/Jennifer-R-Baker-9.1.23-p2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Baker"
+    },
+    "user-1746": {
+      "name": "Carrie Reed",
+      "path": "assets/lobbyist-photos/user-1746-ecce2e146604.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/headshot.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Carrie Reed"
+    },
+    "user-1747": {
+      "name": "Rebecca Gladstone",
+      "path": "assets/lobbyist-photos/user-1747-694a695ab1f8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/Rebecca-Gladstone-2024.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rebecca Gladstone"
+    },
+    "user-1749": {
+      "name": "Trent Wilson",
+      "path": "assets/lobbyist-photos/user-1749-d43c4bf4f405.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/Trent-Wilson-9.27.23-cropped.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Trent Wilson"
+    },
+    "user-1751": {
+      "name": "Benjamin Gurewitz",
+      "path": "assets/lobbyist-photos/user-1751-2bb435e0b3cf.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/20260116__2026_01_16-Ben-Gurewitz__01-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Benjamin Gurewitz"
+    },
+    "user-1753": {
+      "name": "Sean Kolmer",
+      "path": "assets/lobbyist-photos/user-1753-22c89385c457.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/10/Sean-Kolmer-10.18.23-Cropped.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sean Kolmer"
+    },
+    "user-1754": {
+      "name": "Cassidy Kotter",
+      "path": "assets/lobbyist-photos/user-1754-9c8b219d1e1b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/04/Cassidy-Kotter-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cassidy Kotter"
+    },
+    "user-1755": {
+      "name": "Cameron Herrington",
+      "path": "assets/lobbyist-photos/user-1755-0bdde7bc4dac.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/1847-Cameron-Herrington-11.15.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cameron Herrington"
+    },
+    "user-1757": {
+      "name": "Pablo Nieves-Valenzuela",
+      "path": "assets/lobbyist-photos/user-1757-ab7dd2d85df7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/Photo-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Pablo Nieves-Valenzuela"
+    },
+    "user-1758": {
+      "name": "Emily Soules",
+      "path": "assets/lobbyist-photos/user-1758-fae1b1e5cff4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/1526-Emily-Soules-11.14.23-Cropped.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Emily Soules"
+    },
+    "user-1759": {
+      "name": "Hayley Watson",
+      "path": "assets/lobbyist-photos/user-1759-512762de778a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/07/Hayley-Watson.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Hayley Watson"
+    },
+    "user-1760": {
+      "name": "Rob Patridge",
+      "path": "assets/lobbyist-photos/user-1760-7165be5eff19.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/1902-Rob-Patridge-11.28.23.webp",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rob Patridge"
+    },
+    "user-1761": {
+      "name": "Katheryn Yetter",
+      "path": "assets/lobbyist-photos/user-1761-6c358cf40e82.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/11/1903-Katheryn-Yetter-11.29.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Katheryn Yetter"
+    },
+    "user-1764": {
+      "name": "Megan Chuinard",
+      "path": "assets/lobbyist-photos/user-1764-7753a9d87faa.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/12/IMG_0625-1.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Megan Chuinard"
+    },
+    "user-1772": {
+      "name": "Kyle Smith",
+      "path": "assets/lobbyist-photos/user-1772-f38fe0743a19.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/05/IMG_6929-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kyle Smith"
+    },
+    "user-1776": {
+      "name": "Scotty Nowning",
+      "path": "assets/lobbyist-photos/user-1776-0711075f99e2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/1912-Scotty-Nowning-1.17.24-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Scotty Nowning"
+    },
+    "user-1781": {
+      "name": "Elaine Schooler",
+      "path": "assets/lobbyist-photos/user-1781-c8257821e644.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/Schooler-Elaine.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elaine Schooler"
+    },
+    "user-1782": {
+      "name": "Jennifer Williamson",
+      "path": "assets/lobbyist-photos/user-1782-7f89f83745b6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/1025-Jennifer-Williamson.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Williamson"
+    },
+    "user-1784": {
+      "name": "Tom Powers",
+      "path": "assets/lobbyist-photos/user-1784-90f03533529d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/1833-Tom-Powers-11.23.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tom Powers"
+    },
+    "user-1787": {
+      "name": "Meliah Masiba",
+      "path": "assets/lobbyist-photos/user-1787-520ecfb575ac.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/03/1000026785.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Meliah Masiba"
+    },
+    "user-1789": {
+      "name": "Bridget Budbill",
+      "path": "assets/lobbyist-photos/user-1789-a67ac3d0ad87.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/02/Bridget-Budbill-2.6.24.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Bridget Budbill"
+    },
+    "user-1790": {
+      "name": "Teri Watson",
+      "path": "assets/lobbyist-photos/user-1790-c1b57b19b0f3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/02/1876-Teri-Watson-11.22.23-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Teri Watson"
+    },
+    "user-1791": {
+      "name": "Carly Sylva-Gabrielson",
+      "path": "assets/lobbyist-photos/user-1791-2f13bdf4df6f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/02/Carly-Sylva-Gabrielson-headshot-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Carly Sylva-Gabrielson"
+    },
+    "user-1794": {
+      "name": "Jay Ward",
+      "path": "assets/lobbyist-photos/user-1794-d3e0e03a0234.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/02/IMG_4960.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jay Ward"
+    },
+    "user-1795": {
+      "name": "Thomas Baker",
+      "path": "assets/lobbyist-photos/user-1795-7ab804cad9af.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/08/Head-Shot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Thomas Baker"
+    },
+    "user-1796": {
+      "name": "Marc Overbeck",
+      "path": "assets/lobbyist-photos/user-1796-70dc4c3d3ec8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/03/Overbeck-2-1.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marc Overbeck"
+    },
+    "user-1797": {
+      "name": "Zach Lindahl",
+      "path": "assets/lobbyist-photos/user-1797-56e3d5af1cd9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/03/Zach-Photo.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Zach Lindahl"
+    },
+    "user-1798": {
+      "name": "Garrett Mosher",
+      "path": "assets/lobbyist-photos/user-1798-cb48cd84cacc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/03/1728-Garrett-Mosher-12.21.20.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Garrett Mosher"
+    },
+    "user-1800": {
+      "name": "Isis Thornton-Saunders",
+      "path": "assets/lobbyist-photos/user-1800-c66fa4e4a0f1.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/ITS-Square-2.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Isis Thornton-Saunders"
+    },
+    "user-1801": {
+      "name": "Lauren Link",
+      "path": "assets/lobbyist-photos/user-1801-2f2b3fe53d18.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/06/Lauren-Mt.-Si-pic.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lauren Link"
+    },
+    "user-1803": {
+      "name": "Jennifer Arguinzoni-Ward",
+      "path": "assets/lobbyist-photos/user-1803-9e5a727c1458.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/05/JAW-Hwadshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Arguinzoni-Ward"
+    },
+    "user-1804": {
+      "name": "Anna Sovereign",
+      "path": "assets/lobbyist-photos/user-1804-7cf7fe0161e7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/07/AnnaHS.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anna Sovereign"
+    },
+    "user-1805": {
+      "name": "Travis Meuwissen",
+      "path": "assets/lobbyist-photos/user-1805-93ba502dc208.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/06/Travis-head-shot-v.2-high-res-square-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Travis Meuwissen"
+    },
+    "user-1806": {
+      "name": "Dominique Rossi",
+      "path": "assets/lobbyist-photos/user-1806-f17e05cc3ce6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/08/image006.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dominique Rossi"
+    },
+    "user-1808": {
+      "name": "Chad Washington",
+      "path": "assets/lobbyist-photos/user-1808-6a2c1eea5aa0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/09/ChadCandice_181-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Chad Washington"
+    },
+    "user-1811": {
+      "name": "Marissa Cade",
+      "path": "assets/lobbyist-photos/user-1811-55d856a7b680.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/09/Marissa-Headshot-w-Roses-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marissa Cade"
+    },
+    "user-1812": {
+      "name": "Megan Garcia",
+      "path": "assets/lobbyist-photos/user-1812-f1d4945e9f53.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Megan-Garcia_bw_h.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Megan Garcia"
+    },
+    "user-1813": {
+      "name": "Hayley Banyai-Becker",
+      "path": "assets/lobbyist-photos/user-1813-227227ab34d5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/09/IMG_7270-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Hayley Banyai-Becker"
+    },
+    "user-1814": {
+      "name": "Sharolyn Smith",
+      "path": "assets/lobbyist-photos/user-1814-4107cbf8f9ba.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Smith-Sharolyn-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sharolyn Smith"
+    },
+    "user-1815": {
+      "name": "Montana Lewellen",
+      "path": "assets/lobbyist-photos/user-1815-c60db42634bf.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/10/Montana-Lewellen.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Montana Lewellen"
+    },
+    "user-1816": {
+      "name": "Tim Dooley",
+      "path": "assets/lobbyist-photos/user-1816-09ce5836c864.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Tim-Dooley-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tim Dooley"
+    },
+    "user-1817": {
+      "name": "Eliza Walton",
+      "path": "assets/lobbyist-photos/user-1817-da26130b8255.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Eliza-Walton-2-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Eliza Walton"
+    },
+    "user-1821": {
+      "name": "Adrienne Anderson",
+      "path": "assets/lobbyist-photos/user-1821-a382b085cdd5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Edited-281-of-292-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Adrienne Anderson"
+    },
+    "user-1823": {
+      "name": "Angela Donley",
+      "path": "assets/lobbyist-photos/user-1823-641528ccb58b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/Multco-Headshots.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Angela Donley"
+    },
+    "user-1824": {
+      "name": "Willis Homann",
+      "path": "assets/lobbyist-photos/user-1824-05ff73574474.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/processed-3C307375-B1B7-4DB4-B6E3-BB25770BF5A5-2-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Willis Homann"
+    },
+    "user-1826": {
+      "name": "Jocelyn Blake",
+      "path": "assets/lobbyist-photos/user-1826-c24db1f5586f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Jocelyn-Blake-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jocelyn Blake"
+    },
+    "user-1827": {
+      "name": "Laura Wilkeson",
+      "path": "assets/lobbyist-photos/user-1827-1671780a000a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/10/headshot-1-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Laura Wilkeson"
+    },
+    "user-1835": {
+      "name": "Jackie Fabrick",
+      "path": "assets/lobbyist-photos/user-1835-19775efe4d4d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Jackie-Fabrick-headshot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jackie Fabrick"
+    },
+    "user-1837": {
+      "name": "Leah Tucker",
+      "path": "assets/lobbyist-photos/user-1837-3ab836823bbe.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/brittney.corey_.photography-26-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Leah Tucker"
+    },
+    "user-1838": {
+      "name": "Alexander Aghdaei",
+      "path": "assets/lobbyist-photos/user-1838-3e050b5afb32.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/11/Alexander-Aghdaei-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alexander Aghdaei"
+    },
+    "user-1839": {
+      "name": "Aaron Fiedler",
+      "path": "assets/lobbyist-photos/user-1839-825d464fc572.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Aaron-Fiedler.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Aaron Fiedler"
+    },
+    "user-1843": {
+      "name": "Dave Robertson",
+      "path": "assets/lobbyist-photos/user-1843-0c46919320b3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/IMG_1943.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dave Robertson"
+    },
+    "user-1847": {
+      "name": "David Wieland",
+      "path": "assets/lobbyist-photos/user-1847-2031709dafba.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/1000025887.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=David Wieland"
+    },
+    "user-1848": {
+      "name": "Fatima Falcon",
+      "path": "assets/lobbyist-photos/user-1848-11a1854eee48.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Falcon-Fatima_linkedin_color.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Fatima Falcon"
+    },
+    "user-1851": {
+      "name": "Cynthia Ramirez",
+      "path": "assets/lobbyist-photos/user-1851-a806882c2612.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Cynthia-Ramirez-Photo-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cynthia Ramirez"
+    },
+    "user-1859": {
+      "name": "Dave Henslee",
+      "path": "assets/lobbyist-photos/user-1859-4a3a6069aa19.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Dave-Henslee-Headshot.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dave Henslee"
+    },
+    "user-1860": {
+      "name": "Matt Shields",
+      "path": "assets/lobbyist-photos/user-1860-75f3560d2d77.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/MS-Capitl-Club-1-1.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Matt Shields"
+    },
+    "user-1861": {
+      "name": "Michael Reese",
+      "path": "assets/lobbyist-photos/user-1861-2d1eafadfadc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/03/DOC-Director-Mike-Reese-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michael Reese"
+    },
+    "user-1862": {
+      "name": "Paloma Sparks",
+      "path": "assets/lobbyist-photos/user-1862-1a8da5868902.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Paloma-Sparks-headshot-3-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Paloma Sparks"
+    },
+    "user-1863": {
+      "name": "Harvey Mathews",
+      "path": "assets/lobbyist-photos/user-1863-a692a039704a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/12/Harvey-Mathews.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Harvey Mathews"
+    },
+    "user-1866": {
+      "name": "Elana Lynn",
+      "path": "assets/lobbyist-photos/user-1866-54947c68d8da.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/11/20250704_190005.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elana Lynn"
+    },
+    "user-1869": {
+      "name": "Duke Shepard",
+      "path": "assets/lobbyist-photos/user-1869-14f4362be482.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/66df4952af792f4f09a1465a-HeadshotPro.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Duke Shepard"
+    },
+    "user-1870": {
+      "name": "Martin Taylor",
+      "path": "assets/lobbyist-photos/user-1870-d41e4b3cdcf9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Image.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Martin Taylor"
+    },
+    "user-1871": {
+      "name": "Dan Eisenbeis",
+      "path": "assets/lobbyist-photos/user-1871-54306c4aa07e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Eisenbeis_Daniel-square-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dan Eisenbeis"
+    },
+    "user-1872": {
+      "name": "Philip Schmidt",
+      "path": "assets/lobbyist-photos/user-1872-943e9f3f5110.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Philip-Schmidt-600x600-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Philip Schmidt"
+    },
+    "user-1875": {
+      "name": "Tan Perkins",
+      "path": "assets/lobbyist-photos/user-1875-7374e9498d62.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/0-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tan Perkins"
+    },
+    "user-1876": {
+      "name": "Shane O'Brien",
+      "path": "assets/lobbyist-photos/user-1876-e857b5b1ff14.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/1000006518-3-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Shane O\\"
+    },
+    "user-1877": {
+      "name": "Mike Powers",
+      "path": "assets/lobbyist-photos/user-1877-81ab1a0553c3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/IMG_1331-4.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mike Powers"
+    },
+    "user-1883": {
+      "name": "Alexandra Ring",
+      "path": "assets/lobbyist-photos/user-1883-6ce7add16d25.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Alexandra2-002.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alexandra Ring"
+    },
+    "user-1885": {
+      "name": "Justin Low",
+      "path": "assets/lobbyist-photos/user-1885-eeb62f3abb81.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/2025-J-Low-5-7-BW-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Justin Low"
+    },
+    "user-1886": {
+      "name": "Lizzy Atwood Wills",
+      "path": "assets/lobbyist-photos/user-1886-e4c42124ffc5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/LIZZY-69-3-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lizzy Atwood Wills"
+    },
+    "user-1887": {
+      "name": "Logan Gilles",
+      "path": "assets/lobbyist-photos/user-1887-4493d664b34f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/logangilles.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Logan Gilles"
+    },
+    "user-1888": {
+      "name": "Jenna App",
+      "path": "assets/lobbyist-photos/user-1888-c27c39d4fa27.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Jenna-Headshot2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jenna App"
+    },
+    "user-1889": {
+      "name": "Jonah Liden",
+      "path": "assets/lobbyist-photos/user-1889-e5ed66858f28.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Jonah-Liden-Headshot-2.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jonah Liden"
+    },
+    "user-1895": {
+      "name": "Vanessa Cornwall",
+      "path": "assets/lobbyist-photos/user-1895-1b44f393c0c7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/03/ccp.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Vanessa Cornwall"
+    },
+    "user-1896": {
+      "name": "Elise Kreutzer",
+      "path": "assets/lobbyist-photos/user-1896-53baae757c44.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/03/Kreutzer-Elise_Portrait.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elise Kreutzer"
+    },
+    "user-1897": {
+      "name": "Kate Suisman",
+      "path": "assets/lobbyist-photos/user-1897-073f5b11179f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/04/Kate-Suisman-Photo-for-Bio-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kate Suisman"
+    },
+    "user-1898": {
+      "name": "Marchel Marcos Kaleikini",
+      "path": "assets/lobbyist-photos/user-1898-baf5c3bc1b1f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/03/IMG_5451.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marchel Marcos Kaleikini"
+    },
+    "user-1899": {
+      "name": "Delina Biniam",
+      "path": "assets/lobbyist-photos/user-1899-1f9bb0ef8792.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/03/IMG_1206-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Delina Biniam"
+    },
+    "user-1900": {
+      "name": "Kathryn Hill",
+      "path": "assets/lobbyist-photos/user-1900-f12086b71bf7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Kathryn-Hill-Photo.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kathryn Hill"
+    },
+    "user-1902": {
+      "name": "Rachel Alpert",
+      "path": "assets/lobbyist-photos/user-1902-c821d9b80849.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/RA-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rachel Alpert"
+    },
+    "user-1903": {
+      "name": "Everett Wild",
+      "path": "assets/lobbyist-photos/user-1903-9abcc53e7cf4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/Wild-Everett-Headshot-Square.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Everett Wild"
+    },
+    "user-1904": {
+      "name": "Ricardo Lujan Valerio",
+      "path": "assets/lobbyist-photos/user-1904-b3a22a08a4cc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/08/images-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ricardo Lujan Valerio"
+    },
+    "user-1905": {
+      "name": "Ellie Booth",
+      "path": "assets/lobbyist-photos/user-1905-d9e3c500826d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/08/EAB-Headshot-1-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ellie Booth"
+    },
+    "user-1907": {
+      "name": "Miles Larson",
+      "path": "assets/lobbyist-photos/user-1907-72688ed575d2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/09/Headshot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Miles Larson"
+    },
+    "user-1910": {
+      "name": "Mary Moller",
+      "path": "assets/lobbyist-photos/user-1910-13ffe4046d5a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/7-25-Mary-Moller-20-1.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mary Moller"
+    },
+    "user-1911": {
+      "name": "Evan Sorce",
+      "path": "assets/lobbyist-photos/user-1911-b26d47c59746.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/11/IMG_9312.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Evan Sorce"
+    },
+    "user-1914": {
+      "name": "Kelly Fukai",
+      "path": "assets/lobbyist-photos/user-1914-47a5c5ccc290.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/11/Kelly-Fukai-Headshot-SQ-2025-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kelly Fukai"
+    },
+    "user-1915": {
+      "name": "Elisabeth Gade",
+      "path": "assets/lobbyist-photos/user-1915-37973e8df65c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/11/Adobe-Express-file.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elisabeth Gade"
+    },
+    "user-1917": {
+      "name": "Morgan Gratz-Weiser",
+      "path": "assets/lobbyist-photos/user-1917-8017c9be88a5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/Morgan.GratzWeiser-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Morgan Gratz-Weiser"
+    },
+    "user-1920": {
+      "name": "Marris Alden",
+      "path": "assets/lobbyist-photos/user-1920-a36852c3d474.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/Marris-Alden-Cropped.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Marris Alden"
+    },
+    "user-1921": {
+      "name": "Patrick Collins",
+      "path": "assets/lobbyist-photos/user-1921-cd0c31136251.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Collins-Patrick-8x10-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Patrick Collins"
+    },
+    "user-1922": {
+      "name": "Derrick Wheeler",
+      "path": "assets/lobbyist-photos/user-1922-db3d830ae1a3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Wheeler-4-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Derrick Wheeler"
+    },
+    "user-1923": {
+      "name": "Gregory Miller",
+      "path": "assets/lobbyist-photos/user-1923-59b523546b21.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/03/Greg-Miller-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Gregory Miller"
+    },
+    "user-1925": {
+      "name": "Nicole Stingh",
+      "path": "assets/lobbyist-photos/user-1925-53f59860e77f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Nicole-Stingh-Nov-2025-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nicole Stingh"
+    },
+    "user-1926": {
+      "name": "Ariane Le Chevallier",
+      "path": "assets/lobbyist-photos/user-1926-64aec346c5f0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Ariane-Le-Chevallier-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ariane Le Chevallier"
+    },
+    "user-1928": {
+      "name": "Yannika Marquardt",
+      "path": "assets/lobbyist-photos/user-1928-168b50cd0e5c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/20250407-DSC03160.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Yannika Marquardt"
+    },
+    "user-1931": {
+      "name": "Anthony Montoya",
+      "path": "assets/lobbyist-photos/user-1931-17bb6a1796ad.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/Anthony_8197-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anthony Montoya"
+    },
+    "user-1932": {
+      "name": "Emily Hughes",
+      "path": "assets/lobbyist-photos/user-1932-23dbba393738.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Square-Pic-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Emily Hughes"
+    },
+    "user-1933": {
+      "name": "Ethan Livermore",
+      "path": "assets/lobbyist-photos/user-1933-98f7be77de1d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/06/ethan-headshot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ethan Livermore"
+    },
+    "user-1934": {
+      "name": "Christopher McMorran",
+      "path": "assets/lobbyist-photos/user-1934-8201f8938696.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Christopher-McMorran-Headshot-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Christopher McMorran"
+    },
+    "user-1935": {
+      "name": "Laura Tabor",
+      "path": "assets/lobbyist-photos/user-1935-6b3ab55ef0cd.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/LTheadshotsquare-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Laura Tabor"
+    },
+    "user-1936": {
+      "name": "Dylann Loverro",
+      "path": "assets/lobbyist-photos/user-1936-32161f694678.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/01/Dylann-Loverro.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Dylann Loverro"
+    },
+    "user-1937": {
+      "name": "Megan Quintrell",
+      "path": "assets/lobbyist-photos/user-1937-f7b14a7e8c7a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/IMG_0343.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Megan Quintrell"
+    },
+    "user-1940": {
+      "name": "Kaliko Castille",
+      "path": "assets/lobbyist-photos/user-1940-d611690276e6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/Kaliko-Castille-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kaliko Castille"
+    },
+    "user-1942": {
+      "name": "Cassie Wilson",
+      "path": "assets/lobbyist-photos/user-1942-350ac11ca755.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/Cassie-Wilson-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cassie Wilson"
+    },
+    "user-1944": {
+      "name": "Russell Gibson",
+      "path": "assets/lobbyist-photos/user-1944-577246ee2ce9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/2023_CIV_Gibson-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Russell Gibson"
+    },
+    "user-1946": {
+      "name": "Alexa Piscanio",
+      "path": "assets/lobbyist-photos/user-1946-bef57f985c22.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/03/Profile-Pic.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alexa Piscanio"
+    },
+    "user-1947": {
+      "name": "Jennifer Purcell",
+      "path": "assets/lobbyist-photos/user-1947-4ae2259c069a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/04/JPurcell-Headshot.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Purcell"
+    },
     "user-1948": {
       "name": "Coline Benson",
       "path": "assets/lobbyist-photos/user-1948-1c81b7e8be16.jpg",
       "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/04/1862126976434373-scaled.jpg",
       "profile": "https://oregoncapitolclub.org/user/?type=user&search=Coline Benson"
+    },
+    "user-1950": {
+      "name": "Daysi Bedolla Sotelo",
+      "path": "assets/lobbyist-photos/user-1950-39c4a6136d5b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/08/32006-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Daysi Bedolla Sotelo"
+    },
+    "user-1951": {
+      "name": "Jesse Cornett",
+      "path": "assets/lobbyist-photos/user-1951-7f4d7437316f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/06/Headshot-high-res.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jesse Cornett"
+    },
+    "user-1952": {
+      "name": "Miles Palacios",
+      "path": "assets/lobbyist-photos/user-1952-ae4081315f55.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/Miles-Palacios_HAO-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Miles Palacios"
+    },
+    "user-1954": {
+      "name": "Samantha Bebout",
+      "path": "assets/lobbyist-photos/user-1954-ed99dcf62d85.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/06/IMG_6614-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Samantha Bebout"
+    },
+    "user-1956": {
+      "name": "James Barta",
+      "path": "assets/lobbyist-photos/user-1956-52e65c38a791.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/07/James-Barta-headshot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=James Barta"
+    },
+    "user-1961": {
+      "name": "Kaia Maclaren",
+      "path": "assets/lobbyist-photos/user-1961-f1953b5b68fa.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/09/Headshot-Kaia-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kaia Maclaren"
+    },
+    "user-201": {
+      "name": "Joel Shapiro",
+      "path": "assets/lobbyist-photos/user-201-848e4e22fdb8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/headshot-bw.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Joel Shapiro"
+    },
+    "user-202": {
+      "name": "Jeff Newgard",
+      "path": "assets/lobbyist-photos/user-202-18056173bd0a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/10/headshot_jeffnewgard.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jeff Newgard"
+    },
+    "user-204": {
+      "name": "Jeff Heatherington",
+      "path": "assets/lobbyist-photos/user-204-7b5d0a361a53.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/2016-Headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jeff Heatherington"
+    },
+    "user-209": {
+      "name": "Shawn Cleave",
+      "path": "assets/lobbyist-photos/user-209-b7b6c82f0eb6.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/photo27.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Shawn Cleave"
+    },
+    "user-266": {
+      "name": "Lynda Gardner",
+      "path": "assets/lobbyist-photos/user-266-d88e4c131a7c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/11/LyndaGardner.4.14.14x0004-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lynda Gardner"
+    },
+    "user-269": {
+      "name": "Rocky Dallum",
+      "path": "assets/lobbyist-photos/user-269-5ced78903bae.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/Dallum-Rocky-5x5-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Rocky Dallum"
+    },
+    "user-273": {
+      "name": "Greg Leo",
+      "path": "assets/lobbyist-photos/user-273-cdee0e25f0f9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/Greg_Leo-photo.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Leo"
+    },
+    "user-281": {
+      "name": "Phil Donovan",
+      "path": "assets/lobbyist-photos/user-281-16592b15a1ac.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/11/Phil-cropped-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Phil Donovan"
+    },
+    "user-283": {
+      "name": "Jason Brandt",
+      "path": "assets/lobbyist-photos/user-283-b33884f3fb14.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/02/Jason-Brandt.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jason Brandt"
+    },
+    "user-292": {
+      "name": "Peter Brown",
+      "path": "assets/lobbyist-photos/user-292-0289a26c90d2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/02/Peter-Brown.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Peter Brown"
+    },
+    "user-296": {
+      "name": "Laura Curtis",
+      "path": "assets/lobbyist-photos/user-296-ddedec69a079.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/09/Laura-Curtis-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Laura Curtis"
+    },
+    "user-298": {
+      "name": "Tom Barrows",
+      "path": "assets/lobbyist-photos/user-298-575ff551faf8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/03/Tom-Barrows-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tom Barrows"
+    },
+    "user-30": {
+      "name": "Niki Terzieff",
+      "path": "assets/lobbyist-photos/user-30-96f1614214cc.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/02/Cannabis-Creative-Conference37756-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Niki Terzieff"
+    },
+    "user-308": {
+      "name": "John Powell",
+      "path": "assets/lobbyist-photos/user-308-f97a640dcdd9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/John-A.-Powell.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John Powell"
+    },
+    "user-320": {
+      "name": "Amanda Dalton",
+      "path": "assets/lobbyist-photos/user-320-8d307258733c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/10/Amanda-6132R_AD1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Amanda Dalton"
+    },
+    "user-339": {
+      "name": "Bill Cross",
+      "path": "assets/lobbyist-photos/user-339-a269c53c6409.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/03/Bill-Cross-81.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Bill Cross"
+    },
+    "user-344": {
+      "name": "Erik Kancler",
+      "path": "assets/lobbyist-photos/user-344-3dc0bff94f7a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/EK_Portrait_Gray-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Erik Kancler"
+    },
+    "user-347": {
+      "name": "Jeremiah Rigsby",
+      "path": "assets/lobbyist-photos/user-347-54dabe591019.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/jeremiah_rigsby_DSC1144_final-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jeremiah Rigsby"
+    },
+    "user-355": {
+      "name": "Patrick Sieng",
+      "path": "assets/lobbyist-photos/user-355-f0e9827a380c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/Patrick-Head-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Patrick Sieng"
+    },
+    "user-36": {
+      "name": "Courtni Dresser",
+      "path": "assets/lobbyist-photos/user-36-799311bfba57.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/12/Courtni-Dresser-OMA-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Courtni Dresser"
+    },
+    "user-368": {
+      "name": "Amanda Hess",
+      "path": "assets/lobbyist-photos/user-368-9a6b42fb9d7a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/09/Best-1-Capitol-Club-1-J-112-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Amanda Hess"
+    },
+    "user-372": {
+      "name": "Bill Perry",
+      "path": "assets/lobbyist-photos/user-372-2785ef3a5ab7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/Bill-headshot.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Bill Perry"
+    },
+    "user-375": {
+      "name": "Fawn Barrie",
+      "path": "assets/lobbyist-photos/user-375-f0cf39b04849.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/IMG_4881_Facetune_10-12-2018-15-00-04.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Fawn Barrie"
+    },
+    "user-378": {
+      "name": "Jennifer Stoll",
+      "path": "assets/lobbyist-photos/user-378-a976b01022bb.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/830-Jennifer-Stoll-12.5.18.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Stoll"
+    },
+    "user-39": {
+      "name": "Mark Bonanno",
+      "path": "assets/lobbyist-photos/user-39-5dd91c3c7c45.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/09/Mark-Bonanno-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mark Bonanno"
+    },
+    "user-406": {
+      "name": "Alex Cuyler",
+      "path": "assets/lobbyist-photos/user-406-c84bd14d5530.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Alex-Cuyler-737.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Alex Cuyler"
+    },
+    "user-409": {
+      "name": "Mark Landauer",
+      "path": "assets/lobbyist-photos/user-409-7fc7bf29ee85.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Headshot-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mark Landauer"
+    },
+    "user-427": {
+      "name": "Cindy Robert",
+      "path": "assets/lobbyist-photos/user-427-0d6cd3e30cdd.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/Headshot-2.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Cindy Robert"
+    },
+    "user-430": {
+      "name": "Sabrina E. Riggs",
+      "path": "assets/lobbyist-photos/user-430-37af4f36a787.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Dalton-Advocacy-2724.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sabrina E. Riggs"
+    },
+    "user-435": {
+      "name": "Phil Bentley",
+      "path": "assets/lobbyist-photos/user-435-42d56ee20559.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/09/Philip-Bentley-1340.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Phil Bentley"
+    },
+    "user-437": {
+      "name": "Gwenn Baldwin",
+      "path": "assets/lobbyist-photos/user-437-7cd2745caaa3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/11/SunJnKg-cropped-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Gwenn Baldwin"
+    },
+    "user-445": {
+      "name": "Kelsey Wilson",
+      "path": "assets/lobbyist-photos/user-445-1c75a6132362.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/02/116-DSC06496-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kelsey Wilson"
+    },
+    "user-458": {
+      "name": "Pamela Leavitt",
+      "path": "assets/lobbyist-photos/user-458-b44d1ab9aae4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Pamela-Leavitt-2.13.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Pamela Leavitt"
+    },
+    "user-464": {
+      "name": "Darrell W. Fuller",
+      "path": "assets/lobbyist-photos/user-464-142988f75b8a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/11/Darrell-Fuller-07.28.21.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Darrell W. Fuller"
+    },
+    "user-466": {
+      "name": "Michael Gay",
+      "path": "assets/lobbyist-photos/user-466-e2564bd1b770.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/01/1577-Michael-T.-Gay-1.30.23-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michael Gay"
+    },
+    "user-469": {
+      "name": "Courtney Westling",
+      "path": "assets/lobbyist-photos/user-469-281b108f3e38.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Courtney-Westling-2019.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Courtney Westling"
+    },
+    "user-470": {
+      "name": "Greg Peden",
+      "path": "assets/lobbyist-photos/user-470-6542ba2530ab.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Greg-Peden-1.12.22.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Greg Peden"
+    },
+    "user-474": {
+      "name": "Tammy L. Dennee",
+      "path": "assets/lobbyist-photos/user-474-015b9aa88807.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2026/04/DenneeTammy_2025-OR-1-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tammy L. Dennee"
+    },
+    "user-479": {
+      "name": "John DiLorenzo Jr.",
+      "path": "assets/lobbyist-photos/user-479-a1a7b7d8443f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/92-John-DiLorenzo-2.23.23.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John DiLorenzo Jr."
+    },
+    "user-493": {
+      "name": "Richard Angstrom",
+      "path": "assets/lobbyist-photos/user-493-839739483a27.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/11/D3gdOw9I-1.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Richard Angstrom"
+    },
+    "user-503": {
+      "name": "Brian Posewitz",
+      "path": "assets/lobbyist-photos/user-503-067ee5a4183b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1457-Brian-Posewitz-2019.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brian Posewitz"
+    },
+    "user-520": {
+      "name": "Katy King",
+      "path": "assets/lobbyist-photos/user-520-a542b92f187d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/IMG_4094.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Katy King"
+    },
+    "user-528": {
+      "name": "Angi Dilkes",
+      "path": "assets/lobbyist-photos/user-528-d0a1ee5db6f5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/03/IMG_R_0003-4-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Angi Dilkes"
+    },
+    "user-53": {
+      "name": "Mary Anne Cooper",
+      "path": "assets/lobbyist-photos/user-53-878a5855af6e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Cooper-2023-FINAL-2-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Mary Anne Cooper"
+    },
+    "user-55": {
+      "name": "Nellie deVries",
+      "path": "assets/lobbyist-photos/user-55-1c4b6a7a7ca8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/02/Nellie-deVries-1229-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nellie deVries"
+    },
+    "user-554": {
+      "name": "John Mangan",
+      "path": "assets/lobbyist-photos/user-554-fefb5d140f49.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/ACLI-Headshot125-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John Mangan"
+    },
+    "user-555": {
+      "name": "James L. (J.L.) Wilson",
+      "path": "assets/lobbyist-photos/user-555-c9851b8e2769.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/JL-Phone-1-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=James L. (J.L.) Wilson"
+    },
+    "user-56": {
+      "name": "Andy Smith",
+      "path": "assets/lobbyist-photos/user-56-85c15cf2f234.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/Andy_Smith_JPEG.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Andy Smith"
+    },
+    "user-568": {
+      "name": "Kristine Evertz",
+      "path": "assets/lobbyist-photos/user-568-3a6bfc776983.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Headshot-25-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kristine Evertz"
+    },
+    "user-57": {
+      "name": "Michael Selvaggio",
+      "path": "assets/lobbyist-photos/user-57-df113cd557d4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/02/selvaggio_photo_square.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michael Selvaggio"
+    },
+    "user-588": {
+      "name": "Graham Trainor",
+      "path": "assets/lobbyist-photos/user-588-f96875adf2e9.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Graham-Trainor.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Graham Trainor"
+    },
+    "user-59": {
+      "name": "Matt Markee",
+      "path": "assets/lobbyist-photos/user-59-5a772b1ffbad.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/03/Matt-Markee-205-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Matt Markee"
+    },
+    "user-597": {
+      "name": "Don Loving",
+      "path": "assets/lobbyist-photos/user-597-5c026af8557a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/01/Me.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Don Loving"
+    },
+    "user-60": {
+      "name": "Kylie Grunow",
+      "path": "assets/lobbyist-photos/user-60-813d6c448b48.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/01/Kylie_Grunow.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kylie Grunow"
+    },
+    "user-605": {
+      "name": "Jody Wiser",
+      "path": "assets/lobbyist-photos/user-605-98a616832d38.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/Jody-Wiser.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jody Wiser"
+    },
+    "user-617": {
+      "name": "Felisa Hagins",
+      "path": "assets/lobbyist-photos/user-617-cd5248e432e5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Felisa-Hagins_SEIU49_Political-Director-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Felisa Hagins"
+    },
+    "user-629": {
+      "name": "Brant Wolf",
+      "path": "assets/lobbyist-photos/user-629-14c64837caaa.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Brant-Wolf-430.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brant Wolf"
+    },
+    "user-631": {
+      "name": "David F. Barrows",
+      "path": "assets/lobbyist-photos/user-631-ab1e6b155672.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/09/David-F.-Barrows.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=David F. Barrows"
+    },
+    "user-645": {
+      "name": "Anneliese Koehler",
+      "path": "assets/lobbyist-photos/user-645-e6c5f5e1dac2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/Anneliese-Koehler-1322.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anneliese Koehler"
+    },
+    "user-646": {
+      "name": "Tom Perrick",
+      "path": "assets/lobbyist-photos/user-646-5745f2115ac2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/02/Tom-Perrick-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tom Perrick"
+    },
+    "user-654": {
+      "name": "Sybil Hebb",
+      "path": "assets/lobbyist-photos/user-654-6a97a0cc2efa.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/02/Sybil-Hebb-612.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sybil Hebb"
+    },
+    "user-660": {
+      "name": "Scott Winkels",
+      "path": "assets/lobbyist-photos/user-660-b8cba2ed1162.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/788-Scott-Winkels-2.15.19.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Scott Winkels"
+    },
+    "user-667": {
+      "name": "Libby Batlan",
+      "path": "assets/lobbyist-photos/user-667-edad71ca1a9e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/10/Libby-Batlan-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Libby Batlan"
+    },
+    "user-682": {
+      "name": "Andrea (Andi) Easton",
+      "path": "assets/lobbyist-photos/user-682-aade4fe7991c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/Andi-Easton_OAHHS-2023-Cropped-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Andrea (Andi) Easton"
+    },
+    "user-690": {
+      "name": "Nicole Palmateer-Hazelbaker",
+      "path": "assets/lobbyist-photos/user-690-efc1bc845b31.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/735-Nicole-Palmateer-Hazelbaker-1.25.17-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Nicole Palmateer-Hazelbaker"
+    },
+    "user-693": {
+      "name": "Annette Price",
+      "path": "assets/lobbyist-photos/user-693-ba9d89223cd3.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/IMG_7050-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Annette Price"
+    },
+    "user-699": {
+      "name": "Christopher Parta",
+      "path": "assets/lobbyist-photos/user-699-d34fb923af3b.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/02/Chris-Parta-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Christopher Parta"
+    },
+    "user-710": {
+      "name": "Brian Krieg",
+      "path": "assets/lobbyist-photos/user-710-ecf6790db87e.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/smacna-17-1-4-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brian Krieg"
+    },
+    "user-726": {
+      "name": "Elizabeth Howe",
+      "path": "assets/lobbyist-photos/user-726-ea5856c01752.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Elizabeth-Howe-2020.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Elizabeth Howe"
+    },
+    "user-729": {
+      "name": "Erin Doyle",
+      "path": "assets/lobbyist-photos/user-729-9b88522110e4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Erin-Doyle-headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Erin Doyle"
+    },
+    "user-746": {
+      "name": "Calli Daly",
+      "path": "assets/lobbyist-photos/user-746-d111395de95d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/headshot.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Calli Daly"
+    },
+    "user-747": {
+      "name": "Bryan Boehringer",
+      "path": "assets/lobbyist-photos/user-747-8778ed5922c4.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Bryan-Boehringer-4.12.23-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Bryan Boehringer"
+    },
+    "user-760": {
+      "name": "Susan Grabe",
+      "path": "assets/lobbyist-photos/user-760-8d32e0ed8888.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Susan-Grabe-BW.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Susan Grabe"
+    },
+    "user-776": {
+      "name": "Brett Rowlett",
+      "path": "assets/lobbyist-photos/user-776-7ab6ab24b8cb.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/04/Brett_Rowlett.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Brett Rowlett"
+    },
+    "user-778": {
+      "name": "Scott Barrie",
+      "path": "assets/lobbyist-photos/user-778-c06cabdff38c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/08/Scott-Barrie-992.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Scott Barrie"
+    },
+    "user-779": {
+      "name": "John C. Powell",
+      "path": "assets/lobbyist-photos/user-779-500f82baa886.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/John-C.-Powell-1084.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John C. Powell"
+    },
+    "user-781": {
+      "name": "Lori Sattenspiel",
+      "path": "assets/lobbyist-photos/user-781-fbeaca821c42.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/head-shot.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Lori Sattenspiel"
+    },
+    "user-784": {
+      "name": "Jessica Adamson",
+      "path": "assets/lobbyist-photos/user-784-c25a3c375faf.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Jessica-2024.1.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jessica Adamson"
+    },
+    "user-791": {
+      "name": "Pat Riggs-Henson",
+      "path": "assets/lobbyist-photos/user-791-5e496f3e7322.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/pat-city-club-picture-2-2.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Pat Riggs-Henson"
+    },
+    "user-794": {
+      "name": "Molly McGrew",
+      "path": "assets/lobbyist-photos/user-794-bc0457c0a4dd.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/1321-Molly-McGrew-2.1016.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Molly McGrew"
+    },
+    "user-797": {
+      "name": "Evyan Jarvis Andries",
+      "path": "assets/lobbyist-photos/user-797-d0be1fc8e278.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2020/12/IMG_3803-1-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Evyan Jarvis Andries"
+    },
+    "user-801": {
+      "name": "Betsy Jones",
+      "path": "assets/lobbyist-photos/user-801-3cf6cb4c953d.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/02/Photo-for-Capitol-Club.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Betsy Jones"
+    },
+    "user-845": {
+      "name": "Jana Jarvis",
+      "path": "assets/lobbyist-photos/user-845-ad78799d7905.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/1085-Jana-Jarvis-2018.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jana Jarvis"
+    },
+    "user-856": {
+      "name": "Kevin Christiansen",
+      "path": "assets/lobbyist-photos/user-856-85bec1f00aab.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/01/Kevin-new-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Kevin Christiansen"
+    },
+    "user-857": {
+      "name": "John Mohlis",
+      "path": "assets/lobbyist-photos/user-857-9d6f48d5ec00.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/1065-John-Mohlis-1.25.17.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=John Mohlis"
+    },
+    "user-866": {
+      "name": "Tom Holt",
+      "path": "assets/lobbyist-photos/user-866-1a0a240186f2.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/Tom-Holt920.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tom Holt"
+    },
+    "user-867": {
+      "name": "Anthony K. Smith",
+      "path": "assets/lobbyist-photos/user-867-8e53e23ccd7a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/12/Anthony_K_Smith_470x470.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anthony K. Smith"
+    },
+    "user-869": {
+      "name": "Jennifer Olson",
+      "path": "assets/lobbyist-photos/user-869-e4f212259985.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2025/07/WEBGRS241220_05a-3-1-1.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Olson"
+    },
+    "user-878": {
+      "name": "Michael C. (Mike) Freese",
+      "path": "assets/lobbyist-photos/user-878-3e9dca560ef7.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2017/09/Mike-Freese.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michael C. (Mike) Freese"
+    },
+    "user-884": {
+      "name": "Courtney Johnston",
+      "path": "assets/lobbyist-photos/user-884-45852090cf4f.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/01/1312.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Courtney Johnston"
+    },
+    "user-902": {
+      "name": "Justin Martin",
+      "path": "assets/lobbyist-photos/user-902-bb4476e67219.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/02/Justin-Martin-207.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Justin Martin"
+    },
+    "user-904": {
+      "name": "Doug Riggs",
+      "path": "assets/lobbyist-photos/user-904-bfeaed39e543.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/272-Doug-Riggs-2017.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Doug Riggs"
+    },
+    "user-919": {
+      "name": "Melissa Vaillancourt",
+      "path": "assets/lobbyist-photos/user-919-36d8ca2e818c.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/09/Melissa-Vaillancourt-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Melissa Vaillancourt"
+    },
+    "user-929": {
+      "name": "Ginny Lang",
+      "path": "assets/lobbyist-photos/user-929-39400087a53a.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2016/02/Ginny-Lang-182_b.png",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ginny Lang"
+    },
+    "user-936": {
+      "name": "Michael D. Mason",
+      "path": "assets/lobbyist-photos/user-936-51ce09296357.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/403-Michael-D.-Mason-2016.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Michael D. Mason"
+    },
+    "user-937": {
+      "name": "Anne E. Murray",
+      "path": "assets/lobbyist-photos/user-937-8350d9581770.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/02/5698F5C4-3177-4FD4-87BA-D90DED0EA16E.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Anne E. Murray"
+    },
+    "user-938": {
+      "name": "Gary Oxley",
+      "path": "assets/lobbyist-photos/user-938-e93d174c5bf1.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2018/12/Gary-Oxley-255.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Gary Oxley"
+    },
+    "user-941": {
+      "name": "Ariel Nelson",
+      "path": "assets/lobbyist-photos/user-941-c453a0d9af30.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/1356-Ariel-Nelson-2.3.16.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ariel Nelson"
+    },
+    "user-952": {
+      "name": "Zack Reeves",
+      "path": "assets/lobbyist-photos/user-952-840e58d043be.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2022/01/Zack-Reeves-2.7.19.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Zack Reeves"
+    },
+    "user-954": {
+      "name": "George Okulitch",
+      "path": "assets/lobbyist-photos/user-954-2f8cf987ec37.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/01/George-Okulitch-652.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=George Okulitch"
+    },
+    "user-956": {
+      "name": "Sean Tate",
+      "path": "assets/lobbyist-photos/user-956-cde727fcb5c8.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2024/01/IMG_6966-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Sean Tate"
+    },
+    "user-963": {
+      "name": "Tracy Rainey",
+      "path": "assets/lobbyist-photos/user-963-478f0ce78eee.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/02/Tracy-Rutten.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Tracy Rainey"
+    },
+    "user-974": {
+      "name": "Betsy Earls",
+      "path": "assets/lobbyist-photos/user-974-5359b262f5d5.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2023/03/669-Betsy-Earls-2020.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Betsy Earls"
+    },
+    "user-987": {
+      "name": "Ryan Fisher",
+      "path": "assets/lobbyist-photos/user-987-31cb5bfaddd0.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2019/09/Ryan-Fisher-2019-scaled.jpeg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Ryan Fisher"
+    },
+    "user-988": {
+      "name": "Jennifer Dresler",
+      "path": "assets/lobbyist-photos/user-988-04cbfc7f4679.jpg",
+      "source": "https://oregoncapitolclub.org/wp-content/uploads/2021/02/Jenny-standing-head-shot-2019_square-scaled.jpg",
+      "profile": "https://oregoncapitolclub.org/user/?type=user&search=Jennifer Dresler"
     }
   }
 }

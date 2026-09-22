@@ -32,6 +32,10 @@ def allowed_photo(url):
 def thumbnail(content):
     Image.MAX_IMAGE_PIXELS = 25000000
     with Image.open(io.BytesIO(content)) as source:
+        # Large camera JPEGs can be decoded at reduced resolution without
+        # allocating their full pixel buffers. Keep the decoded-pixel bound.
+        if source.format == 'JPEG' and source.width * source.height > 25000000:
+            source.draft('RGB', (320, 400))
         if source.width * source.height > 25000000:
             raise ValueError('Portrait exceeds pixel limit')
         source.load()
@@ -45,11 +49,19 @@ def thumbnail(content):
         return out.getvalue()
 
 
-def refresh(members, session):
+def refresh(members, session, delay_seconds=5.0):
+    if delay_seconds < 1:
+        raise ValueError('Photo request delay must be at least one second')
     if len(members) < 100 or len({m['cc_id'] for m in members}) != len(members):
         raise ValueError('Incomplete or duplicated directory; keeping prior photo manifest')
     previous = json.loads(MANIFEST.read_text()).get('photos', {}) if MANIFEST.exists() else {}
-    photos, files, failed = {}, {}, []
+    # Individually reviewed official-site portraits are maintained separately
+    # from directory acquisition and must survive a successful CC refresh.
+    photos = {key: photo for key, photo in previous.items()
+              if re.fullmatch(r'lobbyist-\d+', key)
+              and re.fullmatch(r'assets/lobbyist-photos/lobbyist-\d+-[a-f0-9]{12}\.jpg', photo.get('path', ''))
+              and (ROOT / 'docs' / photo['path']).is_file()}
+    files, failed = {}, []
     cache_file = ROOT / 'data/capitol_club_photo_cache.json'
     cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -66,6 +78,7 @@ def refresh(members, session):
             photos[key] = cached['photo']
             continue
         response = None
+        time.sleep(delay_seconds)
         try:
             response = session.get(url, headers={'Referer': MEMBER_URL}, timeout=20, stream=True, allow_redirects=False)
             if response.status_code == 429:
@@ -79,7 +92,6 @@ def refresh(members, session):
                 if len(data) > 8_000_000:
                     raise ValueError('Image exceeds download limit')
             response.close()
-            time.sleep(1.0)
             jpg = thumbnail(data)
             filename = f'{key}-{hashlib.sha256(jpg).hexdigest()[:12]}.jpg'
             files[filename] = jpg
@@ -120,6 +132,7 @@ def main():
     session.headers.update(HEADERS)
     parser = argparse.ArgumentParser()
     parser.add_argument('--from-json', action='store_true', help='Resume the most recent local directory snapshot')
+    parser.add_argument('--delay-seconds', type=float, default=5.0, help='Pause before each image request (default: 5 seconds)')
     args = parser.parse_args()
     snapshot = ROOT / 'data/capitol_club_photos_source.json'
     if args.from_json:
@@ -130,7 +143,7 @@ def main():
     # Directory browsing and static asset delivery use separate sessions.
     images = requests.Session()
     images.headers.update(HEADERS)
-    refresh(members, images)
+    refresh(members, images, args.delay_seconds)
 
 
 if __name__ == '__main__':
