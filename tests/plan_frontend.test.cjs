@@ -960,3 +960,42 @@ test("a leader's giving is left out of the ask but not out of the donor", async 
   assert.ok(row.gifts.some(g => g.amount === 20000));
   assert.ok(row.per_cycle.some(c => c.recipients.some(r => r.member === "Fahey")));
 });
+
+// ── Who else to ring, and about what ───────────────────────────────────────
+test("an additional contact names the clients they are a contact for", () => {
+  const ctx = shapeContext();
+  const lob = (lobbyist_id, name, extra = {}) => ({ lobbyist: { lobbyist_id, name, ...extra } });
+  const group = { rows: [
+    { donor: "Charter Communications", also: [lob(1, "Nicole Mann",
+        { firm: "Dalton Advocacy, Inc.", email: "nicole@daltonadvocacy.com", phone: "503-559-2506" })] },
+    { donor: "DoorDash", also: [lob(1, "Nicole Mann",
+        { firm: "Dalton Advocacy, Inc.", email: "nicole@daltonadvocacy.com", phone: "503-559-2506" }),
+      lob(2, "Sabrina Riggs", { email: "sabrina@daltonadvocacy.com" })] },
+  ] };
+  const contacts = ctx.alsoContacts(group);
+  // One entry per person, carrying every client they are attached to.
+  assert.deepEqual(Array.from(contacts, c => c.name), ["Nicole Mann", "Sabrina Riggs"]);
+  assert.deepEqual(plain(contacts[0].clients), ["Charter Communications", "DoorDash"]);
+  assert.equal(ctx.alsoLine(contacts[0]),
+    "Nicole Mann (Charter Communications, DoorDash) — Dalton Advocacy, Inc. · "
+    + "nicole@daltonadvocacy.com · 503-559-2506");
+  // A name with nothing to reach them by still reads cleanly.
+  assert.equal(ctx.alsoLine({ name: "Jo Bloggs", clients: ["A PAC"], reach: "" }),
+               "Jo Bloggs (A PAC)");
+  // The name is kept apart so the sheet can bold it.
+  assert.deepEqual(plain(ctx.alsoParts(contacts[1])),
+                   { donor: "Sabrina Riggs", rest: " (DoorDash) — sabrina@daltonadvocacy.com" });
+});
+
+test("nobody attached means no column content", () => {
+  const ctx = shapeContext();
+  assert.deepEqual(ctx.alsoContacts({ rows: [{ donor: "A PAC", also: [] }, { donor: "B PAC" }] }), []);
+});
+
+test("each tier is a different colour, and Tier 4 is none", () => {
+  const ctx = context();
+  const fills = ["Tier 1", "Tier 2", "Tier 3"].map(t => ctx.tierFill(t));
+  assert.equal(new Set(fills).size, 3, "three tiers, three colours");
+  assert.ok(fills.every(f => /^FF[0-9A-F]{6}$/.test(f)), fills.join(" "));
+  assert.equal(ctx.tierFill("Tier 4"), null, "the rest are left unfilled");
+});
