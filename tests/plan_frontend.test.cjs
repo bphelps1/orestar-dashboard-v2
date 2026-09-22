@@ -14,6 +14,16 @@ const { test } = require("node:test");
 const root = path.resolve(__dirname, "..");
 const src = fs.readFileSync(path.join(root, "docs/recommend.js"), "utf8");
 
+/**
+ * A host-realm copy of a value built inside the vm sandbox.
+ *
+ * Sandbox objects carry the sandbox's Object.prototype, so
+ * assert.deepStrictEqual — which `node:assert/strict` makes deepEqual — fails
+ * them against a literal written here with "same structure but not
+ * reference-equal", however identical the contents. Compare the plain shape.
+ */
+const plain = value => JSON.parse(JSON.stringify(value));
+
 /** The source between two markers, both of which must exist. */
 function slice(from, to) {
   const a = src.indexOf(from);
@@ -220,12 +230,17 @@ test("only the five comparables this plan's donors gave most to get columns", ()
                     rows: [{ donor: "d", donor_key: "d", type: "Donor Target", target: 0, given: 0,
                              cycles: {}, contacts: [], attribution: null, also: [] }] }];
   const { comps } = ctx.planCycleColumns(groups, 2026);
-  assert.deepEqual(comps.map(c => c.filer), ["F7", "F6", "F5", "F4", "F3"]);
+  assert.deepEqual(Array.from(comps, c => c.filer), ["F7", "F6", "F5", "F4", "F3"]);
 });
 
 // ── First-time asks and shared identity ──────────────────────────────────
 function scoringContext(extra = {}) {
-  const ctx = context({ filerIndex: [], isDonorExcluded: () => false, ...extra });
+  // limitedHistoryWeight() asks a profile for its office; a bare fixture has
+  // none, and a null office simply skips the legislative special-case. Without
+  // the stub the whole call throws ReferenceError — getOffice is declared
+  // outside every slice.
+  const ctx = context({ filerIndex: [], isDonorExcluded: () => false,
+                        getOffice: () => null, ...extra });
   vm.runInContext(slice('function _getAllYearGifts(', '// ── Step 6: Display results'), ctx);
   return ctx;
 }
@@ -373,7 +388,7 @@ const NURSES_TO_MCLAIN = { 2014: 25000, 2016: 7500, 2018: 6000, 2022: 2000, 2024
 test("a comparable is benchmarked on the recent window, not a lifetime maximum", () => {
   const ctx = context();
   const pick = ctx.benchmarkCycle(NURSES_TO_MCLAIN, 2026);
-  assert.deepEqual(pick, { cycle: 2024, amount: 2000, stale: false });
+  assert.deepEqual(plain(pick), { cycle: 2024, amount: 2000, stale: false });
   assert.equal(Math.max(...Object.values(NURSES_TO_MCLAIN)), 25000);   // the old rule
 });
 
@@ -386,7 +401,7 @@ test("the cycle being planned is not a benchmark for a peer", () => {
 test("with nothing recent, older giving stands in and is flagged", () => {
   const ctx = context();
   const pick = ctx.benchmarkCycle({ 2018: 6000, 2020: 4000 }, 2026);
-  assert.deepEqual(pick, { cycle: 2020, amount: 4000, stale: true });
+  assert.deepEqual(plain(pick), { cycle: 2020, amount: 4000, stale: true });
   assert.match(ctx.recencyNote(true, 2026), /Nothing in 2021–2022 and 2023–2024/);
   assert.match(ctx.recencyNote(false, 2026), /Benchmarked on 2021–2022 and 2023–2024/);
 });
@@ -415,7 +430,7 @@ test("the weighted median answers what a donor gives now", () => {
 test("the stale fallback takes the last thing known, not the biggest", () => {
   const ctx = context();
   // Reaching back for a maximum is how one decade-old gift priced every ask.
-  assert.deepEqual(ctx.benchmarkCycle({ 2016: 25000, 2020: 4000 }, 2026),
+  assert.deepEqual(plain(ctx.benchmarkCycle({ 2016: 25000, 2020: 4000 }, 2026)),
                    { cycle: 2020, amount: 4000, stale: true });
 });
 
@@ -522,8 +537,8 @@ test("one column per rung, named for the rung it stands for", () => {
   ctx.window._compCycles = new Map([["d", new Map([...ladder.values()].map(s =>
     [s.name, { 2024: 1000 }]))]]);
   const { comps } = ctx.planCycleColumns([{ rows: [{ donor_key: "d" }] }], 2026);
-  assert.deepEqual(comps.map(c => c.level), [1, 2, 3, 4, 5]);
-  assert.deepEqual(comps.map(c => c.filer), ["Speaker", "Senior", "Middle", "Swing", "Bench"]);
+  assert.deepEqual(Array.from(comps, c => c.level), [1, 2, 3, 4, 5]);
+  assert.deepEqual(Array.from(comps, c => c.filer), ["Speaker", "Senior", "Middle", "Swing", "Bench"]);
   assert.equal(comps[0].rung, "Caucus leadership");
 });
 
@@ -534,7 +549,7 @@ test("a ladder committee's giving folds into the index the columns read", () => 
   ctx.indexLadderGiving(
     new Map([["speaker", { 2023: [{ name: "Big PAC", donor_id: "d9", total: 5000 }],
                            2024: [{ name: "Big PAC", donor_id: "d9", total: 1500 }] }]]), ladder);
-  assert.deepEqual(ctx.window._compCycles.get("d9").get("Speaker"), { 2024: 6500 });
+  assert.deepEqual(plain(ctx.window._compCycles.get("d9").get("Speaker")), { 2024: 6500 });
 });
 
 // ── The standing donor list, by chamber and party ──────────────────────────
@@ -596,10 +611,10 @@ test("the list is drawn from one chamber and one party, minus paper committees",
 
 test("the generic ask is what a donor gives one candidate across a cycle", async () => {
   const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
-  assert.deepEqual(built.rows.map(r => r.donor), ["Big PAC"]);
+  assert.deepEqual(Array.from(built.rows, r => r.donor), ["Big PAC"]);
   const big = built.rows[0];
   // 2026: $2,000 to A (two cheques) and $2,000 to B — two relationships, not four.
-  assert.deepEqual(big.gifts.filter(g => g.cycle === 2026).map(g => g.amount), [2000, 2000]);
+  assert.deepEqual(Array.from(big.gifts.filter(g => g.cycle === 2026), g => g.amount), [2000, 2000]);
   assert.equal(big.ask, 2000);
   assert.equal(big.campaigns, 2);
   assert.deepEqual([big.cycles_given, big.cycles_in_window], [3, 6]);
@@ -680,10 +695,10 @@ test("committee names shorten to the candidate", () => {
 
 test("a lobbyist's name splits into the list's two columns", () => {
   const ctx = shapeContext();
-  assert.deepEqual(ctx.splitName("Jack Dempsey"), { first: "Jack", last: "Dempsey" });
-  assert.deepEqual(ctx.splitName("Kirsten Larson Adams"), { first: "Kirsten Larson", last: "Adams" });
-  assert.deepEqual(ctx.splitName("Cher"), { first: "Cher", last: "" });
-  assert.deepEqual(ctx.splitName(""), { first: "", last: "" });
+  assert.deepEqual(plain(ctx.splitName("Jack Dempsey")), { first: "Jack", last: "Dempsey" });
+  assert.deepEqual(plain(ctx.splitName("Kirsten Larson Adams")), { first: "Kirsten Larson", last: "Adams" });
+  assert.deepEqual(plain(ctx.splitName("Cher")), { first: "Cher", last: "" });
+  assert.deepEqual(plain(ctx.splitName("")), { first: "", last: "" });
 });
 
 test("the suggested ask carries a range around the median", async () => {
@@ -699,5 +714,5 @@ test("donor identities survive for the lobbyist lookup", async () => {
   const built = await ctx.buildChamberList("house", "Democrat", 2026);
   // planAttribution needs the ids; dropping them is what left every donor
   // unattributed the first time round.
-  assert.deepEqual(built.rows[0].ids, ["d1"]);
+  assert.deepEqual(plain(built.rows[0].ids), ["d1"]);
 });

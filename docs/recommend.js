@@ -884,17 +884,44 @@ const CURRENT_MEMBER_NAME_ALIASES = {
   "Vikki Breese-Iverson": ["Vikki Iverson"],
   "Courtney Neron Misslin": ["Courtney Neron"],
 };
-function isCurrentLegislator(filer) {
+/** The sitting member this committee belongs to, by roster name, else null. */
+function currentMemberFor(filer) {
   const chamber = getChamber(filer);
-  if (!chamber || !currentLegislators) return false;
+  if (!chamber || !currentLegislators) return null;
   // Whole tokens accommodate middle initials and committee labels without fuzzy surname matches.
   const candidates = [filer.candidate_name, filer.name].map(n => new Set(memberNameTokens(n)));
-  return currentLegislators[chamber].some(name => {
-    return [name, ...(CURRENT_MEMBER_NAME_ALIASES[name] || [])].some(variant => {
+  return currentLegislators[chamber].find(name =>
+    [name, ...(CURRENT_MEMBER_NAME_ALIASES[name] || [])].some(variant => {
       const tokens = memberNameTokens(variant);
       return tokens.length >= 2 && candidates.some(candidate => tokens.every(t => candidate.has(t)));
-    });
-  });
+    })) || null;
+}
+
+function isCurrentLegislator(filer) {
+  return currentMemberFor(filer) !== null;
+}
+
+/**
+ * How a call list writes a candidate: the surname alone, and the surname plus
+ * a first initial when the chamber seats two of them — Bobby Levy and Emerson
+ * Levy both sit in the House, so both read "Levy B" and "Levy E".
+ */
+function memberShortNames(chamber) {
+  const roster = currentLegislators?.[chamber] || [];
+  const bySurname = new Map();
+  for (const name of roster) {
+    const tokens = String(name).trim().split(/\s+/);
+    const surname = tokens[tokens.length - 1];
+    if (!bySurname.has(surname)) bySurname.set(surname, []);
+    bySurname.get(surname).push(name);
+  }
+  const out = new Map();
+  for (const [surname, names] of bySurname) {
+    for (const name of names) {
+      out.set(name, names.length > 1 ? `${surname} ${name.trim()[0]}` : surname);
+    }
+  }
+  return out;
 }
 
 /** Only known, recent candidate elections can establish candidate comparability.
