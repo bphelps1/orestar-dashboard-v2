@@ -734,6 +734,24 @@ test("a lobbyist's name splits into the list's two columns", () => {
   assert.deepEqual(plain(ctx.splitName("")), { first: "", last: "" });
 });
 
+test("every sheet the workbook writes can actually be built", async () => {
+  const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
+  const ctx = shapeContext();
+  // These run only when someone presses Excel, so a constant renamed
+  // elsewhere goes unnoticed until the download fails. It has happened twice
+  // — RECENT_CYCLES, then LIST_ASK_ROUNDING — both only in the method sheet.
+  const method = ctx.chamberMethodRows(built);
+  assert.ok(method.length > 5);
+  for (const row of method) {
+    assert.ok(row.Item && row.Value !== undefined && row.Detail,
+              `incomplete method row: ${JSON.stringify(row)}`);
+    assert.doesNotMatch(String(row.Detail), /undefined|NaN|\[object/,
+                        `method row did not render: ${row.Item}`);
+  }
+  // The flat sheet has to survive a built list with no DOM behind it too.
+  assert.ok(ctx.listSheetHeaders(built).labels.length > 10);
+});
+
 test("the sheet's column numbers come from its own headers", () => {
   const ctx = shapeContext();
   const h = ctx.listSheetHeaders({ cycle: 2026, chamber: { label: "House" }, party: { short: "D" } });

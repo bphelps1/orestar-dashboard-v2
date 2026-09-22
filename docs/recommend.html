@@ -295,8 +295,6 @@
       <input type="search" id="list-search" class="table-search" placeholder="Search lobbyists or donors…" />
       <label class="plan-toggle"><input type="checkbox" id="list-include-suggested" checked />
         Include unreviewed matches</label>
-      <label class="plan-toggle"><input type="checkbox" id="list-show-unattributed" checked />
-        Show donors with no lobbyist</label>
       <span id="list-count" class="list-count"></span>
     </div>
     <div id="list-status" class="plan-status"></div>
@@ -306,8 +304,7 @@
           <tr>
             <th>Tier</th>
             <th>Who to call</th>
-            <th class="num" id="list-ask-head">Suggested ask</th>
-            <th>By client</th>
+            <th>Suggested ask by client</th>
             <th>Donors</th>
             <th id="list-cycle-head-0">This cycle giving</th>
             <th id="list-cycle-head-1">Last cycle giving</th>
@@ -316,6 +313,8 @@
         <tbody id="list-tbody"></tbody>
       </table>
     </div>
+
+    <div id="list-unranked" class="list-unranked" hidden></div>
   </section>
 
 </div><!-- /mode-chamber -->

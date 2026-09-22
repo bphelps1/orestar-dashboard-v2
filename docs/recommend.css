@@ -670,3 +670,21 @@
 .list-giving { margin-bottom: 5px; }
 .list-giving strong { font-weight: 600; }
 .list-count { margin-left: auto; font-size: 0.78rem; color: var(--color-text-muted); }
+
+/* Donors nobody carries: listed under the ranking, not inside it. */
+.list-unranked {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-alt, #f8fafc);
+}
+.list-unranked h4 { margin: 0 0 4px; font-size: 0.9rem; }
+.list-unranked-count { font-weight: 400; color: var(--color-text-muted); }
+.list-unranked .section-desc { margin: 0 0 10px; }
+.list-unranked-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 4px 18px;
+}
+.list-unranked-row { font-size: 0.8rem; line-height: 1.5; }
