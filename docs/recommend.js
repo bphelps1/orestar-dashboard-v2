@@ -2263,6 +2263,8 @@ async function loadLobbyistPlan() {
   window._donorContacts = new Map();
   window._donorTypes = new Map();
   wirePlanControls();
+  // Portrait acquisition is optional and must never delay attribution results.
+  if (typeof LP !== "undefined") LP.load().then(() => renderLobbyistPlan());
   status.textContent = "Looking up lobbyists…";
   renderLobbyistPlan();
   const runCycle = window._cycle;
@@ -2463,7 +2465,19 @@ function contactLine(m) {
   return [m.email, m.phone].filter(Boolean).join(" · ");
 }
 
+function portraitPerson(l) {
+  if (!l) return null;
+  return l.kind === "firm" ? lobbyistsById?.get(l.firm_primary_id) || null : l;
+}
+function portraitMarkup(person, small = false) {
+  const photo = typeof LP !== "undefined" ? LP.get(person) : null;
+  if (!photo) return small ? "" : '<span class="plan-photo-empty">Photo unavailable</span>';
+  return `<img class="${small ? "plan-member-portrait" : "plan-portrait"}" src="${esc(photo.path)}" alt="${esc(person.name)}" loading="lazy" onerror="this.replaceWith(document.createTextNode('Photo unavailable'))">`;
+}
 function lobbyistHeader(l) {
+  return `<div class="plan-person">${portraitMarkup(portraitPerson(l))}<div>${lobbyistHeaderText(l)}</div></div>`;
+}
+function lobbyistHeaderText(l) {
   if (l.kind !== "firm") {
     return `<div class="plan-lobbyist">${esc(l.name)}</div>
             <div class="plan-contact">${esc(lobbyistContact(l))}</div>`;
@@ -2473,7 +2487,7 @@ function lobbyistHeader(l) {
   const lead = primary
     ? `<div class="plan-contact"><span class="plan-primary">${esc(primary.name)}</span>${own || contactLine(primary) ? " · " : ""}${esc(own || contactLine(primary))}</div>`
     : own ? `<div class="plan-contact">${esc(own)}</div>` : "";
-  const item = m => `<li>${esc(m.name)}${contactLine(m) ? ` <span>${esc(contactLine(m))}</span>` : ""}</li>`;
+  const item = m => `<li>${portraitMarkup(m, true)}${esc(m.name)}${contactLine(m) ? ` <span>${esc(contactLine(m))}</span>` : ""}</li>`;
   const more = others.length
     ? `<details class="plan-members" open><summary>${others.length} other${others.length === 1 ? "" : "s"} at the firm</summary>
          <ul>${others.map(item).join("")}</ul></details>`
@@ -2922,14 +2936,22 @@ function tierFill(label) {
 }
 
 /** Sheet 1 of the workbook: the call list, styled. */
-function writeCallList(wb, groups, cycle) {
-  const { rows, roles, merges, cols, moneyFrom, headerRows } = planSheetAoa(groups, cycle);
+async function writeCallList(wb, groups, cycle, imageCache = new Map()) {
+  const source = planSheetAoa(groups, cycle);
+  const { roles, headerRows } = source;
+  // Insert only in the workbook presentation. The export's numeric model and
+  // CSV column schema stay identical.
+  const rows = source.rows.map(r => [r[0], "", ...r.slice(1)]);
+  rows[4][1] = "Photo";
+  const cols = [source.cols[0], {wch:14}, ...source.cols.slice(1)];
+  const moneyFrom = source.moneyFrom + 1;
+  const merges = source.merges.map(m => ({s:{r:m.s.r,c:m.s.c+1},e:{r:m.e.r,c:m.e.c+1}}));
   const ws = wb.addWorksheet("Call list", {
-    views: [{ state: "frozen", xSplit: 3, ySplit: headerRows }],
+    views: [{ state: "frozen", xSplit: 4, ySplit: headerRows }],
     properties: { defaultRowHeight: 16, outlineLevelRow: 1, outlineProperties: { summaryBelow: false } },
   });
   rows.forEach(r => ws.addRow(r));
-  ws.columns.forEach((col, i) => { col.width = cols[i]?.wch || 12; });
+  cols.forEach((col, i) => { ws.getColumn(i+1).width = col?.wch || 12; });
   for (const m of merges) ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1);
 
   rows.forEach((_, i) => {
@@ -2950,7 +2972,7 @@ function writeCallList(wb, groups, cycle) {
       });
     } else if (role === "lobbyist" || role === "lobbyist-partner") {
       row.font = { bold: true };
-      const tier = String(row.getCell(4).value || "");
+      const tier = String(row.getCell(5).value || "");
       const fill = tierFill(tier) || INK.lobbyist;
       row.eachCell({ includeEmpty: true }, cell => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
@@ -2959,17 +2981,21 @@ function writeCallList(wb, groups, cycle) {
     } else if (role === "donor") {
       row.outlineLevel = 1;
       row.hidden = true;
-      row.getCell(3).alignment = { indent: 1 };
+      row.getCell(4).alignment = { indent: 1 };
     }
     if (role === "donor" || role === "lobbyist" || role === "lobbyist-partner" || role === "total") {
       for (let c = moneyFrom + 1; c <= rows[0].length; c++) row.getCell(c).numFmt = MONEY;
-      row.getCell(8).alignment = { wrapText: true, vertical: "top" };
+      row.getCell(9).alignment = { wrapText: true, vertical: "top" };
     }
   });
   // The "Lobbyist" repeat in column A is there for filtering and sorting, not
   // for reading; it would otherwise be the first thing the eye lands on.
   ws.getColumn(1).hidden = true;
   ws.getColumn(1).width = 24;
+  const headers = roles.flatMap((role,i) => role === "lobbyist" || role === "lobbyist-partner" ? [i+1] : []);
+  for (let i = 0; i < headers.length; i++) {
+    if (groups[i]?.lobbyist) await addPortrait(wb, ws, portraitPerson(groups[i].lobbyist), headers[i], 2, imageCache);
+  }
   return ws;
 }
 
@@ -2985,8 +3011,8 @@ function writeTable(wb, name, rows, { money = [], widths = {}, note = "" } = {})
   head.height = 26;
   head.eachCell(cell => styleHeaderCell(cell));
   for (const r of rows) ws.addRow(headers.map(h => r[h]));
-  ws.columns.forEach((col, i) => {
-    const h = headers[i];
+  headers.forEach((h, i) => {
+    const col = ws.getColumn(i+1);
     col.width = widths[h] || Math.min(42, Math.max(12, String(h).length + 4));
     if (money.includes(h)) col.numFmt = MONEY;
   });
@@ -3036,7 +3062,8 @@ function writeCover(wb, groups, cycle) {
   heading("What's in this file");
   for (const [sheet, what] of [
     ["Call list", "Every lobbyist to call, in the order to call them, with their donors underneath and what to ask each one for."],
-    ["Lobbyists", "The same lobbyists, one line each — sort or filter this one."],
+    ["Lobbyists", "The same lobbyists, one line each, with the designated lead's portrait for firms."],
+    ["Contact photos", "Public portraits and source links for the named contacts, including other members of each firm."],
     ["Donors", "One line per donor, for anyone who wants to pivot the numbers."],
     ["How these numbers were set", "Where each figure came from."],
   ]) {
@@ -3057,24 +3084,69 @@ function writeCover(wb, groups, cycle) {
   return ws;
 }
 
+async function addPortrait(wb, ws, person, rowNumber, columnNumber, imageCache) {
+  const cell = ws.getRow(rowNumber).getCell(columnNumber);
+  const image = typeof LP !== "undefined" ? await LP.image(person) : null;
+  if (!image) {
+    cell.value = "Photo unavailable";
+    ws.getRow(rowNumber).height = Math.max(ws.getRow(rowNumber).height || 16, 28);
+    cell.alignment = {wrapText:true,vertical:"middle",horizontal:"center"};
+    cell.font = {size:9,color:{argb:INK.muted}};
+    return;
+  }
+  if (!imageCache.has(image.photo.path)) imageCache.set(image.photo.path,
+    wb.addImage({buffer:image.data,extension:"jpeg"}));
+  ws.getRow(rowNumber).height = Math.max(ws.getRow(rowNumber).height || 16, 84);
+  ws.addImage(imageCache.get(image.photo.path), {
+    tl:{col:columnNumber-1+.12,row:rowNumber-1+.05}, ext:{width:80,height:100}, editAs:"oneCell",
+  });
+}
+
+async function writeContactPhotos(wb, groups, imageCache) {
+  const people = new Map();
+  for (const g of groups) {
+    const l = g.lobbyist;
+    if (!l) continue;
+    const contacts = l.kind === "firm"
+      ? [lobbyistsById?.get(l.firm_primary_id), ...(l.firm_member_ids || []).map(id => lobbyistsById?.get(id))]
+      : [l];
+    for (const person of contacts.filter(Boolean)) {
+      if (!people.has(person.lobbyist_id)) people.set(person.lobbyist_id,{person,groups:new Set()});
+      people.get(person.lobbyist_id).groups.add(l.name);
+    }
+  }
+  if (!people.size) return;
+  const entries = [...people.values()].sort((a,b) => a.person.name.localeCompare(b.person.name));
+  const ws = writeTable(wb, "Contact photos", entries.map(({person,groups}) => ({
+    Photo:"", Name:person.name, "Lobbyist / firm":[...groups].join("; "),
+    "Photo source":typeof LP !== "undefined" ? LP.get(person)?.profile || "" : "",
+  })), {widths:{Photo:14,Name:28,"Lobbyist / firm":38,"Photo source":65},
+    note:"Public Capitol Club portraits. Names and directory IDs establish matches. Missing portraits are labeled; source profiles are included."});
+  for (let i=0;i<entries.length;i++) await addPortrait(wb,ws,entries[i].person,i+4,1,imageCache);
+}
+
 async function exportLobbyistWorkbook(groups, cycle, filename) {
   const ExcelJSLib = await loadExcelJs();
   const wb = new ExcelJSLib.Workbook();
   wb.creator = "Oregon Campaign Finance";
   wb.created = new Date();
 
+  if (typeof LP !== "undefined") await LP.load();
+  const imageCache = new Map();
   writeCover(wb, groups, cycle);
-  writeCallList(wb, groups, cycle);
+  await writeCallList(wb, groups, cycle, imageCache);
 
   const lobRows = lobbyistSheetRows(groups, cycle);
   if (lobRows.length) {
-    writeTable(wb, "Lobbyists", lobRows, {
+    const lobbyistSheet = writeTable(wb, "Lobbyists", lobRows.map(r => ({Photo:"",...r})), {
       money: ["Suggested ask", `Given ${cycle - 1}–${cycle}`, "Remaining", "Last Cycle",
               "Given to this committee to date", "Given to like candidates"],
-      widths: { "Lobbyist / Firm": 30, "Firm / Title": 24, Contact: 24, Email: 30,
+      widths: { Photo:14, "Lobbyist / Firm": 30, "Firm / Title": 24, Contact: 24, Email: 30,
                 "Other contacts": 44, Clients: 60, "Why this tier": 60 },
-      note: "One line per lobbyist. Sort by tier or by what is still to ask.",
+      note: "One line per lobbyist. Firm portraits show the designated lead. Photos are embedded for offline viewing.",
     });
+    const named = groups.filter(g => g.lobbyist);
+    for (let i=0;i<named.length;i++) await addPortrait(wb,lobbyistSheet,portraitPerson(named[i].lobbyist),i+4,1,imageCache);
   }
   const flat = lobbyistPlanExportRows();
   if (flat.length) {
@@ -3087,6 +3159,7 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
   writeTable(wb, "How these numbers were set", methodSheetRows(groups, cycle),
              { widths: { Item: 26, Value: 34, Detail: 110 } });
 
+  await writeContactPhotos(wb, groups, imageCache);
   const buf = await wb.xlsx.writeBuffer();
   downloadFile(new Blob([buf], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
