@@ -1,0 +1,26 @@
+name: Lobbyist Portraits
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests beautifulsoup4 Pillow
+      - run: python scraper/refresh_lobbyist_photos.py
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: codex/refresh-lobbyist-photos
+          add-paths: |
+            docs/assets/lobbyist-photos.json
+            docs/assets/lobbyist-photos/
+          commit-message: Refresh Capitol Club portraits
+          title: Refresh Capitol Club portraits
+          body: Review directory IDs, source names, and portrait updates. Photos are sourced from the named public Capitol Club profiles and served locally for the app and embedded Excel exports.
