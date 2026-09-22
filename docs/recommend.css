@@ -649,3 +649,31 @@
 .detail-table th { font-weight: 600; color: var(--color-text-muted); }
 .detail-table td.num,
 .detail-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── The standing list, in the shape of the lobby list ──────────────────── */
+/* Column widths follow the lobby list: the money columns get the room. */
+.list-table { table-layout: fixed; min-width: 1320px; }
+.list-table th:nth-child(1) { width: 70px; }
+.list-table th:nth-child(2) { width: 210px; }
+.list-table th:nth-child(3) { width: 240px; }
+.list-table th:nth-child(4) { width: 180px; }
+.list-table th:nth-child(5),
+.list-table th:nth-child(6) { width: 310px; }
+.list-table td { vertical-align: top; }
+.list-row td { padding-top: 10px; padding-bottom: 10px; }
+.list-who { line-height: 1.35; }
+.list-ask { font-size: 0.82rem; line-height: 1.5; }
+.list-ask strong { font-weight: 600; }
+.list-ask-total {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.list-donors { font-size: 0.78rem; line-height: 1.5; color: var(--color-text-muted); }
+.list-giving-cell { font-size: 0.75rem; line-height: 1.45; }
+.list-giving { margin-bottom: 5px; }
+.list-giving strong { font-weight: 600; }
+.list-count { margin-left: auto; font-size: 0.78rem; color: var(--color-text-muted); }

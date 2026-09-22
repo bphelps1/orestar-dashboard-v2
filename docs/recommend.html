@@ -259,12 +259,13 @@
 
   <section class="search-section">
     <p class="section-desc">
-      Who gives to candidates of this kind, and how much do they give one of them? The list ranks every
-      organization that gave to these committees on three things — whether they give cycle after cycle,
-      how many campaigns they give to, and how much they put in each cycle — and puts a
-      <strong>generic ask</strong> beside each name: the median of what they give one candidate of this
-      kind across a whole cycle, weighted toward the last three cycles. No seat, margin or existing
-      relationship enters these numbers; for a named candidate use the other mode.
+      Who gives to candidates of this kind, how much do they give one of them, and who do you call to
+      ask? The list ranks every organization that gave to these committees on three things — whether
+      they give cycle after cycle, how many campaigns they give to, and how much they put in each cycle
+      — then sorts them under the lobbyist who carries them, in the shape of the lobby list: one row
+      per lobbyist, their donors and a suggested ask for each, and what those donors gave in the recent
+      cycles. No seat, margin or existing relationship enters these numbers; for a named candidate use
+      the other mode. Attributions and partners are set at <a href="/admin/lobbyists">/admin/lobbyists</a>.
     </p>
     <div class="controls-bar">
       <label for="list-chamber">Chamber:</label>
@@ -290,21 +291,25 @@
 
     <div class="results-summary" id="list-summary"></div>
 
-    <div class="table-search-bar">
-      <input type="search" id="list-search" class="table-search" placeholder="Search donors…" />
+    <div class="table-search-bar plan-controls">
+      <input type="search" id="list-search" class="table-search" placeholder="Search lobbyists or donors…" />
+      <label class="plan-toggle"><input type="checkbox" id="list-include-suggested" checked />
+        Include unreviewed matches</label>
+      <label class="plan-toggle"><input type="checkbox" id="list-show-unattributed" checked />
+        Show donors with no lobbyist</label>
+      <span id="list-count" class="list-count"></span>
     </div>
+    <div id="list-status" class="plan-status"></div>
     <div class="table-wrapper">
-      <table id="list-table" class="data-table">
+      <table id="list-table" class="data-table list-table">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Donor</th>
-            <th class="num">Generic Ask</th>
-            <th class="num">Score</th>
-            <th class="num">Cycles</th>
-            <th class="num">Campaigns</th>
-            <th class="num">Per Cycle</th>
-            <th>Last Gave</th>
+            <th>Tier</th>
+            <th>Who to call</th>
+            <th>Suggested ask(s)</th>
+            <th>Donors</th>
+            <th id="list-cycle-head-0">This cycle giving</th>
+            <th id="list-cycle-head-1">Last cycle giving</th>
           </tr>
         </thead>
         <tbody id="list-tbody"></tbody>

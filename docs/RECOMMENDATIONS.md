@@ -562,19 +562,49 @@ is in the room: **who gives to House Democrats, and how much does one of them
 get?**
 
 Pick a chamber, a party and a cycle to count back from, and it returns the top
-**125 organizations**, each with a **generic ask**.
+**125 organizations**, each with a suggested ask, sorted under the lobbyist who
+carries them.
 
-### The generic ask
+### The suggested ask
 
 The recency-weighted median of what that donor gives **one candidate of this
-kind across a whole cycle**.
+kind across a whole cycle**, with a range either side: the weighted 25th and
+75th percentile of the same set, written the way the lobby list writes an ask
+— *Oregon Nurses PAC: $1,500–$2,500*.
 
 Contributions to the same candidate inside a cycle are added up first, so a
 $1,000 primary cheque and a $1,000 general cheque read as one $2,000
 relationship — which is what you ask for, not two separate $1,000 asks. The
 median is then taken across those relationships, weighted by `CYCLE_WEIGHTS`,
-so a donor's habits now outweigh a cheque it wrote a decade ago. The plain
-median and the largest single relationship sit in the row's detail beside it.
+so a donor's habits now outweigh a cheque it wrote a decade ago.
+
+### Sorted into the people who carry them
+
+The list is not a ranking to read top to bottom; it is a **call list**. So it
+is laid out the way the fundraising team's lobby list is laid out: **one row
+per lobbyist**, and the donors sorted underneath the person who carries them,
+so a candidate reads down the *Suggested ask(s)* column and makes the calls.
+
+| Column | What is in it |
+|---|---|
+| **Tier** | Partner first, then Tier 1–4 |
+| **Who to call** | portrait, name, firm and contact details, and anyone else attached to those donors |
+| **Suggested ask(s)** | one line per donor — *donor: $low–$high* — and the total |
+| **Donors** | the donors this lobbyist carries, as a list |
+| **⟨cycle⟩ giving** | one line per donor: *donor: $20,000 Fahey, $15,000 Nosse …*, for each of the three most recent cycles |
+
+A donor appears under **one** lobbyist, chosen exactly as the candidate plan
+chooses: an admin's filing at `/admin/lobbyists` first, then a link marked
+primary, then a confirmed link over an unreviewed one, then the stronger
+match. Everyone else attached to the donor is listed as *also*. Donors with
+nobody on file gather in a row at the bottom, and the toggles above the table
+hide unreviewed matches or that row.
+
+**Tier** uses the candidate plan's rule — `6 × donors carried` (max 30) +
+`2 × like candidates their donors support` (max 30) + `what those donors gave
+them ÷ 5,000` (max 20) — minus the two bonuses that need a single committee to
+have given to, which a chamber list does not have. **PARTNER** is still set by
+hand per chamber and party and is never computed.
 
 ### The score (0–100)
 
@@ -626,9 +656,17 @@ given, benchmarks against comparable seats, or applies the first-time 50% cap.
 
 ### The files
 
-**CSV** and **Excel** for the list on screen, and **Excel — all four lists**,
-which builds House D, House R, Senate D and Senate R for the same cycle into
-one workbook, a sheet each plus a shared *How these were set* sheet.
+The **Excel** file is the lobby list, column for column: tier, portrait, first
+and last name, the asks, the donors, a column of giving per cycle, then how to
+reach them. Headers frozen, the identity columns frozen at the left, partners
+and Tier 1 shaded, one row per lobbyist with the portrait drawn into it. Built
+with ExcelJS — the community SheetJS build cannot write frozen panes, fills or
+embedded images.
+
+Alongside it: a **donors** sheet, one flat row per donor for pivoting, and
+**How these were set**. **Excel — all four lists** builds House D, House R,
+Senate D and Senate R for the same cycle into one workbook, a lobby-list sheet
+each. **CSV** is the flat donor table.
 
 ---
 
