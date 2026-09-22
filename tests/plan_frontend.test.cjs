@@ -814,3 +814,55 @@ test("every ask is a round number a caller can say out loud", async () => {
   for (const a of asks) assert.equal(a % 250, 0, `${a} is not a round ask`);
   assert.equal(asks.reduce((a, b) => a + b, 0) % 250, 0);
 });
+
+// ── The tranche below the top 125 ──────────────────────────────────────────
+//
+// A lobbyist already on the list may also carry donors ranked just below the
+// cut. Those ride along in the giving columns so the caller knows what else
+// is in the conversation — but they carry no ask and move nobody up the order.
+test("the build returns both bands, and only the first one is asked for", async () => {
+  // 130 organizations, so the cut at 125 actually bites.
+  const donors = Array.from({ length: 130 }, (_, i) => [`PAC ${String(i).padStart(3, "0")}`, `d${i}`]);
+  const year = amount => donors.map(([name, donor_id]) => ({ name, donor_id, total: amount }));
+  const ctx = listContext({
+    filerIndex: [{ slug: "a", name: "Friends of Julie Fahey", candidate_name: "Julie Fahey",
+                   committee_type: "Candidate Committee", office: "State Representative",
+                   party: "Democrat", total_in: 500000 }],
+    // Descending totals keep the ranking stable and the split predictable.
+    DL: { getFilerDonorYears: async () => new Map([["a", {
+      2024: donors.map(([name, donor_id], i) => ({ name, donor_id, total: 10000 - i * 10 })),
+      2026: donors.map(([name, donor_id], i) => ({ name, donor_id, total: 10000 - i * 10 })),
+    }]]) },
+    LOB: { loadBookTypes: async ids => new Map(ids.map(id => [id, "Political Committee"])) },
+  });
+  const built = await ctx.buildChamberList("house", "Democrat", 2026);
+  assert.equal(built.rows.length, 125);
+  assert.equal(built.context.length, 5);
+  for (const row of built.context) {
+    assert.equal(row.context, true);
+    assert.equal(row.ask, 0, "a client below the cut is never asked for a number");
+  }
+  assert.deepEqual(Array.from(built.context, r => r.list_rank), [126, 127, 128, 129, 130]);
+  // The ranked band keeps its asks.
+  assert.ok(built.rows.every(r => r.ask >= 250));
+});
+
+test("a client with no ask says so wherever it appears", () => {
+  const ctx = shapeContext();
+  const row = { donor: "Zillow Group", per_cycle: [{ cycle: 2026, recipients: [
+    { filer: "Friends of Ben Bowman", member: "Bowman", amount: 1000 },
+  ] }] };
+  assert.equal(ctx.givingLine(row, 2026), "Zillow Group: $1,000 Bowman");
+  assert.equal(ctx.givingLine({ ...row, context: true }, 2026),
+               "Zillow Group (no ask): $1,000 Bowman");
+});
+
+test("a lobbyist's giving columns cover both bands, their asks only one", () => {
+  const ctx = shapeContext();
+  const asked = { donor: "Big PAC", ask: 2500, per_cycle: [] };
+  const alongside = { donor: "Small PAC", ask: 0, context: true, per_cycle: [] };
+  const group = { rows: [asked], context: [alongside] };
+  assert.deepEqual(Array.from(ctx.groupGivingRows(group), r => r.donor), ["Big PAC", "Small PAC"]);
+  // The ask column is built from group.rows alone, so it never names the other.
+  assert.equal(group.rows.map(ctx.askLine).join("\n"), "Big PAC: $2,500");
+});

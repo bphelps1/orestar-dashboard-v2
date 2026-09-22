@@ -625,6 +625,18 @@ The tier beside each name is still the book-size rule below, and it is a
 label rather than the sort key, so tiers are not strictly in order down the
 page.
 
+### Clients below the cut
+
+A lobbyist already on the list often carries donors ranked just below the top
+125. Those appear in that lobbyist's **giving columns**, marked *(no ask)*,
+and in the donor roster under *also represents, no ask* — they are part of the
+call you are about to make even though they are not part of the ask.
+
+They carry **no suggested ask**, and they count toward neither the lobbyist's
+tier nor their place in the order, which stay on the clients that do. The band
+runs to rank `LIST_CONTEXT_SIZE` (250); a lobbyist with *only* clients from it
+does not appear at all.
+
 ### Donors nobody carries
 
 A donor with no lobbyist attached has nobody to call, so it is **left out of
