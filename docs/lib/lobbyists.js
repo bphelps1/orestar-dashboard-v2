@@ -64,17 +64,6 @@ const LOB = (() => {
     return fetchAll(() => sb.from("lobbyist_clients").select("*").order("lobbyist_id"));
   }
 
-  /** Partner designations (017): Map<lobbyist_id, Set<"house|D">>. */
-  async function loadPartners() {
-    const sb = await getSupabase();
-    const rows = await fetchAll(() => sb.from("lobbyist_partners").select("*").order("lobbyist_id"));
-    const out = new Map();
-    for (const r of rows) {
-      if (!out.has(r.lobbyist_id)) out.set(r.lobbyist_id, new Set());
-      out.get(r.lobbyist_id).add(`${r.chamber}|${r.party}`);
-    }
-    return out;
-  }
 
   /** The people to call for each donor: Map<donor_id, [contact]>, primary first. */
   async function loadDonorContacts(donorIds) {
@@ -358,6 +347,6 @@ function owningFirm(lobbyist, lobbyistsById) {
 }
 
   return { owningFirm, fetchAll, fetchIn, normOrg, labelKey, pgArray, loadLobbyists, loadClients,
-           loadPartners, loadDonorContacts, loadBookTypes, loadBookTypesByName,
+           loadDonorContacts, loadBookTypes, loadBookTypesByName,
            planAttribution, attributionForLabels, describeMethod, poolIdsForLabels };
 })();

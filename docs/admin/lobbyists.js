@@ -10,7 +10,6 @@
  *   donor_client_links   — donor → Capitol Club client; the client's current
  *                          lobbyists inherit the donor
  *   donor_contacts       — the people to call for a donor (017)
- *   lobbyist_partners    — PARTNER standing, per chamber and party (017)
  */
 "use strict";
 
@@ -39,20 +38,12 @@ const S = {
   decisionShown: PAGE_SIZE,
   openLobbyist: null,
   contacts: new Map(),         // donor_id → [donor_contacts rows]
-  partners: new Map(),         // lobbyist_id → Set("house|D")
   donorShown: PAGE_SIZE,
   openDonor: null,
   editing: null,               // key of the decision row being edited
 };
 
-// Partner standing is per caucus: a firm can be a partner of the House
 // Democrats and nothing to the Senate Republicans.
-const CAUCUSES = [
-  { chamber: "house",  party: "D", label: "House D" },
-  { chamber: "house",  party: "R", label: "House R" },
-  { chamber: "senate", party: "D", label: "Senate D" },
-  { chamber: "senate", party: "R", label: "Senate R" },
-];
 
 function esc(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -102,24 +93,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 async function loadAll() {
   await DN.load();
   const sb = await getSupabase();
-  const [lobbyists, clients, dll, dcl, contacts, partners] = await Promise.all([
+  const [lobbyists, clients, dll, dcl, contacts] = await Promise.all([
     LOB.loadLobbyists(),
     LOB.loadClients(),
     LOB.fetchAll(() => sb.from("donor_lobbyist_links").select("*").order("donor_id")),
     LOB.fetchAll(() => sb.from("donor_client_links").select("*").order("donor_id")),
     LOB.fetchAll(() => sb.from("donor_contacts").select("*").order("donor_id")),
-    LOB.fetchAll(() => sb.from("lobbyist_partners").select("*").order("lobbyist_id")),
   ]);
   S.lobbyists = new Map(lobbyists.map(l => [l.lobbyist_id, l]));
   indexClients(clients);
   S.dll = dll;
   S.dcl = dcl;
   indexContacts(contacts);
-  S.partners = new Map();
-  for (const r of partners) {
-    if (!S.partners.has(r.lobbyist_id)) S.partners.set(r.lobbyist_id, new Set());
-    S.partners.get(r.lobbyist_id).add(`${r.chamber}|${r.party}`);
-  }
   await ensurePool([...dll, ...dcl, ...contacts].map(r => r.donor_id));
 }
 
@@ -485,22 +470,6 @@ function firmsForPersonBlock(l) {
   </div>`;
 }
 
-/** PARTNER standing, per chamber and party — the 2024 lobby list's top tier. */
-function partnerBlock(l) {
-  const have = S.partners.get(l.lobbyist_id) || new Set();
-  const dis = S.canWrite ? "" : "disabled";
-  return `<div class="lob-partners">
-    <h4>Partner</h4>
-    <p class="lob-meta">A standing relationship with a caucus. Partners lead a plan for that chamber and
-      party, above every computed tier. Nothing here affects the other caucuses.</p>
-    <div class="lob-partner-checks">${CAUCUSES.map(c => `
-      <label class="lob-check"><input type="checkbox" data-partner="${l.lobbyist_id}"
-        data-chamber="${c.chamber}" data-party="${c.party}"
-        ${have.has(`${c.chamber}|${c.party}`) ? "checked" : ""} ${dis} /> ${c.label}</label>`).join("")}
-    </div>
-  </div>`;
-}
-
 function lobbyistDetail(l) {
   const clients = editableClients(l.lobbyist_id);
   const donors = donorsForLobbyist(l.lobbyist_id)
@@ -526,7 +495,6 @@ function lobbyistDetail(l) {
           ? `<button type="button" class="btn-small" data-revert-edits="${l.lobbyist_id}">Revert to Capitol Club</button>` : ""}</div>
     </form>
 
-    ${partnerBlock(l)}
     ${l.kind === "firm" ? firmMembersBlock(l) : firmsForPersonBlock(l)}
 
     <div class="lob-cols">
@@ -1026,24 +994,6 @@ async function removeDonorContact(contactId) {
   indexContacts(all);
 }
 
-// ── Partner designations ────────────────────────────────────────────────────
-async function setPartner(lobbyistId, chamber, party, on) {
-  const sb = await getSupabase();
-  if (on) {
-    const { error } = await sb.from("lobbyist_partners")
-      .upsert({ lobbyist_id: lobbyistId, chamber, party, set_by: S.who, set_at: now() },
-              { onConflict: "lobbyist_id,chamber,party" });
-    if (error) throw new Error(error.message);
-    if (!S.partners.has(lobbyistId)) S.partners.set(lobbyistId, new Set());
-    S.partners.get(lobbyistId).add(`${chamber}|${party}`);
-  } else {
-    const { error } = await sb.from("lobbyist_partners").delete()
-      .eq("lobbyist_id", lobbyistId).eq("chamber", chamber).eq("party", party);
-    if (error) throw new Error(error.message);
-    S.partners.get(lobbyistId)?.delete(`${chamber}|${party}`);
-  }
-}
-
 // ── Editing a recorded decision ─────────────────────────────────────────────
 async function saveDecisionEdit(table, row, form) {
   const f = Object.fromEntries(new FormData(form).entries());
@@ -1261,16 +1211,6 @@ function wireUi() {
   document.getElementById("decision-search").addEventListener("input", renderDecisions);
   document.getElementById("donor-search").addEventListener("input", () => { S.donorShown = PAGE_SIZE; renderDonors(); });
   document.getElementById("donor-only-attributed").addEventListener("change", () => { S.donorShown = PAGE_SIZE; renderDonors(); });
-
-  // Partner standing is a checkbox, so it saves on change rather than submit.
-  document.body.addEventListener("change", async (e) => {
-    const box = e.target.closest("[data-partner]");
-    if (!box) return;
-    await guarded(async () => {
-      await setPartner(Number(box.dataset.partner), box.dataset.chamber, box.dataset.party, box.checked);
-      renderAll();
-    });
-  });
 
   document.body.addEventListener("click", async (e) => {
     const t = e.target;
