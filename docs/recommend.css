@@ -570,6 +570,12 @@
 
 .plan-comp-source { font-size: 0.78rem; color: #556477; white-space: normal; margin-top: 3px; max-width: 220px; }
 
+/* Named public portraits sit beside the lobbyist / designated firm lead. */
+.plan-person { display:flex; gap:12px; align-items:flex-start; }
+.plan-portrait { width:64px; height:80px; object-fit:contain; background:white; border-radius:4px; flex:0 0 64px; }
+.plan-photo-empty { width:64px; min-height:80px; flex:0 0 64px; display:flex; align-items:center; justify-content:center; background:#edf2f7; color:#64748b; font-size:11px; text-align:center; border-radius:4px; }
+.plan-member-portrait { width:32px; height:40px; object-fit:contain; vertical-align:middle; margin-right:6px; }
+
 /* ── Mode switch: one candidate, or a whole chamber ─────────────────────── */
 .mode-tabs {
   display: flex;

@@ -109,6 +109,8 @@ def parse_profile(profile) -> dict | None:
 
     return {
         "cc_id": profile.get("id") or "",
+        "photo_url": (profile.select_one("img.photo") or {}).get("src", ""),
+        "profile_url": title.get("href", "") if title else "",
         "name": name,
         "affiliation": "; ".join(affiliation),
         "address": ", ".join(address_lines),
@@ -145,6 +147,9 @@ def scrape_members(session) -> list[dict]:
             new += 1
         log.info("members page %d: %d profiles, %d new", page, len(profiles), new)
         if not profiles or not new:
+            break
+        # Stop at the directory's final page instead of probing an extra URL.
+        if not any("Next" in a.get_text() for a in soup.select("a")):
             break
         time.sleep(PAGE_DELAY)
     return members
