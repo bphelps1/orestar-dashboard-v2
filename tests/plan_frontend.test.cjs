@@ -569,6 +569,9 @@ function listContext(extra = {}) {
     // currentMemberFor() asks which chamber a committee sits in; the cohort
     // is one chamber by construction here.
     getChamber: () => "house",
+    // Declared outside every slice, so it is a sandbox property rather than
+    // something a seed script can assign — reading it in one throws.
+    leadershipRoles: {},
     ...extra,
   });
   vm.runInContext(listCode, ctx);        // context() already ran the rest
@@ -580,8 +583,7 @@ function listContext(extra = {}) {
   // circuits. A `let` from the sliced code has to be assigned from a script in
   // the same context rather than from a property on the sandbox.
   ctx.__roster = { house: ["Julie Fahey", "Bobby Levy", "Emerson Levy"], senate: [] };
-  vm.runInContext("currentLegislators = __roster; committeeChairs = committeeChairs || [];"
-                  + " leadershipRoles = leadershipRoles || {};", ctx);
+  vm.runInContext("currentLegislators = __roster; committeeChairs = committeeChairs || [];", ctx);
   return ctx;
 }
 
@@ -878,10 +880,9 @@ test("a lobbyist's giving columns cover both bands, their asks only one", () => 
 // is a veteran chair who has raised for a decade. Leaving them in the median
 // opens a first call at a number only a leader ever sees.
 function leadershipContext(roles = {}, chairs = []) {
-  const ctx = listContext();
-  ctx.__roles = roles;
+  const ctx = listContext({ leadershipRoles: roles });
   ctx.__chairs = chairs;
-  vm.runInContext("leadershipRoles = __roles; committeeChairs = __chairs;", ctx);
+  vm.runInContext("committeeChairs = __chairs;", ctx);
   return ctx;
 }
 const seat = (candidate_name, leadership_role) => ({
