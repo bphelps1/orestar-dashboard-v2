@@ -854,14 +854,16 @@ test("the build returns both bands, and only the first one is asked for", async 
   assert.ok(built.rows.every(r => r.ask >= 250));
 });
 
-test("a client with no ask says so wherever it appears", () => {
+test("a client with no ask reads like any other in the giving history", () => {
   const ctx = shapeContext();
   const row = { donor: "Zillow Group", per_cycle: [{ cycle: 2026, recipients: [
     { filer: "Friends of Ben Bowman", member: "Bowman", amount: 1000 },
   ] }] };
+  // The giving history is about the money, not about the ask. That a client
+  // carries no ask is said once, in the donor roster.
   assert.equal(ctx.givingLine(row, 2026), "Zillow Group: $1,000 Bowman");
   assert.equal(ctx.givingLine({ ...row, context: true }, 2026),
-               "Zillow Group (no ask): $1,000 Bowman");
+               "Zillow Group: $1,000 Bowman");
 });
 
 test("a lobbyist's giving columns cover both bands, their asks only one", () => {
