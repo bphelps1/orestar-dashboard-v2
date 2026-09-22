@@ -4,7 +4,7 @@ const LP = (() => {
   let photos = {}, pending;
   const bytes = new Map();
   const nameKey = s => String(s || '').normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase();
-  const validPath = p => /^assets\/lobbyist-photos\/user-\d+-[a-f0-9]{12}\.jpg$/.test(p || '');
+  const validPath = p => /^assets\/lobbyist-photos\/(?:user|lobbyist)-\d+-[a-f0-9]{12}\.jpg$/.test(p || '');
   async function load() {
     if (!pending) pending = (async () => {
       const response = await fetch('assets/lobbyist-photos.json', {cache:'no-cache',signal:AbortSignal.timeout(5000)});
@@ -12,12 +12,14 @@ const LP = (() => {
       const data = await response.json();
       if (data.version !== 1 || !data.photos || typeof data.photos !== 'object') throw Error('Invalid portrait catalog');
       photos = Object.fromEntries(Object.entries(data.photos).filter(([id,p]) =>
-        /^user-\d+$/.test(id) && p && typeof p.name === 'string' && validPath(p.path)));
+        /^(?:user|lobbyist)-\d+$/.test(id) && p && typeof p.name === 'string' && validPath(p.path)));
     })().catch(error => { pending = null; console.warn('Lobbyist portraits:', error.message); });
     return pending;
   }
   function get(person) {
     if (!person || person.kind === 'firm') return null;
+    const reviewed = photos[`lobbyist-${person.lobbyist_id}`];
+    if (reviewed) return reviewed;
     if (person.cc_id) return photos[person.cc_id] || null;
     // Manual contacts may lack a directory ID. Require a unique exact full
     // name; never guess from initials, surname, fuzzy matching, or appearance.

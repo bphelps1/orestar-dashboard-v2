@@ -3450,7 +3450,7 @@ async function writeContactPhotos(wb, groups, imageCache) {
     Photo:"", Name:person.name, "Lobbyist / firm":[...groups].join("; "),
     "Photo source":typeof LP !== "undefined" ? LP.get(person)?.profile || "" : "",
   })), {widths:{Photo:14,Name:28,"Lobbyist / firm":38,"Photo source":65},
-    note:"Public Capitol Club portraits. Names and directory IDs establish matches. Missing portraits are labeled; source profiles are included."});
+    note:"Public professional portraits. Names, directory IDs, and reviewed contact IDs establish matches. Missing portraits are labeled; source profiles are included."});
   for (let i=0;i<entries.length;i++) await addPortrait(wb,ws,entries[i].person,i+4,1,imageCache);
 }
 

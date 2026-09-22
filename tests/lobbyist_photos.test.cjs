@@ -63,3 +63,13 @@ test('Excel embeds a portrait without moving totals incorrectly or expanding don
  assert.equal(flat.getCell('C4').value.richText[0].text,person.name);
 
 });
+
+test('reviewed official-site portraits match stable contact IDs, including contacts with directory placeholders',async()=>{
+ const official={name:'Official Contact',path:'assets/lobbyist-photos/lobbyist-42-123456abcdef.jpg',profile:'https://example.org/team/contact'};
+ const c=harness(async()=>({ok:true,json:async()=>({version:1,photos:{'lobbyist-42':official,'user-1':entry}})}));
+ await c.photos.load();
+ assert.equal(c.photos.get({lobbyist_id:42,cc_id:'user-99',name:'Official Contact'}).path,official.path);
+ assert.equal(c.photos.get({lobbyist_id:43,name:'Someone Else'}),null);
+ assert.equal(c.photos.get({lobbyist_id:42,kind:'firm'}),null);
+ assert.equal(c.photos.get({cc_id:'user-1'}).path,entry.path);
+});
