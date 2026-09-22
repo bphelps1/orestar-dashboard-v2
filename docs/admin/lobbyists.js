@@ -697,6 +697,32 @@ function renderDecisions() {
     ? `<button class="btn-small" id="decision-more-btn">Show more (${rows.length - S.decisionShown} left)</button>` : "";
 }
 
+// The caucus top-donor lists on the Recommend tab leave their unranked donors
+// here when they are built — the ones with nobody to call, which is exactly
+// what this tab is for. Per-browser and only as fresh as the last build, so
+// the badge says when that was.
+const LIST_UNATTRIBUTED_KEY = "orestar.unattributedTopDonors.v1";
+
+function topDonorFlags() {
+  const byId = new Map();
+  let built_at = null;
+  try {
+    const store = JSON.parse(localStorage.getItem(LIST_UNATTRIBUTED_KEY) || "{}");
+    for (const entry of Object.values(store)) {
+      if (!built_at || entry.built_at > built_at) built_at = entry.built_at;
+      for (const d of entry.donors || []) {
+        for (const id of [d.donor_id, ...(d.ids || [])].filter(Boolean)) {
+          if (!byId.has(id)) byId.set(id, []);
+          byId.get(id).push({ ...d, chamber: entry.chamber, party: entry.party, cycle: entry.cycle });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Could not read the caucus top-donor flags:", e.message);
+  }
+  return { byId, built_at };
+}
+
 async function loadUnmatched() {
   const sb = await getSupabase();
   const { data, error } = await sb.from("lobby_donor_pool")
@@ -716,13 +742,30 @@ async function renderUnmatched() {
   const covered = new Set([...S.dll, ...S.dcl].filter(r => r.status !== "rejected").map(r => r.donor_id));
   const q = document.getElementById("unmatched-search").value.trim().toLowerCase();
   const main = new Set(["Political Committee", "Business Entity", "Labor Organization"]);
+  const flags = topDonorFlags();
   const rows = S.unmatchedRows.filter(d => !covered.has(d.donor_id))
     .filter(d => S.unmatchedType === "all" || (S.unmatchedType === "other" ? !main.has(d.book_type) : d.book_type === S.unmatchedType))
     .filter(d => !q || d.display_name.toLowerCase().includes(q));
+  // A donor that ranks on a caucus list and has nobody to call is the one
+  // worth assigning first, so it goes to the top whatever its raw total.
+  rows.sort((a, b) => (flags.byId.has(b.donor_id) ? 1 : 0) - (flags.byId.has(a.donor_id) ? 1 : 0));
+  const banner = document.getElementById("unmatched-toplist");
+  if (banner) {
+    const n = rows.filter(d => flags.byId.has(d.donor_id)).length;
+    banner.hidden = !flags.built_at;
+    banner.innerHTML = flags.built_at
+      ? `<strong>${n}</strong> of these rank on a caucus top-donor list with nobody to call, shown first.
+         From the lists built on this computer, most recently
+         ${esc(new Date(flags.built_at).toLocaleString())}. Rebuild them under
+         <a href="/recommend">Top donors by chamber &amp; party</a> to refresh.`
+      : "";
+  }
   const dis = S.canWrite ? "" : "disabled";
   tbody.innerHTML = rows.slice(0, S.unmatchedShown).map(d => `
     <tr>
       <td>${esc(DN.display(d.display_name))}${d.committee_id ? ` <span class="lob-meta">#${esc(d.committee_id)}</span>` : ""}
+        ${(flags.byId.get(d.donor_id) || []).map(f => `<div class="lob-toplist">Top donor —
+          ${esc(f.chamber)} ${esc(f.party)} #${f.rank} · ask ${fmt$(f.ask)}</div>`).join("")}
         <div class="lob-meta">${esc([d.city, d.state].filter(Boolean).join(", "))}</div></td>
       <td class="lob-meta">${esc(d.book_type || "")}</td>
       <td class="num">${fmt$(d.total_since_2021)}</td>

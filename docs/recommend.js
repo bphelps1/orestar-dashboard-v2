@@ -3537,13 +3537,18 @@ const LIST_MIN_RAISED = 5000;       // committees below this are paper filings
 const LIST_MIN_CYCLES = 2;          // one cycle is an event, not a habit
 const LIST_LOOKUP_BATCH = 300;      // donors whose category is read at a time
 const LIST_RECIPIENTS_SHOWN = 20;   // candidates named per donor per cycle
-// A call list asks for round numbers. Nothing rounds to nothing: a donor
-// worth listing is worth asking, so the smallest ask is one step.
-const LIST_ASK_ROUNDING = 500;
+// A call list asks for round numbers, but a small ask has to stay small: a
+// donor whose giving sits at $250 should be asked $250, not rounded up to
+// $500 for tidiness. So the step is finer below $1,000 than above it.
+const LIST_ASK_STEP = 500;
+const LIST_ASK_SMALL_STEP = 250;
+const LIST_ASK_SMALL_BELOW = 1000;
+const LIST_ASK_FLOOR = 250;
 
 function roundAsk(amount) {
-  return Math.max(LIST_ASK_ROUNDING,
-                  Math.round((Number(amount) || 0) / LIST_ASK_ROUNDING) * LIST_ASK_ROUNDING);
+  const value = Number(amount) || 0;
+  const step = value < LIST_ASK_SMALL_BELOW ? LIST_ASK_SMALL_STEP : LIST_ASK_STEP;
+  return Math.max(LIST_ASK_FLOOR, Math.round(value / step) * step);
 }
 
 // Full marks. A donor giving to this many campaigns in a cycle, or this many
@@ -3828,7 +3833,7 @@ function chamberGroups() {
   const built = window._chamberList;
   if (!built) return [];
   const groups = new Map();
-  const none = { lobbyist: null, rows: [] };
+  const unattributed = [];
   for (const row of built.rows) {
     const list = listLobbyistsFor(row);
     let owner = list[0] ? owningFirm(list[0].lobbyist) : null;
@@ -3837,14 +3842,14 @@ function chamberGroups() {
     if (owner) atFirm.add(owner.lobbyist_id);
     const entry = { ...row, attribution: list[0] || null,
                     also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
-    if (!owner) { none.rows.push(entry); continue; }
+    // Nobody to call means nothing to rank. The donor is not dropped from the
+    // problem, though — it is held aside for /admin/lobbyists.
+    if (!owner) { unattributed.push(entry); continue; }
     if (!groups.has(owner.lobbyist_id)) groups.set(owner.lobbyist_id, { lobbyist: owner, rows: [] });
     groups.get(owner.lobbyist_id).rows.push(entry);
   }
+  window._listUnattributed = unattributed;
   let out = [...groups.values()];
-  if (document.getElementById("list-show-unattributed")?.checked !== false && none.rows.length) {
-    out.push(none);
-  }
   const q = (document.getElementById("list-search")?.value || "").trim().toLowerCase();
   if (q) {
     out = out.map(g => {
@@ -3857,15 +3862,18 @@ function chamberGroups() {
   }
   for (const g of out) {
     g.rows.sort((a, b) => b.ask - a.ask || b.score - a.score);
-    // The asks are already round, so their total is too — the single number
-    // in the Suggested ask column is exactly the breakdown added up.
     g.ask = g.rows.reduce((s, r) => s + r.ask, 0);
+    // Who to call first is a question about the donors, so it is answered
+    // with the score that ranked them: consistency, breadth and size through
+    // the recency window. A lobbyist's standing is their clients' added up —
+    // six likely donors are a better morning than one.
+    g.likelihood = Math.round(g.rows.reduce((s, r) => s + r.score, 0) * 10) / 10;
     g.tier = lobbyistTier(g.rows.map(r => ({
       given: 0, cycles: {},
       comp_gifts: r.per_cycle.flatMap(c => c.recipients.map(x => ({ filer: x.filer, amount: x.amount }))),
     })));
   }
-  out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (a.tier.tier - b.tier.tier) || (b.ask - a.ask));
+  out.sort((a, b) => b.likelihood - a.likelihood || b.ask - a.ask);
   return out;
 }
 
@@ -3915,7 +3923,6 @@ function wireListControls() {
   listControlsWired = true;
   document.getElementById("list-search").addEventListener("input", renderChamberRows);
   document.getElementById("list-include-suggested").addEventListener("change", renderChamberRows);
-  document.getElementById("list-show-unattributed").addEventListener("change", renderChamberRows);
 }
 
 async function runChamberList() {
@@ -3947,6 +3954,28 @@ async function runChamberList() {
   }
 }
 
+// Donors nobody carries are not ranked, but they are the whole reason to open
+// /admin/lobbyists, so the list leaves them where that page can pick them up.
+// Per-browser and plainly labelled with when it was written — this is a note
+// to the person who builds the list, not a record anyone else depends on.
+const LIST_UNATTRIBUTED_KEY = "orestar.unattributedTopDonors.v1";
+
+function recordUnattributed(built, rows) {
+  try {
+    const store = JSON.parse(localStorage.getItem(LIST_UNATTRIBUTED_KEY) || "{}");
+    store[`${built.chamber.key}|${built.party.short}|${built.cycle}`] = {
+      chamber: built.chamber.label, party: built.party.label, cycle: built.cycle,
+      built_at: new Date().toISOString(),
+      donors: rows.map(r => ({ donor_id: r.donor_id, ids: r.ids || [], donor: r.donor,
+                               ask: r.ask, score: r.score,
+                               rank: built.rows.findIndex(x => x.donor_key === r.donor_key) + 1 })),
+    };
+    localStorage.setItem(LIST_UNATTRIBUTED_KEY, JSON.stringify(store));
+  } catch (e) {
+    console.warn("Could not record unattributed donors for the admin page:", e.message);
+  }
+}
+
 function renderChamberList(built) {
   document.getElementById("list-results").hidden = false;
   document.getElementById("list-title").textContent =
@@ -3962,15 +3991,36 @@ function renderChamberList(built) {
       <span class="sc-help" title="The middle donor's suggested ask: the recency-weighted median of what it gives one candidate of this kind across a cycle.">?</span></span><br>
       <span class="sc-value">${fmt$(percentile(asks, 0.5))}</span>
       <div class="sc-sub">${fmt$(asks[0])} to ${fmt$(asks[asks.length - 1])} across the list</div></div>
-    <div class="summary-card sc-muted"><span class="sc-label">With a lobbyist</span><br>
-      <span class="sc-value">${fmtNum(attributed)}</span>
-      <div class="sc-sub">of ${fmtNum(built.rows.length)} donors · assign the rest at
-        <a href="/admin/lobbyists">/admin/lobbyists</a></div></div>
+    <div class="summary-card sc-muted"><span class="sc-label">Not ranked
+      <span class="sc-help" title="Donors with nobody on file to call. They are left out of the ranking and listed below, and flagged on the Unmatched donors tab at /admin/lobbyists.">?</span></span><br>
+      <span class="sc-value">${fmtNum(built.rows.length - attributed)}</span>
+      <div class="sc-sub">of ${fmtNum(built.rows.length)} donors have no lobbyist ·
+        assign them at <a href="/admin/lobbyists">/admin/lobbyists</a></div></div>
     <div class="summary-card sc-muted"><span class="sc-label">Drawn from</span><br>
       <span class="sc-value">${fmtNum(built.committees)}</span>
       <div class="sc-sub">${built.party.label} ${built.chamber.label} committees ·
         ${fmtNum(built.ranked)} donors ranked</div></div>`;
   renderChamberRows();
+}
+
+/** The donors nobody carries: listed, not ranked, and handed to the admin. */
+function renderUnranked() {
+  const box = document.getElementById("list-unranked");
+  const built = window._chamberList;
+  const rows = window._listUnattributed || [];
+  if (!box || !built) return;
+  recordUnattributed(built, rows);
+  if (!rows.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const total = rows.reduce((sum, r) => sum + r.ask, 0);
+  box.innerHTML = `
+    <h4>Not ranked — nobody on file to call <span class="list-unranked-count">${rows.length} donors ·
+      ${fmt$(total)} of asks</span></h4>
+    <p class="section-desc">These gave enough to make the top ${built.rows.length}, but there is no
+      lobbyist attached, so they are left out of the order above. They are flagged on the
+      <a href="/admin/lobbyists">Unmatched donors</a> tab, newest build first.</p>
+    <div class="list-unranked-rows">${[...rows].sort((a, b) => b.ask - a.ask).map(r =>
+      `<div class="list-unranked-row"><strong>${esc(r.donor)}</strong>: ${fmt$(r.ask)}</div>`).join("")}</div>`;
 }
 
 function renderChamberRows() {
@@ -3982,7 +4032,7 @@ function renderChamberRows() {
     `${groups.filter(g => g.lobbyist).length} lobbyists · `
     + `${groups.reduce((s, g) => s + g.rows.length, 0)} donors`;
   if (!groups.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="plan-empty">No lobbyists or donors match.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="plan-empty">No lobbyists or donors match.</td></tr>';
     return;
   }
   const cycles = [built.cycle, built.cycle - 2];
@@ -4004,16 +4054,15 @@ function renderChamberRows() {
       <td class="list-who">${who}${g.rows.some(r => r.also.length)
         ? `<div class="plan-also">also: ${esc([...new Set(g.rows.flatMap(r =>
             r.also.map(a => a.lobbyist.name)))].join(", "))}</div>` : ""}</td>
-      <td class="num list-ask-total">${fmt$(g.ask)}</td>
       <td class="list-asks">${byClient}</td>
       <td class="list-donors">${donors}</td>
       <td class="list-giving-cell">${giving(cycles[0])}</td>
       <td class="list-giving-cell">${giving(cycles[1])}</td>
     </tr>`;
   }).join("");
-  document.getElementById("list-ask-head").textContent = `Suggested ask ${built.cycle}`;
   document.getElementById("list-cycle-head-0").textContent = `${cycleName(cycles[0])} giving`;
   document.getElementById("list-cycle-head-1").textContent = `${cycleName(cycles[1])} giving`;
+  renderUnranked();
 }
 
 // ── The standing list as a file ───────────────────────────────────────────
@@ -4034,7 +4083,7 @@ const LIST_SHEET_CYCLES = 3;          // cycles of giving printed, newest first
 /** Header labels, left to right, for a built list. */
 function listSheetHeaders(built) {
   const cycles = Array.from({ length: LIST_SHEET_CYCLES }, (_, i) => built.cycle - 2 * i);
-  const labels = ["Tier", "Photo", "First Name", "Last Name", `Suggested Ask ${built.cycle}`,
+  const labels = ["Tier", "Photo", "First Name", "Last Name",
                   `Suggested Ask ${built.cycle} by client`, "Donors",
                   ...cycles.map(c => `${cycleName(c)} giving`),
                   "Also lobbied by", "Firm", "Email", "Cell", "Work"];
@@ -4044,11 +4093,10 @@ function listSheetHeaders(built) {
   const at = label => labels.indexOf(label) + 1;
   return {
     cycles, labels,
-    askCol: at(`Suggested Ask ${built.cycle}`),
     byClientCol: at(`Suggested Ask ${built.cycle} by client`),
     givingFrom: at(`${cycleName(cycles[0])} giving`),
     // Money columns are the ones the fundraiser reads; the rest are contact.
-    moneyFrom: 4, moneyTo: 7 + cycles.length,
+    moneyFrom: 4, moneyTo: 6 + cycles.length,
   };
 }
 
@@ -4072,7 +4120,6 @@ function listSheetRows(built, groups) {
         "",                                   // the portrait is drawn into this cell
         l ? first : "No lobbyist on file",
         l ? last : "",
-        g.ask,                                // one number, the breakdown added up
         g.rows.map(askLine).join("\n"),
         g.rows.map(r => r.donor).join("; "),
         ...cycles.map(c => g.rows.map(r => givingLine(r, c)).filter(Boolean).join("\n")),
@@ -4129,8 +4176,10 @@ function chamberMethodRows(built) {
     { Item: "Suggested ask", Value: "median gift to one candidate, one cycle",
       Detail: `Contributions to the same candidate inside a cycle are added up first, so instalments read `
         + `as one relationship. The median across those relationships is weighted by how recent each is, `
-        + `then rounded to the nearest ${fmt$(LIST_ASK_ROUNDING)} — never to nothing. A lobbyist's single `
-        + `ask is their clients' asks added up, so the column and the breakdown always agree.` },
+        + `then rounded: to the nearest ${fmt$(LIST_ASK_SMALL_STEP)} below ${fmt$(LIST_ASK_SMALL_BELOW)} `
+        + `and to the nearest ${fmt$(LIST_ASK_STEP)} above it, never below ${fmt$(LIST_ASK_FLOOR)}. `
+        + `A small ask has to stay small: a donor whose giving sits at ${fmt$(LIST_ASK_FLOOR)} is asked `
+        + `that, not rounded up for tidiness.` },
     { Item: "Recency weights", Value: CYCLE_WEIGHTS.join(" · "),
       Detail: `Weight by cycles ago, newest first. The first `
         + `${CYCLE_WEIGHTS.filter(w => w === 1).length} count in full; giving older than `
@@ -4169,7 +4218,7 @@ function chamberMethodRows(built) {
 
 /** Sheet 1: the lobby list itself, styled to be read rather than pivoted. */
 async function writeListSheet(wb, built, groups, imageCache) {
-  const { labels, cycles, moneyFrom, moneyTo, askCol } = listSheetHeaders(built);
+  const { labels, cycles, moneyFrom, moneyTo } = listSheetHeaders(built);
   const ws = wb.addWorksheet(`${built.chamber.label} ${built.party.short}`,
     { views: [{ state: "frozen", ySplit: 2, xSplit: 4 }] });
 
@@ -4198,9 +4247,6 @@ async function writeListSheet(wb, built, groups, imageCache) {
     if (fill) tierCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
     tierCell.font = { bold: true, size: 18 };
     tierCell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-    // The single ask reads as money, not as text.
-    row.getCell(askCol).numFmt = MONEY;
-    row.getCell(askCol).font = { bold: true };
     // Donor names in bold, so a column of them can be scanned.
     for (const [column, parts] of Object.entries(entry.rich)) {
       if (!parts.length) continue;
@@ -4213,7 +4259,7 @@ async function writeListSheet(wb, built, groups, imageCache) {
     if (entry.person) await addPortrait(wb, ws, entry.person, row.number, 2, imageCache);
   }
 
-  const widths = [8, 13, 14, 16, 16, 34, 34, ...cycles.map(() => 46), 24, 24, 30, 16, 16];
+  const widths = [8, 13, 14, 16, 36, 34, ...cycles.map(() => 46), 24, 24, 30, 16, 16];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: labels.length } };
   return ws;

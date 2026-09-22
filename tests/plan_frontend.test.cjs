@@ -677,14 +677,22 @@ test("an ask is one number, as a call list quotes it", () => {
                    { donor: "Kroger", rest: ": $1,000" });
 });
 
-test("asks round to the nearest $500, and never to nothing", () => {
+test("asks round coarsely above $1,000 and finely below it", () => {
   const ctx = listContext();
+  // At or above $1,000 the step is $500.
   assert.equal(ctx.roundAsk(2400), 2500);
   assert.equal(ctx.roundAsk(2600), 2500);
   assert.equal(ctx.roundAsk(2750), 3000);
-  assert.equal(ctx.roundAsk(250), 500, "a donor worth listing is worth asking");
-  assert.equal(ctx.roundAsk(10), 500);
-  assert.equal(ctx.roundAsk(0), 500);
+  assert.equal(ctx.roundAsk(1750), 2000);
+  // Below it the step is $250, so a small ask stays small rather than being
+  // rounded up to $500 for tidiness.
+  assert.equal(ctx.roundAsk(900), 1000);
+  assert.equal(ctx.roundAsk(700), 750);
+  assert.equal(ctx.roundAsk(600), 500);
+  assert.equal(ctx.roundAsk(250), 250);
+  // And the floor is one small step, never nothing.
+  assert.equal(ctx.roundAsk(10), 250);
+  assert.equal(ctx.roundAsk(0), 250);
 });
 
 test("a giving line names sitting members by surname", () => {
@@ -734,16 +742,34 @@ test("a lobbyist's name splits into the list's two columns", () => {
   assert.deepEqual(plain(ctx.splitName("")), { first: "", last: "" });
 });
 
+test("every sheet the workbook writes can actually be built", async () => {
+  const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
+  const ctx = shapeContext();
+  // These run only when someone presses Excel, so a constant renamed
+  // elsewhere goes unnoticed until the download fails. It has happened twice
+  // — RECENT_CYCLES, then LIST_ASK_ROUNDING — both only in the method sheet.
+  const method = ctx.chamberMethodRows(built);
+  assert.ok(method.length > 5);
+  for (const row of method) {
+    assert.ok(row.Item && row.Value !== undefined && row.Detail,
+              `incomplete method row: ${JSON.stringify(row)}`);
+    assert.doesNotMatch(String(row.Detail), /undefined|NaN|\[object/,
+                        `method row did not render: ${row.Item}`);
+  }
+  // The flat sheet has to survive a built list with no DOM behind it too.
+  assert.ok(ctx.listSheetHeaders(built).labels.length > 10);
+});
+
 test("the sheet's column numbers come from its own headers", () => {
   const ctx = shapeContext();
   const h = ctx.listSheetHeaders({ cycle: 2026, chamber: { label: "House" }, party: { short: "D" } });
   // Counting these by hand put the bolded donor lists one column left, over
-  // the ask and over Donors. They are read off the labels instead.
-  assert.equal(h.labels[h.askCol - 1], "Suggested Ask 2026");
+  // Donors. They are read off the labels instead.
   assert.equal(h.labels[h.byClientCol - 1], "Suggested Ask 2026 by client");
   assert.equal(h.labels[h.givingFrom - 1], "2025–2026 giving");
   assert.equal(h.labels[h.givingFrom], "2023–2024 giving");
-  assert.equal(h.byClientCol, h.askCol + 1);
+  assert.equal(h.labels.includes("Suggested Ask 2026"), false,
+               "the standalone per-lobbyist ask column is gone");
 });
 
 test("donor identities survive for the lobbyist lookup", async () => {
@@ -779,11 +805,12 @@ test("giving history names only members who still hold the seat", async () => {
             "Clem's giving still informs the ask, it just has no name on it");
 });
 
-test("a lobbyist's single ask is their clients' asks added up", async () => {
+test("every ask is a round number a caller can say out loud", async () => {
   const ctx = listContext();
-  // Every client ask is already a multiple of the rounding, so the total is
-  // too: the column and the breakdown can never disagree.
-  const asks = [2400, 250, 1750].map(ctx.roundAsk);
-  assert.deepEqual(asks, [2500, 500, 2000]);
-  assert.equal(asks.reduce((a, b) => a + b, 0) % 500, 0);
+  const asks = [2400, 250, 1750, 40].map(ctx.roundAsk);
+  assert.deepEqual(asks, [2500, 250, 2000, 250]);
+  // Whatever the step used, every ask is a multiple of the small one, so a
+  // lobbyist's total is too.
+  for (const a of asks) assert.equal(a % 250, 0, `${a} is not a round ask`);
+  assert.equal(asks.reduce((a, b) => a + b, 0) % 250, 0);
 });

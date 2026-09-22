@@ -573,13 +573,16 @@ carries them.
 ### The suggested ask
 
 The recency-weighted median of what that donor gives **one candidate of this
-kind across a whole cycle**, rounded to the nearest **$500** — a call list
-asks for round numbers. Nothing rounds to nothing: a donor worth listing is
-worth asking, so the smallest ask is one step.
+kind across a whole cycle**, rounded — a call list asks for round numbers, but
+a small ask has to stay small:
 
-A lobbyist's own ask is their clients' asks **added up**. Both are already
-multiples of $500, so the single figure and the breakdown beside it can never
-disagree.
+| Ask | Rounded to | Floor |
+|---|---|---|
+| under $1,000 | nearest **$250** | **$250** |
+| $1,000 and over | nearest **$500** | — |
+
+A donor whose giving sits at $250 is asked $250, not rounded up to $500 for
+tidiness.
 
 Contributions to the same candidate inside a cycle are added up first, so a
 $1,000 primary cheque and a $1,000 general cheque read as one $2,000
@@ -598,8 +601,7 @@ so a candidate reads down the *Suggested ask(s)* column and makes the calls.
 |---|---|
 | **Tier** | Tier 1–4, all computed |
 | **Who to call** | portrait, name, firm and contact details, and anyone else attached to those donors |
-| **Suggested ask ⟨cycle⟩** | one number: everything this lobbyist's clients are worth |
-| **…by client** | that number broken out — *donor: $2,500*, one line each |
+| **Suggested ask ⟨cycle⟩ by client** | one line per donor — *donor: $2,500* |
 | **Donors** | the donors this lobbyist carries, as a list |
 | **⟨cycle⟩ giving** | one line per donor: *donor: $20,000 Fahey, $15,000 Levy E …*, for each of the three most recent cycles |
 
@@ -609,9 +611,31 @@ column of them can be read down rather than across.
 A donor appears under **one** lobbyist, chosen exactly as the candidate plan
 chooses: an admin's filing at `/admin/lobbyists` first, then a link marked
 primary, then a confirmed link over an unreviewed one, then the stronger
-match. Everyone else attached to the donor is listed as *also*. Donors with
-nobody on file gather in a row at the bottom, and the toggles above the table
-hide unreviewed matches or that row.
+match. Everyone else attached to the donor is listed as *also*.
+
+### The order lobbyists are worked in
+
+**Combined client likelihood** — the donor scores of everyone they carry,
+added up. Who to call first is a question about the donors, so it is answered
+with the same score that ranked them: consistency, breadth and per-cycle size
+through the recency window. Six likely donors are a better morning than one,
+so the total rather than the average.
+
+The tier beside each name is still the book-size rule below, and it is a
+label rather than the sort key, so tiers are not strictly in order down the
+page.
+
+### Donors nobody carries
+
+A donor with no lobbyist attached has nobody to call, so it is **left out of
+the ranking** rather than sorted to the bottom. Those donors are listed under
+the table — named, with their asks, not ranked — and recorded for
+`/admin/lobbyists`, where the **Unmatched donors** tab pulls them to the top
+with a badge naming the list, the rank they would have had and the ask.
+
+That hand-off is per-browser: the list writes it when you build it, and the
+admin banner says when that was. It is a note to the person building the
+list, not a record anything depends on.
 
 ### Who the giving history names
 
@@ -692,8 +716,8 @@ given, benchmarks against comparable seats, or applies the first-time 50% cap.
 ### The files
 
 The **Excel** file is the lobby list, column for column: tier, portrait, first
-and last name, the single ask, the ask by client, the donors, a column of
-giving per cycle, then how to reach them. Headers frozen, the identity columns
+and last name, the ask by client, the donors, a column of giving per cycle,
+then how to reach them. Headers frozen, the identity columns
 frozen at the left, Tier 1 shaded, one row per lobbyist with the portrait
 drawn into it, donor names bold inside the multi-line cells. Built with
 ExcelJS — the community SheetJS build cannot write frozen panes, fills, rich

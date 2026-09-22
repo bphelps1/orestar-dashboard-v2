@@ -176,3 +176,24 @@ ul.pair-evidence li + li { margin-top: 2px; }
 .lob-firm-members h4 { font-size: 0.9rem; margin-bottom: 4px; }
 .lob-firm-members .lob-client-list { max-height: none; }
 .lob-member-of { margin-top: 12px; }
+
+/* Donors that rank on a caucus top-donor list with nobody to call. */
+.lob-toplist-banner {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border-left: 3px solid var(--color-accent);
+  background: #eff6ff;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.lob-toplist {
+  display: inline-block;
+  margin: 3px 4px 0 0;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
