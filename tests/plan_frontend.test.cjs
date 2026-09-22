@@ -701,7 +701,7 @@ test("a giving line names sitting members by surname", () => {
 });
 
 test("a surname alone, unless the chamber seats two of them", () => {
-  const ctx = context();
+  const ctx = context({ getChamber: () => "house" });
   ctx.__roster = { house: ["Julie Fahey", "Bobby Levy", "Emerson Levy", "Rob Nosse"], senate: [] };
   vm.runInContext("currentLegislators = __roster;", ctx);
   const short = ctx.memberShortNames("house");
@@ -712,7 +712,9 @@ test("a surname alone, unless the chamber seats two of them", () => {
 });
 
 test("a committee resolves to the sitting member, or to nobody", () => {
-  const ctx = context();
+  // currentMemberFor() asks getChamber(), which is declared outside every
+  // slice — the cohort is one chamber by construction wherever it is called.
+  const ctx = context({ getChamber: () => "house" });
   ctx.__roster = { house: ["Julie Fahey"], senate: [] };
   vm.runInContext("currentLegislators = __roster;", ctx);
   const house = { office: "State Representative" };
