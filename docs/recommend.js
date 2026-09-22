@@ -554,7 +554,7 @@ function cycleWeight(giftCycle, planCycle) {
  * up by a relationship that ended a decade ago; the weighted one answers
  * $2,000, which is what they actually give now.
  */
-function weightedMedian(entries) {
+function weightedPercentile(entries, p) {
   const sorted = entries.filter(e => e.weight > 0 && e.amount > 0)
     .sort((a, b) => a.amount - b.amount);
   const total = sorted.reduce((s, e) => s + e.weight, 0);
@@ -562,10 +562,12 @@ function weightedMedian(entries) {
   let seen = 0;
   for (const e of sorted) {
     seen += e.weight;
-    if (seen >= total / 2) return e.amount;
+    if (seen >= total * p) return e.amount;
   }
   return sorted[sorted.length - 1].amount;
 }
+
+function weightedMedian(entries) { return weightedPercentile(entries, 0.5); }
 
 /** The phrase a row uses to say how old the giving behind its ask is. */
 function recencyNote(stale, cycle) {
@@ -3231,6 +3233,7 @@ const INK = {
   lobbyist: "FFEFF3FA",
   total: "FFD9E2F3",
   rule: "FFBFBFBF",
+  contact: "FF7D9A78",     // the lobby list's sage header for who-to-call columns
   muted: "FF595959",
 };
 const MONEY = '"$"#,##0';
@@ -3529,6 +3532,7 @@ const LIST_SIZE = 125;              // the list the user asked for: top 100–12
 const LIST_MIN_RAISED = 5000;       // committees below this are paper filings
 const LIST_MIN_CYCLES = 2;          // one cycle is an event, not a habit
 const LIST_LOOKUP_BATCH = 300;      // donors whose category is read at a time
+const LIST_RECIPIENTS_SHOWN = 20;   // candidates named per donor per cycle
 
 // Full marks. A donor giving to this many campaigns in a cycle, or this many
 // dollars into the chamber in a cycle, tops out the component; the curve in
@@ -3659,12 +3663,15 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
                 + LIST_WEIGHTS.magnitude * curve(magnitude, LIST_MAGNITUDE_FULL);
 
     const ask = weightedMedian(gifts);
+    const askLow = weightedPercentile(gifts, 0.25);
+    const askHigh = weightedPercentile(gifts, 0.75);
     const campaigns = new Set([...donor.gifts.keys()].map(s => s.split("|")[0]));
     const cyclesGiven = [...perCycle.keys()].sort((a, b) => b - a);
     ranked.push({
       donor_key: key, donor: donor.name, donor_id: [...donor.ids][0] || null,
       ids: [...donor.ids], book_type: null,
       ask: Math.round(ask),
+      ask_low: Math.round(askLow), ask_high: Math.round(askHigh),
       score: Math.round(score * 10) / 10,
       consistency, breadth, magnitude,
       cycles_given: perCycle.size,
@@ -3674,6 +3681,9 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
       per_cycle: cyclesGiven.map(cy => ({
         cycle: cy, total: perCycle.get(cy).total, committees: perCycle.get(cy).committees.length,
         top: [...perCycle.get(cy).committees].sort((a, b) => b.amount - a.amount).slice(0, 5),
+        // The lobby list prints who the money went to, not just how much.
+        recipients: [...perCycle.get(cy).committees].sort((a, b) => b.amount - a.amount)
+          .slice(0, LIST_RECIPIENTS_SHOWN),
       })),
       gifts,
     });
@@ -3705,8 +3715,7 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
       if (!types.length) { unresolved++; continue; }
       if (types.every(t => PERSON_BOOK_TYPES.has(t))) { people++; continue; }
       row.book_type = types.find(t => !PERSON_BOOK_TYPES.has(t)) || types[0];
-      delete row.ids;
-      rows.push(row);
+      rows.push(row);                 // row.ids stays: attribution looks donors up by id
       if (rows.length >= LIST_SIZE) break;
     }
   }
@@ -3737,7 +3746,131 @@ function listWhy(row) {
 }
 
 
-// ── The standing list on screen ────────────────────────────────────────────
+// ── The standing list, shaped like the lobby list ─────────────────────────
+//
+// The fundraising team works from a lobby list: one row per lobbyist, tier
+// first, then who they are, then the asks — their donors and a number for
+// each — then what those donors gave in each recent cycle. A candidate reads
+// down the "Suggested asks" column and makes the calls, so the donors are
+// sorted into the person who carries them rather than listed on their own.
+//
+// One row per lobbyist, multi-line cells inside it. A donor appears under one
+// lobbyist, chosen the same way the candidate plan chooses: an admin's filing
+// first, then a primary link, then a confirmed one, then the stronger match.
+
+/** "Oregon Nurses PAC: $1,500–$2,500" — one ask, as the lobby list writes it. */
+function askLine(row) {
+  const range = row.ask_low && row.ask_high && row.ask_low !== row.ask_high
+    ? `${fmt$(row.ask_low)}–${fmt$(row.ask_high)}` : fmt$(row.ask);
+  return `${row.donor}: ${range}`;
+}
+
+/** "Oregon Nurses PAC: $1,000 Fahey, $500 Kropf" — a cycle's giving. */
+function givingLine(row, cycle) {
+  const band = row.per_cycle.find(c => c.cycle === cycle);
+  if (!band) return "";
+  const names = band.recipients.map(r => `${fmt$(r.amount)} ${shortCommitteeName(r.filer)}`).join(", ");
+  return `${row.donor}: ${names}`;
+}
+
+/** Committee names are long; a call list wants the candidate. */
+function shortCommitteeName(name) {
+  return String(name || "")
+    .replace(/\s*\(\d+\)\s*$/, "")
+    .replace(/^(friends of|committee to elect|elect|the committee to elect)\s+/i, "")
+    .replace(/\s+for\s+(oregon|state (rep|representative|senate|senator).*|senate|house|bend|\w+ county)$/i, "")
+    .trim();
+}
+
+let listControlsWired = false;
+
+/** Lobbyists for one donor on the list, primary first. */
+function listLobbyistsFor(row) {
+  const list = window._listAttr?.get(row.donor_key) || [];
+  const includeSuggested = document.getElementById("list-include-suggested")?.checked ?? true;
+  return includeSuggested ? list : list.filter(a => a.status === "confirmed");
+}
+
+/** Is this lobbyist a standing partner of the chamber and party being listed? */
+function listIsPartner(lobbyistId) {
+  const built = window._chamberList;
+  if (!built) return false;
+  const key = `${built.chamber.key}|${built.party.short}`;
+  return !!partnersById?.get(lobbyistId)?.has(key);
+}
+
+/**
+ * The list, grouped under the lobbyist who carries each donor. Mirrors
+ * planGroups(): same ownership preference, same firm handling, same order —
+ * partners first, then tier, then the size of the ask.
+ */
+function chamberGroups() {
+  const built = window._chamberList;
+  if (!built) return [];
+  const groups = new Map();
+  const none = { lobbyist: null, rows: [] };
+  for (const row of built.rows) {
+    const list = listLobbyistsFor(row);
+    let owner = list[0] ? owningFirm(list[0].lobbyist) : null;
+    const firm = owner ? firmContacts(owner) : { primary: null, others: [] };
+    const atFirm = new Set([firm.primary, ...firm.others].filter(Boolean).map(m => m.lobbyist_id));
+    if (owner) atFirm.add(owner.lobbyist_id);
+    const entry = { ...row, attribution: list[0] || null,
+                    also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
+    if (!owner) { none.rows.push(entry); continue; }
+    if (!groups.has(owner.lobbyist_id)) groups.set(owner.lobbyist_id, { lobbyist: owner, rows: [] });
+    groups.get(owner.lobbyist_id).rows.push(entry);
+  }
+  let out = [...groups.values()];
+  if (document.getElementById("list-show-unattributed")?.checked !== false && none.rows.length) {
+    out.push(none);
+  }
+  const q = (document.getElementById("list-search")?.value || "").trim().toLowerCase();
+  if (q) {
+    out = out.map(g => {
+      const l = g.lobbyist;
+      const members = l ? [firmContacts(l).primary, ...firmContacts(l).others].filter(Boolean) : [];
+      const hit = l && [l.name, l.firm, l.affiliation, l.email, ...members.map(m => m.name)]
+        .join(" ").toLowerCase().includes(q);
+      return hit || g.rows.some(r => r.donor.toLowerCase().includes(q)) ? g : { ...g, rows: [] };
+    }).filter(g => g.rows.length);
+  }
+  for (const g of out) {
+    g.rows.sort((a, b) => b.ask - a.ask || b.score - a.score);
+    g.ask = g.rows.reduce((s, r) => s + r.ask, 0);
+    g.partner = g.lobbyist ? listIsPartner(g.lobbyist.lobbyist_id) : false;
+    // The candidate-plan tier, minus the two bonuses that need a committee:
+    // a chamber list has no single committee to have given to.
+    g.tier = lobbyistTier(g.rows.map(r => ({
+      given: 0, cycles: {},
+      comp_gifts: r.per_cycle.flatMap(c => c.recipients.map(x => ({ filer: x.filer, amount: x.amount }))),
+    })), g.partner);
+  }
+  out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (a.tier.tier - b.tier.tier) || (b.ask - a.ask));
+  return out;
+}
+
+/** Look up who lobbies for each donor on the list. */
+async function loadChamberAttribution(built) {
+  window._listAttr = null;
+  window._listIdentityIds = new Map();
+  try {
+    if (!lobbyistsById) {
+      lobbyistsById = new Map((await LOB.loadLobbyists())
+        .map(l => [l.lobbyist_id, { ...l, name: donorDisplayName(l.name) }]));
+    }
+    if (!partnersById) partnersById = await LOB.loadPartners();
+    if (typeof LP !== "undefined") LP.load().catch(() => {});
+    const rows = built.rows.flatMap(r => (r.ids || [r.donor_id]).filter(Boolean)
+      .map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
+    const { byKey } = await LOB.planAttribution(rows, lobbyistsById);
+    window._listAttr = byKey;
+  } catch (e) {
+    console.warn("Lobbyist attribution unavailable for the standing list:", e);
+    window._listAttr = new Map();
+    throw e;
+  }
+}
 
 function initChamberList() {
   const chamberSel = document.getElementById("list-chamber");
@@ -3753,11 +3886,18 @@ function initChamberList() {
       `<option value="${c}"${c === cur ? " selected" : ""}>${cycleName(c)}</option>`);
   }
   document.getElementById("list-run-btn").addEventListener("click", runChamberList);
-  document.getElementById("list-search").addEventListener("input", renderChamberRows);
   for (const [id, fmt, scope] of [["list-export-csv", "csv", "one"], ["list-export-xlsx", "xlsx", "one"],
                                   ["list-export-all-xlsx", "xlsx", "all"]]) {
     document.getElementById(id).addEventListener("click", () => exportChamberList(fmt, scope));
   }
+}
+
+function wireListControls() {
+  if (listControlsWired) return;
+  listControlsWired = true;
+  document.getElementById("list-search").addEventListener("input", renderChamberRows);
+  document.getElementById("list-include-suggested").addEventListener("change", renderChamberRows);
+  document.getElementById("list-show-unattributed").addEventListener("change", renderChamberRows);
 }
 
 async function runChamberList() {
@@ -3768,8 +3908,18 @@ async function runChamberList() {
   button.disabled = true;
   try {
     const built = await buildChamberList(chamberKey, partyKey, cycle, msg => showStatus(msg, "loading"));
-    hideStatus();
     window._chamberList = built;
+    wireListControls();
+    showStatus("Looking up lobbyists…", "loading");
+    const status = document.getElementById("list-status");
+    try {
+      await loadChamberAttribution(built);
+      status.textContent = "";
+    } catch (e) {
+      status.textContent = `Lobbyist attribution is unavailable (${e.message}). `
+        + "Donors are listed without a lobbyist.";
+    }
+    hideStatus();
     renderChamberList(built);
   } catch (err) {
     showStatus(`Error: ${err.message}`, "error");
@@ -3782,27 +3932,26 @@ async function runChamberList() {
 function renderChamberList(built) {
   document.getElementById("list-results").hidden = false;
   document.getElementById("list-title").textContent =
-    `Top ${built.rows.length} organizations — ${listTitle(built.chamber, built.party, built.cycle)}`;
+    `${listTitle(built.chamber, built.party, built.cycle)} — top ${built.rows.length} organizations`;
   const asks = built.rows.map(r => r.ask).sort((a, b) => a - b);
-  const median = percentile(asks, 0.5);
-  const everyCycle = built.rows.filter(r => r.cycles_given === r.cycles_in_window).length;
+  const attributed = built.rows.filter(r => listLobbyistsFor(r).length).length;
   document.getElementById("list-summary").innerHTML = `
-    <div class="summary-card"><span class="sc-label">Generic ask, median of the list
-      <span class="sc-help" title="The middle donor's generic ask. Each donor's own ask is the recency-weighted median of what it gives one candidate of this kind across a cycle.">?</span></span><br>
-      <span class="sc-value">${fmt$(median)}</span>
-      <div class="sc-sub">${fmt$(asks[0])} to ${fmt$(asks[asks.length - 1])} across the list</div></div>
-    <div class="summary-card"><span class="sc-label">If every one said yes
-      <span class="sc-help" title="The sum of the generic asks — one ask per donor, for one candidate.">?</span></span><br>
+    <div class="summary-card"><span class="sc-label">Total of the asks
+      <span class="sc-help" title="Every donor's suggested ask added up — one ask each, for one candidate.">?</span></span><br>
       <span class="sc-value">${fmt$(built.rows.reduce((s, r) => s + r.ask, 0))}</span>
       <div class="sc-sub">one candidate, one ask each</div></div>
-    <div class="summary-card sc-muted"><span class="sc-label">Every cycle</span><br>
-      <span class="sc-value">${fmtNum(everyCycle)}</span>
-      <div class="sc-sub">gave in all ${built.rows[0]?.cycles_in_window ?? CYCLE_WEIGHTS.length} cycles in the window</div></div>
+    <div class="summary-card"><span class="sc-label">Middle ask
+      <span class="sc-help" title="The middle donor's suggested ask: the recency-weighted median of what it gives one candidate of this kind across a cycle.">?</span></span><br>
+      <span class="sc-value">${fmt$(percentile(asks, 0.5))}</span>
+      <div class="sc-sub">${fmt$(asks[0])} to ${fmt$(asks[asks.length - 1])} across the list</div></div>
+    <div class="summary-card sc-muted"><span class="sc-label">With a lobbyist</span><br>
+      <span class="sc-value">${fmtNum(attributed)}</span>
+      <div class="sc-sub">of ${fmtNum(built.rows.length)} donors · assign the rest at
+        <a href="/admin/lobbyists">/admin/lobbyists</a></div></div>
     <div class="summary-card sc-muted"><span class="sc-label">Drawn from</span><br>
       <span class="sc-value">${fmtNum(built.committees)}</span>
       <div class="sc-sub">${built.party.label} ${built.chamber.label} committees ·
-        ${fmtNum(built.ranked)} donors ranked, top ${fmtNum(built.considered)} checked for category</div></div>`;
-  document.getElementById("list-search").value = "";
+        ${fmtNum(built.ranked)} donors ranked</div></div>`;
   renderChamberRows();
 }
 
@@ -3810,83 +3959,131 @@ function renderChamberRows() {
   const built = window._chamberList;
   const tbody = document.getElementById("list-tbody");
   if (!built || !tbody) return;
-  const term = (document.getElementById("list-search").value || "").toLowerCase().trim();
-  const rows = term ? built.rows.filter(r => r.donor.toLowerCase().includes(term)) : built.rows;
-  window._renderedList = rows;
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="plan-empty">No donors match.</td></tr>';
+  const groups = chamberGroups();
+  document.getElementById("list-count").textContent =
+    `${groups.filter(g => g.lobbyist).length} lobbyists · `
+    + `${groups.reduce((s, g) => s + g.rows.length, 0)} donors`;
+  if (!groups.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="plan-empty">No lobbyists or donors match.</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.map((r, i) => `
-    <tr>
-      <td>${built.rows.indexOf(r) + 1}</td>
-      <td><button type="button" class="link-btn list-detail-btn" data-idx="${i}"
-            aria-expanded="false">${esc(r.donor)}</button>
-          <div class="list-why">${esc(listWhy(r))}</div></td>
-      <td class="num"><strong>${fmt$(r.ask)}</strong></td>
-      <td class="num">${r.score.toFixed(1)}</td>
-      <td class="num">${r.cycles_given}/${r.cycles_in_window}</td>
-      <td class="num">${fmtNum(r.campaigns)}</td>
-      <td class="num">${fmt$(r.magnitude)}</td>
-      <td>${r.last_cycle ? cycleName(r.last_cycle) : "—"}</td>
-    </tr>
-    <tr class="detail-row" id="list-detail-${i}" hidden><td colspan="8"></td></tr>`).join("");
-  tbody.querySelectorAll(".list-detail-btn").forEach(button =>
-    button.addEventListener("click", () => toggleListDetail(Number(button.dataset.idx), button)));
+  const cycles = [built.cycle, built.cycle - 2];
+  tbody.innerHTML = groups.map(g => {
+    const l = g.lobbyist;
+    const who = l ? lobbyistHeader(l)
+      : `<div class="plan-lobbyist plan-none">No lobbyist on file</div>
+         <div class="plan-contact">Assign these at <a href="/admin/lobbyists">/admin/lobbyists</a></div>`;
+    const asks = g.rows.map(r => `<div class="list-ask"><strong>${esc(r.donor)}</strong>: ${
+      r.ask_low && r.ask_high && r.ask_low !== r.ask_high
+        ? `${fmt$(r.ask_low)}–${fmt$(r.ask_high)}` : fmt$(r.ask)}</div>`).join("");
+    const donors = g.rows.map(r => esc(r.donor)).join("; ");
+    const giving = cy => g.rows.map(r => {
+      const line = givingLine(r, cy);
+      return line ? `<div class="list-giving"><strong>${esc(r.donor)}</strong>: ${
+        esc(line.slice(line.indexOf(": ") + 2))}</div>` : "";
+    }).join("");
+    return `<tr class="list-row">
+      <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
+      <td class="list-who">${who}${g.rows.some(r => r.also.length)
+        ? `<div class="plan-also">also: ${esc([...new Set(g.rows.flatMap(r =>
+            r.also.map(a => a.lobbyist.name)))].join(", "))}</div>` : ""}</td>
+      <td class="list-asks">${asks}<div class="list-ask-total">Total ${fmt$(g.ask)}</div></td>
+      <td class="list-donors">${donors}</td>
+      <td class="list-giving-cell">${giving(cycles[0])}</td>
+      <td class="list-giving-cell">${giving(cycles[1])}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("list-cycle-head-0").textContent = `${cycleName(cycles[0])} giving`;
+  document.getElementById("list-cycle-head-1").textContent = `${cycleName(cycles[1])} giving`;
 }
 
-function toggleListDetail(idx, button) {
-  const row = document.getElementById(`list-detail-${idx}`);
-  const open = row.hidden;
-  button.setAttribute("aria-expanded", String(open));
-  row.hidden = !open;
-  if (!open || row.dataset.filled) return;
-  const r = (window._renderedList || [])[idx];
-  const cycles = r.per_cycle.map(c => `
-    <tr><td>${cycleName(c.cycle)}</td>
-        <td class="num">${fmt$(c.total)}</td>
-        <td class="num">${c.committees}</td>
-        <td>${esc(c.top.map(t => `${t.filer} (${fmt$(t.amount)})`).join(", "))}</td>
-        <td class="num">${(cycleWeight(c.cycle, window._chamberList.cycle)).toFixed(2)}×</td></tr>`).join("");
-  const singles = r.gifts.map(g => g.amount).sort((a, b) => a - b);
-  row.querySelector("td").innerHTML = `
-    <div class="detail-box">
-      <h4>${esc(r.donor)} — ${esc(r.book_type || "organization")}</h4>
-      <p class="detail-note">Generic ask <strong>${fmt$(r.ask)}</strong>: the recency-weighted median of
-        ${fmtNum(r.gifts.length)} candidate-cycle relationships
-        (plain median ${fmt$(percentile(singles, 0.5))}, largest ${fmt$(singles[singles.length - 1])}).
-        Score ${r.score.toFixed(1)} = ${LIST_WEIGHTS.consistency} × consistency ${r.consistency.toFixed(2)}
-        + ${LIST_WEIGHTS.breadth} × breadth (${r.breadth.toFixed(1)} campaigns a cycle)
-        + ${LIST_WEIGHTS.magnitude} × size (${fmt$(r.magnitude)} a cycle).</p>
-      <table class="detail-table">
-        <thead><tr><th>Cycle</th><th class="num">Given</th><th class="num">Campaigns</th>
-          <th>Largest recipients</th><th class="num">Weight</th></tr></thead>
-        <tbody>${cycles}</tbody>
-      </table>
-    </div>`;
-  row.dataset.filled = "1";
+// ── The standing list as a file ───────────────────────────────────────────
+//
+// Column for column the shape of the lobby list the team already works from:
+// tier, portrait, name, the asks, the clients, then a column of giving per
+// cycle, then how to reach them. One row per lobbyist.
+
+/** A lobbyist's name split the way the lobby list splits it. */
+function splitName(name) {
+  const parts = String(name || "").trim().split(/\s+/);
+  return parts.length < 2 ? { first: parts[0] || "", last: "" }
+                          : { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
 }
 
-// ── The standing list as a file ────────────────────────────────────────────
+const LIST_SHEET_CYCLES = 3;          // cycles of giving printed, newest first
 
+/** Header labels, left to right, for a built list. */
+function listSheetHeaders(built) {
+  const cycles = Array.from({ length: LIST_SHEET_CYCLES }, (_, i) => built.cycle - 2 * i);
+  return {
+    cycles,
+    labels: ["Tier", "Photo", "First Name", "Last Name", `Suggested Ask(s) ${built.cycle}`, "Donors",
+             ...cycles.map(c => `${cycleName(c)} giving`),
+             "Also lobbied by", "Firm", "Email", "Cell", "Work"],
+    // Money columns are the ones the fundraiser reads; the rest are contact.
+    moneyFrom: 4, moneyTo: 6 + cycles.length,
+  };
+}
+
+/** One row per lobbyist, in call order. */
+function listSheetRows(built, groups) {
+  const { cycles } = listSheetHeaders(built);
+  return groups.map(g => {
+    const l = g.lobbyist;
+    const contact = l ? planContact(l) : { name: "", email: "", phone: "", others: "" };
+    const { first, last } = splitName(contact.name || (l ? l.name : ""));
+    return {
+      tier: l ? g.tier.label : "",
+      person: portraitPerson(l),
+      cells: [
+        l ? g.tier.label : "",
+        "",                                   // the portrait is drawn into this cell
+        l ? first : "No lobbyist on file",
+        l ? last : "",
+        g.rows.map(askLine).join("\n"),
+        g.rows.map(r => r.donor).join("; "),
+        ...cycles.map(c => g.rows.map(r => givingLine(r, c)).filter(Boolean).join("\n")),
+        [...new Set(g.rows.flatMap(r => r.also.map(a => a.lobbyist.name)))].join("; "),
+        l ? (l.kind === "firm" ? l.name : l.affiliation || l.firm || "") : "",
+        contact.email || "",
+        l && l.kind !== "firm" ? l.phone || "" : contact.phone || "",
+        contact.others || "",
+      ],
+    };
+  });
+}
+
+/** The flat one-row-per-donor table, for pivoting. */
 function chamberListRows(built) {
-  return built.rows.map((r, i) => ({
-    "Rank": i + 1,
-    "Donor": r.donor,
-    "Category": r.book_type || "",
-    "Chamber": built.chamber.label,
-    "Party": built.party.label,
-    "Generic Ask": r.ask,
-    "Score": r.score,
-    "Cycles Given": `${r.cycles_given} of ${r.cycles_in_window}`,
-    "Campaigns Supported": r.campaigns,
-    "Campaigns Per Cycle": Math.round(r.breadth * 10) / 10,
-    "Given Per Cycle": Math.round(r.magnitude),
-    "Last Cycle Given": r.last_cycle ? cycleName(r.last_cycle) : "",
-    "Largest Recipients Last Cycle": (r.per_cycle[0]?.top || [])
-      .map(t => `${t.filer} (${fmt$(t.amount)})`).join("; "),
-    "Why On The List": listWhy(r),
-  }));
+  const byDonor = new Map();
+  for (const g of chamberGroups()) {
+    for (const r of g.rows) byDonor.set(r.donor_key, { group: g, row: r });
+  }
+  return built.rows.map((r, i) => {
+    const hit = byDonor.get(r.donor_key);
+    const l = hit?.group.lobbyist;
+    return {
+      "Rank": i + 1,
+      "Donor": r.donor,
+      "Suggested Ask": r.ask,
+      "Ask Low": r.ask_low,
+      "Ask High": r.ask_high,
+      "Lobbyist": l ? (planContact(l).name || l.name) : "",
+      "Tier": l ? hit.group.tier.label : "",
+      "Category": r.book_type || "",
+      "Chamber": built.chamber.label,
+      "Party": built.party.label,
+      "Score": r.score,
+      "Cycles Given": `${r.cycles_given} of ${r.cycles_in_window}`,
+      "Campaigns Supported": r.campaigns,
+      "Campaigns Per Cycle": Math.round(r.breadth * 10) / 10,
+      "Given Per Cycle": Math.round(r.magnitude),
+      "Last Cycle Given": r.last_cycle ? cycleName(r.last_cycle) : "",
+      "Largest Recipients Last Cycle": (r.per_cycle[0]?.top || [])
+        .map(t => `${t.filer} (${fmt$(t.amount)})`).join("; "),
+      "Why On The List": listWhy(r),
+    };
+  });
 }
 
 function chamberMethodRows(built) {
@@ -3896,12 +4093,14 @@ function chamberMethodRows(built) {
         + `committees that raised at least ${fmt$(LIST_MIN_RAISED)}. ${fmtNum(built.ranked)} donors were `
         + `scored and the top ${fmtNum(built.considered)} checked against ORESTAR's contributor category `
         + "until the list was full." },
-    { Item: "Generic ask", Value: "median gift to one candidate, one cycle",
-      Detail: "Contributions to the same candidate inside a cycle are added up first, so instalments read as "
-        + "one relationship. The median across those relationships is weighted by how recent each is." },
+    { Item: "Suggested ask", Value: "median gift to one candidate, one cycle",
+      Detail: "Contributions to the same candidate inside a cycle are added up first, so instalments read "
+        + "as one relationship. The median across those relationships is weighted by how recent each is; "
+        + "the range either side is the weighted 25th and 75th percentile of the same set." },
     { Item: "Recency weights", Value: CYCLE_WEIGHTS.join(" · "),
-      Detail: `Weight by cycles ago, newest first. The last ${RECENT_CYCLES} cycles count in full; giving `
-        + `older than ${STALE_CYCLES} cycles is outside the window entirely.` },
+      Detail: `Weight by cycles ago, newest first. The first `
+        + `${CYCLE_WEIGHTS.filter(w => w === 1).length} count in full; giving older than `
+        + `${CYCLE_WEIGHTS.length} cycles is outside the window entirely.` },
     { Item: "Window", Value: CYCLE_WEIGHTS.map((_, i) => cycleName(built.cycle - 2 * i)).join(", "),
       Detail: "The cycles the list is built from." },
     { Item: "Score", Value: "0–100",
@@ -3914,6 +4113,15 @@ function chamberMethodRows(built) {
         + `checked, ${fmtNum(built.dropped.people)} individuals and candidate families were dropped and `
         + `${fmtNum(built.dropped.unresolved)} had no resolved identity to read a category from. `
         + `A donor must also have given in at least ${LIST_MIN_CYCLES} cycles in the window.` },
+    { Item: "Who carries a donor", Value: "one lobbyist per donor",
+      Detail: "An admin's filing at /admin/lobbyists wins, then a link marked primary, then a confirmed "
+        + "link over an unreviewed one, then the stronger match — the same order the candidate plan uses. "
+        + "Anyone else attached to the donor is listed under \u2018Also lobbied by\u2019." },
+    { Item: "Tier", Value: "Partner, then 1–4",
+      Detail: "6 × donors carried (max 30) + 2 × like candidates their donors support (max 30) + what "
+        + "those donors gave them ÷ 5,000 (max 20). The candidate plan's two remaining bonuses need a "
+        + "single committee to have given to, so they do not apply to a chamber list. PARTNER is set by "
+        + "hand per chamber and party at /admin/lobbyists and is never computed." },
     { Item: "What it is not", Value: "not a plan for one candidate",
       Detail: "No seat, no margin, no relationship with a particular committee is in these numbers. "
         + "For a named candidate, use the candidate view — it benchmarks against comparable seats and "
@@ -3921,13 +4129,52 @@ function chamberMethodRows(built) {
   ];
 }
 
+/** Sheet 1: the lobby list itself, styled to be read rather than pivoted. */
+async function writeListSheet(wb, built, groups, imageCache) {
+  const { labels, cycles, moneyFrom, moneyTo } = listSheetHeaders(built);
+  const ws = wb.addWorksheet(`${built.chamber.label} ${built.party.short}`,
+    { views: [{ state: "frozen", ySplit: 2, xSplit: 4 }] });
+
+  const title = ws.addRow([`${listTitle(built.chamber, built.party, built.cycle)} — who to call, and for how much`]);
+  title.font = { bold: true, size: 13 };
+  ws.mergeCells(1, 1, 1, labels.length);
+
+  const header = ws.addRow(labels);
+  header.height = 28;
+  labels.forEach((_, i) => {
+    const cell = header.getCell(i + 1);
+    styleHeaderCell(cell, { center: i < 2 });
+    // The lobby list colours the money columns apart from the contact ones.
+    if (i < moneyFrom || i >= moneyTo) cell.fill =
+      { type: "pattern", pattern: "solid", fgColor: { argb: INK.contact } };
+  });
+
+  const rows = listSheetRows(built, groups);
+  for (const entry of rows) {
+    const row = ws.addRow(entry.cells);
+    row.alignment = { vertical: "top", wrapText: true };
+    const lines = Math.max(...entry.cells.map(c => String(c || "").split("\n").length), 1);
+    row.height = Math.max(84, Math.min(320, lines * 14 + 8));
+    const tierCell = row.getCell(1);
+    const fill = tierFill(entry.tier);
+    if (fill) tierCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+    tierCell.font = { bold: true, size: 18 };
+    tierCell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    if (entry.person) await addPortrait(wb, ws, entry.person, row.number, 2, imageCache);
+  }
+
+  const widths = [8, 13, 14, 16, 42, 34, ...cycles.map(() => 46), 24, 24, 30, 16, 16];
+  widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: labels.length } };
+  return ws;
+}
+
 async function exportChamberList(format, scope) {
   const built = window._chamberList;
   if (!built) return;
-  const cycle = built.cycle;
-  const stamp = `${built.chamber.key}_${built.party.short.toLowerCase()}_${cycle}`;
+  const stamp = `${built.chamber.key}_${built.party.short.toLowerCase()}_${built.cycle}`;
 
-  if (scope === "one" && format === "csv") {
+  if (format === "csv") {
     const rows = chamberListRows(built);
     const headers = Object.keys(rows[0]);
     const csv = [headers.join(","), ...rows.map(row => headers.map(h => {
@@ -3941,28 +4188,42 @@ async function exportChamberList(format, scope) {
   const button = document.getElementById(scope === "all" ? "list-export-all-xlsx" : "list-export-xlsx");
   button.disabled = true;
   try {
-    const builds = [built];
+    const ExcelJS = await loadExcelJs();
+    const builds = [{ built, groups: chamberGroups() }];
     if (scope === "all") {
-      showStatus("Building all four lists…", "loading");
+      const current = window._chamberList, currentAttr = window._listAttr;
       for (const chamber of LIST_CHAMBERS) {
         for (const party of LIST_PARTIES) {
-          if (chamber.key === built.chamber.key && party.key === built.party.key) continue;
-          builds.push(await buildChamberList(chamber.key, party.key, cycle,
-            msg => showStatus(`${chamber.label} ${party.label}: ${msg}`, "loading")));
+          if (chamber.key === current.chamber.key && party.key === current.party.key) continue;
+          showStatus(`Building ${chamber.label} ${party.label}…`, "loading");
+          const other = await buildChamberList(chamber.key, party.key, current.cycle,
+            msg => showStatus(`${chamber.label} ${party.label}: ${msg}`, "loading"));
+          window._chamberList = other;
+          await loadChamberAttribution(other).catch(() => {});
+          builds.push({ built: other, groups: chamberGroups() });
         }
       }
-      builds.sort((a, b) => a.chamber.label.localeCompare(b.chamber.label)
-        || a.party.label.localeCompare(b.party.label));
+      window._chamberList = current;
+      window._listAttr = currentAttr;
+      builds.sort((a, b) => a.built.chamber.label.localeCompare(b.built.chamber.label)
+        || a.built.party.label.localeCompare(b.built.party.label));
       hideStatus();
     }
-    const wb = XLSX.utils.book_new();
+
+    const wb = new ExcelJS.Workbook();
+    const imageCache = new Map();
+    for (const b of builds) await writeListSheet(wb, b.built, b.groups, imageCache);
     for (const b of builds) {
-      const sheet = `${b.chamber.label} ${b.party.short}`;
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chamberListRows(b)), sheet);
+      writeTable(wb, `${b.built.chamber.label} ${b.built.party.short} donors`, chamberListRows(b.built),
+        { money: ["Suggested Ask", "Ask Low", "Ask High", "Given Per Cycle"],
+          note: "One row per donor — the sheet to pivot." });
     }
-    XLSX.utils.book_append_sheet(wb,
-      XLSX.utils.json_to_sheet(builds.flatMap(b => chamberMethodRows(b))), "How these were set");
-    XLSX.writeFile(wb, scope === "all" ? `top_donors_all_${cycle}.xlsx` : `top_donors_${stamp}.xlsx`);
+    writeTable(wb, "How these were set", builds.flatMap(b => chamberMethodRows(b.built)),
+      { widths: { Detail: 120 } });
+    const buffer = await wb.xlsx.writeBuffer();
+    downloadFile(new Blob([buffer],
+      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      scope === "all" ? `top_donors_all_${built.cycle}.xlsx` : `top_donors_${stamp}.xlsx`);
   } catch (err) {
     console.error(err);
     showStatus(`Could not build the file: ${err.message}`, "error");

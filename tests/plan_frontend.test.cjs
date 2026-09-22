@@ -27,7 +27,11 @@ const peerCode = slice("const PEER_WINDOWS = [", "async function findComparables
 const tierCode = slice("const TIER_RULES = [", "function renderRepeatDonors(");
 const exportCode = slice("/** Contact details for a lobbyist row", "/** Sheet 2: one line per lobbyist");
 const keyCode = slice("/** Oregon cycles run odd→even", "function _getAllYearGifts(");
-const listCode = slice("const LIST_SIZE = 125;", "// ── The standing list on screen");
+const listCode = slice("const LIST_SIZE = 125;", "// ── The standing list, shaped like the lobby list");
+// The lobby-list shaping: asks, giving lines and the name/committee tidying.
+const listShapeCode = slice("// \u2500\u2500 The standing list, shaped like the lobby list",
+                            "let listControlsWired = false;")
+  + slice("/** A lobbyist's name split the way", "const LIST_SHEET_CYCLES");
 
 function context(extra = {}) {
   const ctx = vm.createContext({
@@ -629,4 +633,71 @@ test("the list is cached per chamber, party and cycle", async () => {
   await ctx.buildChamberList("house", "Democrat", 2026);
   await ctx.buildChamberList("house", "Democrat", 2026);
   assert.equal(calls, 1);
+});
+
+// ── The standing list, in the shape of the lobby list ──────────────────────
+//
+// The team works from a lobby list: one row per lobbyist, their donors and a
+// number for each. These are the pieces that turn a donor row into that line.
+function shapeContext() {
+  const ctx = listContext();
+  vm.runInContext(listShapeCode, ctx);
+  return ctx;
+}
+
+test("an ask reads as the lobby list writes it", () => {
+  const ctx = shapeContext();
+  assert.equal(ctx.askLine({ donor: "Oregon Nurses PAC", ask: 2000, ask_low: 1500, ask_high: 2500 }),
+               "Oregon Nurses PAC: $1,500–$2,500");
+  // One observation, or a flat one: a single figure rather than a range.
+  assert.equal(ctx.askLine({ donor: "Kroger", ask: 750, ask_low: 750, ask_high: 750 }),
+               "Kroger: $750");
+  assert.equal(ctx.askLine({ donor: "Kroger", ask: 750 }), "Kroger: $750");
+});
+
+test("a giving line names the candidates, not the committees", () => {
+  const ctx = shapeContext();
+  const row = { donor: "Oregon Nurses PAC", per_cycle: [{ cycle: 2026, recipients: [
+    { filer: "Friends of Julie Fahey", amount: 20000 },
+    { filer: "Jason for Bend", amount: 2000 },
+  ] }] };
+  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $20,000 Julie Fahey, $2,000 Jason");
+  assert.equal(ctx.givingLine(row, 2024), "", "a cycle with no giving has no line");
+});
+
+test("committee names shorten to the candidate", () => {
+  const ctx = shapeContext();
+  const cases = [
+    ["Friends of Julie Fahey", "Julie Fahey"],
+    ["Committee to Elect Rachel Prusak", "Rachel Prusak"],
+    ["Jason for Bend", "Jason"],
+    ["Gomberg for State Rep", "Gomberg"],
+    ["Oregon Nurses Political Action Committee (12986)", "Oregon Nurses Political Action Committee"],
+    ["Mary Lou Gets Results", "Mary Lou Gets Results"],
+  ];
+  for (const [raw, want] of cases) assert.equal(ctx.shortCommitteeName(raw), want, raw);
+});
+
+test("a lobbyist's name splits into the list's two columns", () => {
+  const ctx = shapeContext();
+  assert.deepEqual(ctx.splitName("Jack Dempsey"), { first: "Jack", last: "Dempsey" });
+  assert.deepEqual(ctx.splitName("Kirsten Larson Adams"), { first: "Kirsten Larson", last: "Adams" });
+  assert.deepEqual(ctx.splitName("Cher"), { first: "Cher", last: "" });
+  assert.deepEqual(ctx.splitName(""), { first: "", last: "" });
+});
+
+test("the suggested ask carries a range around the median", async () => {
+  const ctx = chamberFixture();
+  const built = await ctx.buildChamberList("house", "Democrat", 2026);
+  const big = built.rows[0];
+  assert.ok(big.ask_low <= big.ask && big.ask <= big.ask_high,
+            `${big.ask_low} ≤ ${big.ask} ≤ ${big.ask_high}`);
+});
+
+test("donor identities survive for the lobbyist lookup", async () => {
+  const ctx = chamberFixture();
+  const built = await ctx.buildChamberList("house", "Democrat", 2026);
+  // planAttribution needs the ids; dropping them is what left every donor
+  // unattributed the first time round.
+  assert.deepEqual(built.rows[0].ids, ["d1"]);
 });
