@@ -690,7 +690,6 @@
 .list-unranked-row { font-size: 0.8rem; line-height: 1.5; }
 
 /* Clients from the tranche below the top 125: shown, never asked. */
-.list-giving.is-context { color: var(--color-text-muted); }
 .list-also-represents {
   margin-top: 6px;
   padding-top: 5px;

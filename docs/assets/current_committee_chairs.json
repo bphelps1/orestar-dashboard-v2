@@ -1,16 +1,9 @@
 {
-  "verified_on": "2026-09-21",
+  "verified_on": "2026-09-22",
   "sources": {
     "assignments": "https://olis.oregonlegislature.gov/liz/committees/assignments/committee"
   },
   "chairs": [
-    {
-      "chamber": "house",
-      "name": "Andrea Valderrama",
-      "committees": [
-        "Human Services"
-      ]
-    },
     {
       "chamber": "house",
       "name": "Annessa Hartman",
@@ -43,22 +36,7 @@
       "chamber": "house",
       "name": "David Gomberg",
       "committees": [
-        "Blue Economy",
-        "Transportation and Economic Development"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Emerson Levy",
-      "committees": [
-        "Natural Resources"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Farrah Chaichi",
-      "committees": [
-        "General Government"
+        "Blue Economy"
       ]
     },
     {
@@ -84,32 +62,6 @@
     },
     {
       "chamber": "house",
-      "name": "Julie Fahey",
-      "committees": [
-        "Emergency Board",
-        "Legislative Administration",
-        "Legislative Counsel",
-        "Legislative Policy and Research",
-        "Oregon-China Sister State",
-        "Transportation Funding"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Kevin Mannix",
-      "committees": [
-        "Conduct"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Kim Wallan",
-      "committees": [
-        "Public Records"
-      ]
-    },
-    {
-      "chamber": "house",
       "name": "Lisa Fragala",
       "committees": [
         "Higher Education"
@@ -119,15 +71,7 @@
       "chamber": "house",
       "name": "Mark Gamba",
       "committees": [
-        "Climate, Energy, and Environment",
-        "Transportation Oversight"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Mark Owens",
-      "committees": [
-        "Agriculture, Land Use, Natural Resources, and Water"
+        "Climate, Energy, and Environment"
       ]
     },
     {
@@ -153,40 +97,15 @@
     },
     {
       "chamber": "house",
-      "name": "Paul Evans",
-      "committees": [
-        "Public Safety"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Ricki Ruiz",
-      "committees": [
-        "Education",
-        "Higher Education",
-        "Public Education Appropriation"
-      ]
-    },
-    {
-      "chamber": "house",
       "name": "Rob Nosse",
       "committees": [
-        "Capital Construction",
         "Health Care"
-      ]
-    },
-    {
-      "chamber": "house",
-      "name": "Sarah McDonald",
-      "committees": [
-        "Agriculture, Land Use, Natural Resources, and Water"
       ]
     },
     {
       "chamber": "house",
       "name": "Susan McLain",
       "committees": [
-        "Interstate 5 Bridge",
         "Transportation"
       ]
     },
@@ -194,8 +113,6 @@
       "chamber": "house",
       "name": "Tawna Sanchez",
       "committees": [
-        "Conduct",
-        "Legislative Audits",
         "Ways and Means"
       ]
     },
@@ -215,13 +132,6 @@
     },
     {
       "chamber": "house",
-      "name": "Willy Chotzen",
-      "committees": [
-        "Information Management and Technology"
-      ]
-    },
-    {
-      "chamber": "house",
       "name": "Zach Hudson",
       "committees": [
         "Education"
@@ -231,24 +141,14 @@
       "chamber": "senate",
       "name": "Anthony Broadman",
       "committees": [
-        "Finance and Revenue",
-        "Public Safety"
+        "Finance and Revenue"
       ]
     },
     {
       "chamber": "senate",
       "name": "Chris Gorsek",
       "committees": [
-        "General Government",
         "Transportation"
-      ]
-    },
-    {
-      "chamber": "senate",
-      "name": "Courtney Neron Misslin",
-      "committees": [
-        "Higher Education",
-        "Natural Resources"
       ]
     },
     {
@@ -260,26 +160,9 @@
     },
     {
       "chamber": "senate",
-      "name": "Dick Anderson",
-      "committees": [
-        "Conduct",
-        "Regional Behavioral Health Accountability"
-      ]
-    },
-    {
-      "chamber": "senate",
       "name": "Floyd Prozanski",
       "committees": [
-        "Conduct",
-        "Judiciary",
-        "Public Records"
-      ]
-    },
-    {
-      "chamber": "senate",
-      "name": "Fred Girod",
-      "committees": [
-        "Capital Construction"
+        "Judiciary"
       ]
     },
     {
@@ -293,26 +176,20 @@
       "chamber": "senate",
       "name": "Janeen Sollman",
       "committees": [
-        "Education",
-        "Energy and Environment",
-        "Public Education Appropriation"
+        "Energy and Environment"
       ]
     },
     {
       "chamber": "senate",
       "name": "Jeff Golden",
       "committees": [
-        "Natural Resources",
-        "Natural Resources and Wildfire",
-        "Transportation and Economic Development"
+        "Natural Resources and Wildfire"
       ]
     },
     {
       "chamber": "senate",
       "name": "Kate Lieber",
       "committees": [
-        "Legislative Audits",
-        "Regional Behavioral Health Accountability",
         "Ways and Means"
       ]
     },
@@ -334,10 +211,7 @@
       "chamber": "senate",
       "name": "Khanh Pham",
       "committees": [
-        "Housing and Development",
-        "Information Management and Technology",
-        "Transportation",
-        "Transportation Oversight"
+        "Housing and Development"
       ]
     },
     {
@@ -351,8 +225,7 @@
       "chamber": "senate",
       "name": "Lew Frederick",
       "committees": [
-        "Education",
-        "Interstate 5 Bridge"
+        "Education"
       ]
     },
     {
@@ -371,26 +244,7 @@
     },
     {
       "chamber": "senate",
-      "name": "Rob Wagner",
-      "committees": [
-        "Emergency Board",
-        "Legislative Administration",
-        "Legislative Counsel",
-        "Legislative Policy and Research",
-        "Oregon-China Sister State",
-        "Transportation Funding"
-      ]
-    },
-    {
-      "chamber": "senate",
       "name": "Sara Gelser Blouin",
-      "committees": [
-        "Human Services"
-      ]
-    },
-    {
-      "chamber": "senate",
-      "name": "Wlnsvey Campos",
       "committees": [
         "Human Services"
       ]

@@ -3538,6 +3538,68 @@ const LIST_SIZE = 125;              // the list the user asked for: top 100–12
 // it belongs in their giving columns: it is part of the conversation you are
 // about to have, even though it is not part of the ask.
 const LIST_CONTEXT_SIZE = 250;
+
+// ── Who sets a typical ask, and who does not ─────────────────────────────
+//
+// A Speaker is given money on a different scale from a back-bencher, and so
+// is a veteran committee chair who has been raising for a decade. Leaving
+// them in the median asks a first-time caller to open at a number only a
+// leader ever sees.
+//
+// So they come out of the *median* and nothing else: they keep their place in
+// the giving columns, and they still count toward a donor's breadth,
+// consistency and size. The ask is simply what this donor gives an ordinary
+// member of the caucus.
+//
+// Three kinds come out, in descending order of how obvious they are:
+//
+//   1. Chamber leadership — Speaker, Senate President, Majority Leader,
+//      Minority Leader, and the Ways and Means Co-Chairs.
+//   2. A senior member who is also in leadership or chairs a committee AND
+//      raises like an outlier. That last clause is what makes the rule
+//      workable: seniority and a gavel are common, and plenty of members who
+//      have both still raise ordinary sums. Only the combination distorts a
+//      median, and the money is the part we can measure directly.
+//
+// Seniority is counted in completed cycles with giving, so "more than two
+// terms" is three or more.
+const LIST_SENIOR_CYCLES = 3;
+
+/** Minority Leader, which the primary-leadership test does not cover. */
+function minorityLeaderRole(filer) {
+  const chamber = getChamber(filer);
+  return !!chamber && new RegExp(`^(${chamber} )?minority leader$`).test(leadershipTitle(filer));
+}
+
+/**
+ * Why this committee's giving is left out of the ask median, or null.
+ * `senior` and `outlier` are measured per cohort by the caller.
+ */
+function askMedianExclusion(filer, { senior, outlier }) {
+  if (primaryLeadershipRole(filer)) return "chamber leadership";
+  if (minorityLeaderRole(filer)) return "chamber leadership";
+  if (senior && outlier && otherLeadershipOrChair(filer)) return "senior leader or chair, outsized";
+  return null;
+}
+
+/**
+ * Committees raising far above the rest of their caucus: Q3 + 1.5 × IQR, the
+ * same rule the candidate plan uses for fundraising outliers.
+ *
+ * Measured over **sitting members only**. A cohort holds decades of committees,
+ * most of them long dormant, and including them drags Q1 to almost nothing and
+ * blows the interquartile range out: against the whole cohort the bar came to
+ * $424,000 and only the Speaker and the Majority Leader cleared it, which is
+ * not a useful definition of "raises more than their colleagues". Against
+ * sitting members it is $377,000, and it finds the veterans it is meant to.
+ */
+function outsizedRaisers(totalsBySlug) {
+  const values = [...totalsBySlug.values()].filter(v => v > 0).sort((a, b) => a - b);
+  if (values.length < 8) return new Set();   // too little evidence to call anyone an outlier
+  const q1 = percentile(values, 0.25), q3 = percentile(values, 0.75);
+  const threshold = q3 + 1.5 * (q3 - q1);
+  return new Set([...totalsBySlug].filter(([, v]) => v > threshold).map(([slug]) => slug));
+}
 const LIST_MIN_RAISED = 5000;       // committees below this are paper filings
 const LIST_MIN_CYCLES = 2;          // one cycle is an event, not a habit
 const LIST_LOOKUP_BATCH = 300;      // donors whose category is read at a time
@@ -3618,9 +3680,9 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
 
   const cohort = chamberCohort(chamber, party);
   if (!cohort.length) throw new Error(`No ${party.label} ${chamber.label} committees on file.`);
-  // The giving history names sitting members only, so the roster is required
-  // rather than optional here.
-  await loadCurrentLegislators();
+  // The giving history names sitting members only, and the ask median leaves
+  // out leaders and chairs, so both rosters are required rather than optional.
+  await Promise.all([loadCurrentLegislators(), loadCommitteeChairs()]);
   const windowCycles = CYCLE_WEIGHTS.map((_, i) => cycle - 2 * i);
   const inWindow = new Map();                        // "2025" → 2026
   for (const c of windowCycles) for (const y of cycleYears(c)) inWindow.set(String(y), c);
@@ -3630,12 +3692,16 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
 
   // donor → { name, ids, gifts: Map<"slug|cycle", amount> }
   const donors = new Map();
+  const raisedBySlug = new Map();          // slug → {cycle: total raised}
   for (const filer of cohort) {
     const byYear = blobs.get(filer.slug) || {};
     for (const [year, rows] of Object.entries(byYear)) {
       const cy = inWindow.get(String(year));
       if (!cy) continue;
+      if (!raisedBySlug.has(filer.slug)) raisedBySlug.set(filer.slug, {});
+      const raised = raisedBySlug.get(filer.slug);
       for (const d of rows) {
+        raised[cy] = (raised[cy] || 0) + Number(d.total || 0);
         const key = donorKey(d);
         if (!donors.has(key)) {
           donors.set(key, { name: donorDisplayName(d.name), ids: new Set(), gifts: new Map() });
@@ -3657,6 +3723,29 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
     const member = currentMemberFor(filer);
     if (member) memberNames.set(filer.slug, shortNames.get(member) || member);
   }
+  // Who is left out of the ask median. Seniority and size are measured
+  // against this cohort, so a caucus is judged against itself.
+  const bestRecent = new Map();
+  const seniorSlugs = new Set();
+  for (const filer of cohort) {
+    const raised = raisedBySlug.get(filer.slug) || {};
+    const completed = Object.entries(raised)
+      .filter(([cy, total]) => Number(cy) < cycle && total > 0);
+    if (completed.length >= LIST_SENIOR_CYCLES) seniorSlugs.add(filer.slug);
+    // The best of the two completed cycles, as the candidate plan measures it.
+    // Only members who still hold the seat set the bar the others are judged by.
+    if (memberNames.has(filer.slug)) {
+      bestRecent.set(filer.slug, Math.max(...[cycle - 2, cycle - 4].map(c => raised[c] || 0)));
+    }
+  }
+  const outsized = outsizedRaisers(bestRecent);
+  const askExcluded = new Map();
+  for (const filer of cohort) {
+    const why = askMedianExclusion(filer,
+      { senior: seniorSlugs.has(filer.slug), outlier: outsized.has(filer.slug) });
+    if (why) askExcluded.set(filer.slug, why);
+  }
+
   const totalWeight = CYCLE_WEIGHTS.reduce((s, w) => s + w, 0);
   const ranked = [];
 
@@ -3675,7 +3764,8 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
       const bucket = perCycle.get(cy);
       bucket.total += amount;
       bucket.committees.push({ filer: byName.get(slug) || slug, slug, amount });
-      gifts.push({ cycle: cy, amount, weight: cycleWeight(cy, cycle), filer: byName.get(slug) || slug });
+      gifts.push({ cycle: cy, amount, weight: cycleWeight(cy, cycle), filer: byName.get(slug) || slug,
+                   excluded: askExcluded.get(slug) || null });
     }
     if (perCycle.size < LIST_MIN_CYCLES) continue;
 
@@ -3695,9 +3785,15 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
                 + LIST_WEIGHTS.breadth * curve(breadth, LIST_BREADTH_FULL)
                 + LIST_WEIGHTS.magnitude * curve(magnitude, LIST_MAGNITUDE_FULL);
 
-    const ask = weightedMedian(gifts);
-    const askLow = weightedPercentile(gifts, 0.25);
-    const askHigh = weightedPercentile(gifts, 0.75);
+    // The ask is what this donor gives an ordinary member: leaders and
+    // outsized veterans are out of the median. A donor who gives nobody else
+    // falls back to its whole history rather than losing an ask, and the row
+    // records that it did.
+    const ordinary = gifts.filter(g => !g.excluded);
+    const askFrom = ordinary.length ? ordinary : gifts;
+    const ask = weightedMedian(askFrom);
+    const askLow = weightedPercentile(askFrom, 0.25);
+    const askHigh = weightedPercentile(askFrom, 0.75);
     const campaigns = new Set([...donor.gifts.keys()].map(s => s.split("|")[0]));
     const cyclesGiven = [...perCycle.keys()].sort((a, b) => b - a);
     ranked.push({
@@ -3707,6 +3803,8 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
       // The spread behind the ask, kept for the flat sheet; the call list
       // itself quotes one number.
       ask_low: Math.round(askLow), ask_high: Math.round(askHigh),
+      ask_from: askFrom.length, ask_set_aside: gifts.length - ordinary.length,
+      ask_all_leaders: !ordinary.length && gifts.length > 0,
       score: Math.round(score * 10) / 10,
       consistency, breadth, magnitude,
       cycles_given: perCycle.size,
@@ -3822,10 +3920,9 @@ function givingParts(row, cycle) {
   const band = (row.per_cycle || []).find(c => c.cycle === cycle);
   if (!band || !band.recipients.length) return null;
   const names = band.recipients.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
-  // A client from the tranche below has no ask, and the giving column is the
-  // only place it appears — so it says so, rather than leaving the reader to
-  // wonder why there is no number for it.
-  return { donor: row.donor, rest: `${row.context ? " (no ask)" : ""}: ${names}` };
+  // Clients from the tranche below read the same as the rest here; the donor
+  // roster is where their having no ask is said.
+  return { donor: row.donor, rest: `: ${names}` };
 }
 
 /** Every client whose giving belongs in a lobbyist's columns, asked or not. */
@@ -4084,8 +4181,8 @@ function renderChamberRows() {
             esc(g.context.map(r => r.donor).join("; "))}</div>` : "");
     const giving = cy => groupGivingRows(g).map(r => {
       const parts = givingParts(r, cy);
-      return parts ? `<div class="list-giving${r.context ? " is-context" : ""}"><strong>${
-        esc(parts.donor)}</strong>${esc(parts.rest)}</div>` : "";
+      return parts ? `<div class="list-giving"><strong>${esc(parts.donor)}</strong>${
+        esc(parts.rest)}</div>` : "";
     }).join("");
     return `<tr class="list-row">
       <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
@@ -4188,6 +4285,9 @@ function chamberListRows(built) {
       "Suggested Ask": r.ask,
       "Ask Low": r.ask_low,
       "Ask High": r.ask_high,
+      "Ask From": r.ask_from,
+      "Leaders Set Aside": r.ask_set_aside,
+      "Ask Note": r.ask_all_leaders ? "gives only leaders — priced on all of its giving" : "",
       "Lobbyist": l ? (planContact(l).name || l.name) : "",
       "Tier": l ? hit.group.tier.label : "",
       "Category": r.book_type || "",
@@ -4236,6 +4336,15 @@ function chamberMethodRows(built) {
         + `checked, ${fmtNum(built.dropped.people)} individuals and candidate families were dropped and `
         + `${fmtNum(built.dropped.unresolved)} had no resolved identity to read a category from. `
         + `A donor must also have given in at least ${LIST_MIN_CYCLES} cycles in the window.` },
+    { Item: "Who sets the ask", Value: "ordinary members",
+      Detail: "The median leaves out giving to the Speaker, the Senate President, the Majority and "
+        + "Minority Leaders and the Ways and Means Co-Chairs, and to a senior member who both holds a "
+        + "leadership post or a committee gavel and raises far above the rest of the caucus (above "
+        + `Q3 + 1.5 × IQR of what its members raised in the two completed cycles; senior means `
+        + `${LIST_SENIOR_CYCLES} or more completed cycles of giving). They are given money on a scale a `
+        + "first call will not match. They keep their place in the giving columns and still count "
+        + "toward a donor's breadth, consistency and size — only the median leaves them out. A donor "
+        + "that gives nobody else is priced on its whole history, and its row says so." },
     { Item: "Clients with no ask", Value: `ranked ${LIST_SIZE + 1}–${LIST_CONTEXT_SIZE}`,
       Detail: `A lobbyist already on the list may also carry donors from the tranche below the top `
         + `${LIST_SIZE}. Those appear in the giving columns marked "(no ask)" and in the donor roster, `

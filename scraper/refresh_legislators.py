@@ -34,13 +34,26 @@ def parse_members(html, chamber):
     return sorted(names)
 
 
+# OLIS lists 34 chairs and 62 co-chairs, and a co-chairship is mostly a Ways
+# and Means thing: the full committee has two, and so does every one of its
+# subcommittees and the Emergency Board's. Counting those as committee chairs
+# put Emerson Levy and Paul Evans in the roster as chairs of Natural Resources
+# and Public Safety, when what they co-chair is a Ways and Means subcommittee.
+#
+# So a co-chairship counts only for the full Ways and Means, whose co-chairs
+# really do sit alongside the Speaker and the Majority Leader. Every other
+# co-chairship is left out.
+FULL_WAYS_AND_MEANS = 'JWM'
+
+
 def parse_chairs(html):
     members = {}
     soup = BeautifulSoup(html, 'html.parser')
     for li in soup.select('ul.no-list-style > li'):
         text = re.sub(r'\s+', ' ', li.get_text(' ', strip=True))
         link = li.find('a')
-        if not link or not re.search(r' - (?:Co-)?Chair$', text):
+        role = re.search(r' - (Co-)?Chair$', text)
+        if not link or not role:
             continue
         label = link.get_text(' ', strip=True)
         match = re.match(r'^(Representative|Senator|House Majority Leader|Senate Majority Leader|Speaker|President)\s+(.+)$', label)
@@ -50,6 +63,13 @@ def parse_chairs(html):
         heading = li.parent.parent.find('strong')
         if not heading:
             raise ValueError('Committee heading missing')
+        heading_link = heading.find('a')
+        code = ''
+        if heading_link:
+            code_match = re.search(r'/Committees/([A-Za-z0-9]+)/', heading_link.get('href') or '')
+            code = code_match[1] if code_match else ''
+        if role[1] and code != FULL_WAYS_AND_MEANS:
+            continue                      # a co-chair of anything else is not a chair
         name = match[2].strip()
         members.setdefault((chamber, name), set()).add(heading.get_text(' ', strip=True))
     if not 15 <= len(members) <= 90:
