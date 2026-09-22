@@ -568,9 +568,13 @@ carries them.
 ### The suggested ask
 
 The recency-weighted median of what that donor gives **one candidate of this
-kind across a whole cycle**, with a range either side: the weighted 25th and
-75th percentile of the same set, written the way the lobby list writes an ask
-— *Oregon Nurses PAC: $1,500–$2,500*.
+kind across a whole cycle**, rounded to the nearest **$500** — a call list
+asks for round numbers. Nothing rounds to nothing: a donor worth listing is
+worth asking, so the smallest ask is one step.
+
+A lobbyist's own ask is their clients' asks **added up**. Both are already
+multiples of $500, so the single figure and the breakdown beside it can never
+disagree.
 
 Contributions to the same candidate inside a cycle are added up first, so a
 $1,000 primary cheque and a $1,000 general cheque read as one $2,000
@@ -587,11 +591,15 @@ so a candidate reads down the *Suggested ask(s)* column and makes the calls.
 
 | Column | What is in it |
 |---|---|
-| **Tier** | Partner first, then Tier 1–4 |
+| **Tier** | Tier 1–4, all computed |
 | **Who to call** | portrait, name, firm and contact details, and anyone else attached to those donors |
-| **Suggested ask(s)** | one line per donor — *donor: $low–$high* — and the total |
+| **Suggested ask ⟨cycle⟩** | one number: everything this lobbyist's clients are worth |
+| **…by client** | that number broken out — *donor: $2,500*, one line each |
 | **Donors** | the donors this lobbyist carries, as a list |
-| **⟨cycle⟩ giving** | one line per donor: *donor: $20,000 Fahey, $15,000 Nosse …*, for each of the three most recent cycles |
+| **⟨cycle⟩ giving** | one line per donor: *donor: $20,000 Fahey, $15,000 Levy E …*, for each of the three most recent cycles |
+
+Donor names are **bold** in the ask breakdown and the giving columns, so a
+column of them can be read down rather than across.
 
 A donor appears under **one** lobbyist, chosen exactly as the candidate plan
 chooses: an admin's filing at `/admin/lobbyists` first, then a link marked
@@ -600,11 +608,34 @@ match. Everyone else attached to the donor is listed as *also*. Donors with
 nobody on file gather in a row at the bottom, and the toggles above the table
 hide unreviewed matches or that row.
 
-**Tier** uses the candidate plan's rule — `6 × donors carried` (max 30) +
-`2 × like candidates their donors support` (max 30) + `what those donors gave
-them ÷ 5,000` (max 20) — minus the two bonuses that need a single committee to
-have given to, which a chamber list does not have. **PARTNER** is still set by
-hand per chamber and party and is never computed.
+### Who the giving history names
+
+The giving columns name **only members who currently hold the seat**, checked
+against the chamber roster in `docs/assets/current_legislators.json`. Money
+given to someone who lost or retired is no guide to who to ring now — Brian
+Clem and RJ Navarro were turning up in call lists years after leaving.
+
+That giving still counts toward the donor's ask: what it gave a member of this
+chamber is evidence of what it gives a candidate of this kind, whoever holds
+the seat today. It is the *history column* that is restricted to people you
+can actually call.
+
+Candidates read as a **surname** — *Fahey*, *Nosse* — and as a surname plus a
+first initial where the chamber seats two of them. Bobby Levy and Emerson Levy
+both sit in the House, so both read *Levy B* and *Levy E*. The collision is
+detected from the roster, not hand-maintained.
+
+### Tier
+
+`6 × donors carried` (max 30) + `2 × like candidates their donors support`
+(max 30) + `what those donors gave them ÷ 5,000` (max 20) — the candidate
+plan's rule minus the two bonuses that need a single committee to have given
+to, which a chamber list does not have.
+
+There is **no PARTNER** here. A standing relationship with one caucus says
+nothing about a list that *is* the whole caucus, so everyone is scored and
+lands on the tier their book earns. PARTNER remains in the candidate plan,
+where it means what it says.
 
 ### The score (0–100)
 
@@ -657,11 +688,16 @@ given, benchmarks against comparable seats, or applies the first-time 50% cap.
 ### The files
 
 The **Excel** file is the lobby list, column for column: tier, portrait, first
-and last name, the asks, the donors, a column of giving per cycle, then how to
-reach them. Headers frozen, the identity columns frozen at the left, partners
-and Tier 1 shaded, one row per lobbyist with the portrait drawn into it. Built
-with ExcelJS — the community SheetJS build cannot write frozen panes, fills or
-embedded images.
+and last name, the single ask, the ask by client, the donors, a column of
+giving per cycle, then how to reach them. Headers frozen, the identity columns
+frozen at the left, Tier 1 shaded, one row per lobbyist with the portrait
+drawn into it, donor names bold inside the multi-line cells. Built with
+ExcelJS — the community SheetJS build cannot write frozen panes, fills, rich
+text or embedded images.
+
+The writer takes its column numbers from its own header labels rather than
+counting them by hand; counting them by hand put the bolded donor lists one
+column to the left, over the ask and over Donors.
 
 Alongside it: a **donors** sheet, one flat row per donor for pivoting, and
 **How these were set**. **Excel — all four lists** builds House D, House R,
