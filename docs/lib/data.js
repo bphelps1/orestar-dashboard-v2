@@ -52,6 +52,33 @@ const DL = (() => {
     return detail;
   }
 
+  /**
+   * Per-year donor tables for many filers at once.
+   *
+   * A whole chamber is 200–300 committees, and a filer_detail blob carries a
+   * timeline, payees and contributor breakdowns none of which a donor roll-up
+   * needs. Selecting the one jsonb path keeps a chamber near a megabyte on the
+   * wire instead of forty. Returns Map<slug, {year: [donor rows]}>.
+   */
+  async function getFilerDonorYears(slugs, { chunk = 20, concurrency = 6 } = {}) {
+    const sb = await getSupabase();
+    const pending = [];
+    for (let i = 0; i < slugs.length; i += chunk) pending.push(slugs.slice(i, i + chunk));
+    const out = new Map();
+    await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, async () => {
+      while (pending.length) {
+        const part = pending.shift();
+        const { data, error } = await sb
+          .from("filer_detail")
+          .select("slug,detail->top_donors_by_year")
+          .in("slug", part);
+        if (error) throw new Error(`Failed to load donor history: ${error.message}`);
+        for (const row of data || []) out.set(row.slug, row.top_donors_by_year || {});
+      }
+    }));
+    return out;
+  }
+
   /** Rank donors using inclusive transaction dates, rather than calendar totals. */
   function getDonors({ start = null, end = null, filerIds = null } = {}) {
     const ids = filerIds === null ? null : [...new Set(filerIds
@@ -78,5 +105,5 @@ const DL = (() => {
     return donorRequests.get(key);
   }
 
-  return { getBlob, getFilerDetail, getDonors };
+  return { getBlob, getFilerDetail, getFilerDonorYears, getDonors };
 })();

@@ -3,9 +3,73 @@
 A reference for what the recommendation engine does, what every weight is, and
 where each number comes from. Source: [`docs/recommend.js`](recommend.js).
 
-The engine answers one question: **given a committee, which donors should it
-ask, and for how much?** It never invents donors — every suggestion is someone
-who already gave to a *comparable* committee.
+The engine answers two questions, one per mode:
+
+- **For a candidate** — given a committee, which donors should it ask, and for
+  how much? It never invents donors: every suggestion is someone who already
+  gave to a *comparable* committee.
+- **[Top donors by chamber & party](#top-donors-by-chamber--party)** — who
+  gives to candidates of this kind at all, and how much does one of them get?
+  A standing call list, with no seat, margin or existing relationship in it.
+
+Everything below describes the candidate mode until the chamber-and-party
+section.
+
+---
+
+## Recency — an ask is argued from what a donor does now
+
+A gift is evidence of what a donor will give **today** only while the
+relationship it describes still holds. Oregon Nurses gave Susan McLain
+$25,000 in the 2013–14 cycle and $1,000–$2,000 in each of the last three;
+taking a comparable's lifetime maximum asked every candidate for $25,000 on
+the strength of a relationship that had ended a decade earlier.
+
+Each comparable committee therefore contributes **one** benchmark gift, chosen
+by window:
+
+| Window | Cycles | Which gift | Why |
+|---|---|---|---|
+| **Recent** | the two completed cycles before this one (`RECENT_BENCHMARK_CYCLES`) | the **larger** of them | both describe a live relationship, so the larger is what the donor is good for |
+| **Stale** | up to five cycles further back (`STALE_BENCHMARK_CYCLES`) | the **most recent** | the last thing known about a relationship that has lapsed — reaching back for a maximum is how one decade-old gift priced every ask |
+| Older | beyond that | none | history, shown on the row but never a benchmark |
+
+The cycle being planned is deliberately excluded: a peer's part-cycle total is
+not a benchmark. This is the window the engine already used for members with
+limited incumbent history, now applied to everyone.
+
+Recency is applied **before** seat closeness. A gift counts only while it is
+current; among current gifts, those given in seats about as close as this one
+set the number. When every gift a donor has to a comparable is stale, the ask
+is still priced on them and the row says *"Nothing in 2021–2022 and 2023–2024
+— benchmarked on older giving instead."*
+
+Where a figure blends many gifts rather than choosing one — the generic asks
+in the chamber list — the graded form of the same window applies:
+`CYCLE_WEIGHTS = [1, 1, 1, 0.5, 0.25, 0.1]`, indexed by cycles ago, with the
+median taken against those weights.
+
+## Every ask is a blend, and the blend is shown
+
+A comparable's giving **pulls** an ask toward it; it never replaces it.
+
+The same-tier leadership reference used to be assigned to the target outright,
+so a single peer's gift became the whole ask: a donor giving this committee
+$2,000 a cycle was asked for $25,000 because it had once given another member
+of the same tier that much. That reference is now one candidate among others,
+and every uplifted ask is a stated blend of the donor's own giving here with
+whichever reference is larger. The donor row carries the arithmetic:
+
+```
+Ask = 95% × $2,100 (own giving here, +5%)
+    +  5% × $20,000 (Friends of Rob Nosse, 2023–2024)
+    = $2,995 → $3,000 rounded
+```
+
+The weight comes from the existing inverse-gap rule — a small gap means the
+comparable amount is realistic for this donor, a large one means the
+relationship is not there — so an ask always sits between what the donor
+actually does and what the evidence suggests is possible.
 
 ---
 
@@ -138,14 +202,16 @@ Prospects whose computed ask lands **below $500** are dropped from the list.
 
 ## Step 5 — The target ask
 
-Start from what this donor gave to comparable committees:
+Start from what this donor gave to comparable committees — recently:
 
 ```
-peers = their gifts to seats whose last general finished within N points
-        of this one  (N widens 5 → 10 → 20 until 3 gifts qualify)
-base  = midpoint(median, 75th percentile) of peers   ← all their giving if
-                                                       too few peer gifts
-ask   = min(base, largest single gift)   ← never above what they have ever given
+evidence = one gift per comparable committee, chosen by the recency window
+           above (stale gifts only when nothing current exists, and flagged)
+peers    = the evidence given in seats whose last general finished within N
+           points of this one  (N widens 5 → 10 → 20 until 3 gifts qualify)
+base     = midpoint(median, 75th percentile) of peers   ← all the evidence if
+                                                          too few peer gifts
+ask      = min(base, largest single gift)   ← never above what they have given
 ```
 
 ### First-time asks
@@ -336,6 +402,50 @@ the Call List and flat export include a clearly labeled additional lobbyist ask
 so target totals reconcile. Searching a client retains the whole matching group
 and its budget. Unattributed donors retain their individual asks.
 
+### The fundraising ladder — which comparables get columns
+
+The export's earlier-cycle columns exist to answer *what does this donor give
+someone like my candidate?* Filling all five with the biggest recipients
+answers a different question — it lists the five biggest fundraisers, the same
+handful of leaders on every plan, and a back-bencher's sheet ends up
+benchmarked entirely against the Speaker.
+
+The columns span the ladder instead: **one candidate per rung**.
+
+| Rung | Who is on it | How it is decided |
+|---|---|---|
+| 1 | **Caucus leadership** — Speaker, Senate President, Majority Leader | leadership tier 1 or 2 |
+| 2 | **Senior safe-seat** — top of the pack, no election pressure, several cycles in | safe seat, top third of career fundraising |
+| 3 | **Established mid** — middle of the pack in a seat that is not close | safe seat, middle third |
+| 4 | **Competitive seat** — raising under election pressure | last general finished inside 20 points |
+| 5 | **Back bench** — no leadership, no close race, least raised | safe seat, bottom third, no leadership |
+
+Two things about where the rungs come from:
+
+- **The pool is the whole chamber, not the comparables.** Comparables are
+  deliberately *alike* — a back-bencher's comparables hold no Speaker, so a
+  plan built from them could never show what a donor gives a Speaker, which is
+  exactly the comparison the columns exist to make. The ladder is every
+  committee of the target's chamber and party still standing for election
+  (`election` year ≥ the previous cycle), minus the target itself. The top few
+  raisers on each rung have their per-year donor tables loaded on top of the
+  comparables — the one jsonb path, not the whole blob.
+- **"How much they raise" is career total**, the only per-committee figure the
+  index carries. It blends how big a fundraiser someone is with how long they
+  have been one, which is what the rungs describe — a long-serving chair
+  sitting above a first-term member in the same kind of seat.
+
+**Committee chairmanships are not in ORESTAR**, and neither is legislative
+tenure, so a long-serving chair in a safe seat can read as rung 3 rather than
+rung 2. Pin a committee where it belongs with an `archetype` admin tag on its
+slug (value `1`–`5`, in `admin_tags`); a pin always wins. The **How these
+numbers were set** sheet names every rung, the committee chosen for its column
+and the others on it.
+
+Within a rung the column goes to the committee **this plan's donors actually
+gave the most to**, so it holds evidence rather than blanks. A rung with no
+committee gives its slot back to the next-largest recipient.
+
 ### The Excel export
 
 **Lobbyist Plan Excel** is written with ExcelJS rather than the SheetJS build
@@ -444,12 +554,94 @@ resolved identities — and the merges recorded at `/admin/donors` — back. The
 account-balance sweep was missing that step, so a merge survived only until the
 next sweep finished.
 
+## Top donors by chamber & party
+
+The second mode on the Recommend tab. The candidate mode asks *who should this
+candidate call?*; this one asks the question a caucus asks before any candidate
+is in the room: **who gives to House Democrats, and how much does one of them
+get?**
+
+Pick a chamber, a party and a cycle to count back from, and it returns the top
+**125 organizations**, each with a **generic ask**.
+
+### The generic ask
+
+The recency-weighted median of what that donor gives **one candidate of this
+kind across a whole cycle**.
+
+Contributions to the same candidate inside a cycle are added up first, so a
+$1,000 primary cheque and a $1,000 general cheque read as one $2,000
+relationship — which is what you ask for, not two separate $1,000 asks. The
+median is then taken across those relationships, weighted by `CYCLE_WEIGHTS`,
+so a donor's habits now outweigh a cheque it wrote a decade ago. The plain
+median and the largest single relationship sit in the row's detail beside it.
+
+### The score (0–100)
+
+The three things that make a name worth putting on a standing call list, each
+measured through the recency window:
+
+| Component | Points | Measure |
+|---|---|---|
+| **Consistency** | 0 … **40** | the weighted share of the six cycles in the window in which they gave at all |
+| **Breadth** | 0 … **35** | campaigns supported per cycle, weighted; full marks at `LIST_BREADTH_FULL` (35 a cycle) |
+| **Magnitude** | 0 … **25** | put into the chamber per cycle, weighted; full marks at `LIST_MAGNITUDE_FULL` ($150,000 a cycle) |
+
+Breadth and magnitude are logarithmic: the step from 2 campaigns to 6 says far
+more about a donor than the step from 26 to 30.
+
+### Who is on it, and who is not
+
+- **Organizations only.** ORESTAR's own contributor category decides it, never
+  the shape of a name — `Individual`, `Candidate & Immediate Family` and
+  `Candidate's Immediate Family` are dropped, as in the Lobbyist Plan. A donor
+  the resolver never gave an id has no category to read, so it cannot be shown
+  to be an organization and is left out.
+- **At least two cycles** of giving (`LIST_MIN_CYCLES`): one cycle is an event,
+  not a habit.
+- Candidate committees giving to each other are dropped, as everywhere else.
+
+### Where the numbers come from
+
+Every candidate committee of that chamber and party that ever raised at least
+$5,000 (`LIST_MIN_RAISED`) — 230 committees for House Democrats, 86 for Senate
+Democrats — read through `filer_detail`, selecting only the
+`top_donors_by_year` path. A whole chamber is a megabyte or so on the wire
+instead of forty, and the four lists build in seconds against the live
+database with no new tables, views or indexes.
+
+Ranking comes first and contributor categories second. Reading the category
+for all 11,000 donors to a chamber is seventy-odd round trips for a list of
+125, so every donor is scored, then categories are resolved down the ranking,
+300 at a time, until the list is full. In practice the top ~131 donors yield
+all 125 organizations. The **How these were set** sheet reports how many were
+scored, how many were checked, and what was dropped.
+
+### What it is not
+
+No seat, no margin and no relationship with a particular committee is in these
+numbers — that is the point of a generic ask, and the reason the candidate
+mode exists alongside it. Nothing here subtracts what a donor has already
+given, benchmarks against comparable seats, or applies the first-time 50% cap.
+
+### The files
+
+**CSV** and **Excel** for the list on screen, and **Excel — all four lists**,
+which builds House D, House R, Senate D and Senate R for the same cycle into
+one workbook, a sheet each plus a shared *How these were set* sheet.
+
+---
+
 ## What it deliberately does not do
 
 - **No cross-party suggestions** when the target's party is known.
 - **No donor invented from nothing** — every suggestion has a giving history
   with a comparable committee.
 - **No ask above a donor's largest observed gift.**
+- **No ask priced by a relationship that has lapsed** — giving more than five
+  cycles back is history on the row, never a benchmark.
+- **No ask set outright by one comparable's gift** — a reference can only pull
+  an ask toward it, through a blend the row spells out.
 - **No competitiveness multiplier** — seat matching selects the evidence.
   First-time asks have the explicit 50% introductory cap described above.
 - **No primary-margin influence**, by design.
@@ -462,6 +654,10 @@ next sweep finished.
 | Score factors 1–8 | `buildRepeatDonorTargets()` / `scoreDonors()` |
 | Competitiveness bands (comparability and labels) | `MARGIN_BANDS` / `UNOPPOSED` |
 | Peer-margin windows and the 3-gift minimum | `PEER_WINDOWS` / `MIN_PEER_GIFTS` |
+| How far back evidence reaches | `RECENT_BENCHMARK_CYCLES` / `STALE_BENCHMARK_CYCLES` / `CYCLE_WEIGHTS` |
+| Rungs of the fundraising ladder | `FUNDRAISER_LEVELS` / `fundraiserLadder()` |
+| Pin one committee to a rung | `archetype` admin tag on its slug, value 1–5 |
+| The standing list's size, floors and weights | `LIST_SIZE` / `LIST_MIN_*` / `LIST_WEIGHTS` |
 | Lobbyist tier thresholds and weights | `TIER_RULES` / `lobbyistTier()` |
 | The export's sheets and columns | `planSheetAoa()` / `lobbyistSheetRows()` |
 | $500 prospect floor | end of `scoreDonors()` |
