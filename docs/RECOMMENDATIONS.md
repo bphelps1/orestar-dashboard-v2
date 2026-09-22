@@ -318,9 +318,8 @@ name, the rest follow as "also".
 
 ### Tiers
 
-Lobbyists are worked in the order of the 2024 lobby list: **PARTNER → Tier 1 →
-Tier 4**. A tier is a claim about likelihood to give, and rests on what can be
-observed:
+Lobbyists are worked **Tier 1 → Tier 4**. A tier is a claim about likelihood
+to give, and rests entirely on what can be observed:
 
 | Component | Points |
 |---|---|
@@ -334,10 +333,17 @@ Tier 1 ≥ 70 · Tier 2 ≥ 45 · Tier 3 ≥ 20 · Tier 4 below that. The reason
 shows on the row and in the export ("6 donors in this plan · 35 like candidates
 supported ($89,100) · $20,500 to this committee to date").
 
-**PARTNER is never computed.** It is a standing relationship with one caucus,
-set by hand per **chamber and party** — a firm can be a partner of the House
-Democrats and nothing to the Senate Republicans — and it applies only when the
-plan is for that chamber and party.
+**Every lobbyist is scored.** There used to be a hand-set `PARTNER` rank above
+Tier 1 — a standing relationship with one caucus, recorded per chamber and
+party at `/admin/lobbyists`. It has been removed everywhere: from both plans,
+from the admin page and from the exports. A designation that outranks the
+score tells you who someone knows, not what their book is worth to the
+committee in front of you, and the score already says the second thing. Four
+lobbyists carried the label; they now sit at the tier their book earns.
+
+The `lobbyist_partners` table is left in place and is no longer read or
+written. Nothing in the app depends on it, and dropping it would throw away
+the only record of who was designated, so it is dormant rather than deleted.
 
 ### Who is in the plan
 
@@ -526,9 +532,8 @@ lobbyist claims the client, since the list is dated).
   confirm what is shown.
 - **Lobbyists** — every lobbyist with contact details, clients and attributed
   donors. Add a lobbyist or firm not on Capitol Club, add clients, link a donor
-  directly, or mark a donor "not theirs". Each entry also carries its **Partner**
-  standing (House D / House R / Senate D / Senate R) and its **firms**: add a
-  person to a firm, or make them its primary contact, from either side.
+  directly, or mark a donor "not theirs". Each entry also carries its **firms**:
+  add a person to a firm, or make them its primary contact, from either side.
   A contact field edited here is **pinned** — the weekly Capitol Club refresh
   leaves it alone until *Revert to Capitol Club* hands it back.
 - **Donors** — one entry per donor: which lobbyist or **firm** it is filed under
@@ -632,10 +637,9 @@ detected from the roster, not hand-maintained.
 plan's rule minus the two bonuses that need a single committee to have given
 to, which a chamber list does not have.
 
-There is **no PARTNER** here. A standing relationship with one caucus says
-nothing about a list that *is* the whole caucus, so everyone is scored and
-lands on the tier their book earns. PARTNER remains in the candidate plan,
-where it means what it says.
+Every lobbyist is scored; there is no designation above the tiers. (There was
+one, `PARTNER`, and it has been removed from both plans — see
+[Tiers](#tiers).)
 
 ### The score (0–100)
 

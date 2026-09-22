@@ -544,7 +544,6 @@
   display: inline-block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.04em; border-radius: 8px; padding: 2px 7px; white-space: nowrap; cursor: help;
 }
-.plan-tier.is-partner { background: #fde68a; color: #78350f; }
 .plan-tier.is-t1 { background: #dcfce7; color: #166534; }
 .plan-tier.is-t2 { background: var(--color-accent-light); color: var(--color-accent-dark); }
 .plan-tier.is-t3 { background: var(--color-surface-alt); color: var(--color-text-muted); }

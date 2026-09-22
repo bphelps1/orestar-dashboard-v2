@@ -101,31 +101,32 @@ const row = (over = {}) => ({ given: 0, cycles: {}, comp_gifts: [], ...over });
 test("a big book that gives to many like candidates is Tier 1", () => {
   const ctx = context();
   const comps = Array.from({ length: 15 }, (_, i) => ({ filer: `F${i}`, amount: 5000 }));
-  const t = ctx.lobbyistTier([row({ comp_gifts: comps }), row(), row(), row(), row()], false);
+  const t = ctx.lobbyistTier([row({ comp_gifts: comps }), row(), row(), row(), row()]);
   assert.equal(t.label, "Tier 1");
   assert.equal(t.likeComps, 15);
 });
 
 test("one donor and one like candidate lands at the bottom", () => {
   const ctx = context();
-  const t = ctx.lobbyistTier([row({ comp_gifts: [{ filer: "F", amount: 500 }] })], false);
+  const t = ctx.lobbyistTier([row({ comp_gifts: [{ filer: "F", amount: 500 }] })]);
   assert.equal(t.label, "Tier 4");
 });
 
 test("a prior gift to this committee moves a thin book up", () => {
   const ctx = context();
   const comps = [{ filer: "A", amount: 1000 }, { filer: "B", amount: 1000 }];
-  const cold = ctx.lobbyistTier([row({ comp_gifts: comps })], false);
-  const warm = ctx.lobbyistTier([row({ comp_gifts: comps, cycles: { 2024: 2500 }, given: 500 })], false);
+  const cold = ctx.lobbyistTier([row({ comp_gifts: comps })]);
+  const warm = ctx.lobbyistTier([row({ comp_gifts: comps, cycles: { 2024: 2500 }, given: 500 })]);
   assert.ok(warm.score > cold.score);
   assert.match(warm.why, /\$2,500 to this committee to date/);
 });
 
-test("a partner outranks every computed tier", () => {
+test("every lobbyist lands on a computed tier", () => {
   const ctx = context();
-  const t = ctx.lobbyistTier([row()], true);
-  assert.equal(t.label, "PARTNER");
-  assert.equal(t.tier, 0);   // sorts above Tier 1
+  // There is no standing designation above the score any more: a thin book
+  // is Tier 4 whoever holds it.
+  assert.equal(ctx.lobbyistTier([row()]).label, "Tier 4");
+  assert.equal(ctx.lobbyistTier([row()]).tier, 4);
 });
 
 // ── The exported plan sheet ────────────────────────────────────────────────
@@ -144,7 +145,7 @@ function planFixture() {
   });
   const groups = [{
     lobbyist: { lobbyist_id: 1, name: "Amanda Dalton", kind: "person", email: "a@d.com", phone: "503-000-0000" },
-    tier: { label: "Tier 1", why: "2 donors in this plan" }, partner: false,
+    tier: { label: "Tier 1", why: "2 donors in this plan" },
     rows: [
       { donor: "Grocery PAC", donor_key: "grocery pac", type: "Donor Target", target: 1100, given: 500,
         cycles: { 2026: 500, 2024: 1000 }, contacts: [], attribution: null, also: [] },
@@ -226,7 +227,7 @@ test("only the five comparables this plan's donors gave most to get columns", ()
   const many = new Map();
   for (let i = 0; i < 8; i++) many.set(`F${i}`, { 2024: 1000 * (i + 1) });
   ctx.window._compCycles = new Map([["d", many]]);
-  const groups = [{ lobbyist: null, tier: { label: "", why: "" }, partner: false,
+  const groups = [{ lobbyist: null, tier: { label: "", why: "" },
                     rows: [{ donor: "d", donor_key: "d", type: "Donor Target", target: 0, given: 0,
                              cycles: {}, contacts: [], attribution: null, also: [] }] }];
   const { comps } = ctx.planCycleColumns(groups, 2026);

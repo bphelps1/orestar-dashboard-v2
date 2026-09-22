@@ -347,7 +347,7 @@ async function runRecommendations() {
 
   const cycle = parseInt(document.getElementById("cycle-select").value);
   const years = cycleYears(cycle).map(String);
-  window._targetFiler = filer;   // chamber/party for partner designations
+  window._targetFiler = filer;   // chamber/party for comparable selection
 
   document.getElementById("run-btn").disabled = true;
   showStatus("Finding comparable fundraisers…", "loading");
@@ -2108,7 +2108,7 @@ function seatBenchmarkCard(targetSeat, ctx, cycleContributions) {
 // ── Lobbyist tiers ─────────────────────────────────────────────────────────
 //
 // The fundraising sheets rank lobbyists before they are called: the 2024 lobby
-// list is worked Partner → Tier 1 → Tier 2 → Tier 3. A tier is a claim about
+// list is worked Tier 1 → Tier 2 → Tier 3 → Tier 4. A tier is a claim about
 // likelihood to give, and it rests on two observable things:
 //
 //   volume   — how many donors in this plan they carry, and how much those
@@ -2117,8 +2117,6 @@ function seatBenchmarkCard(targetSeat, ctx, cycleContributions) {
 //              (the comparables are already filtered to the target's party and
 //              office, so "gave to 9 comparables" means nine like-members).
 //
-// PARTNER is not computed. It is a standing relationship with a caucus, set by
-// an admin per chamber and party at /admin/lobbyists (lobbyist_partners).
 const TIER_RULES = [
   { tier: 1, min: 70, label: "Tier 1" },
   { tier: 2, min: 45, label: "Tier 2" },
@@ -2129,10 +2127,9 @@ const TIER_RULES = [
 /**
  * Score and tier one lobbyist group.
  *   rows        the plan rows filed under them
- *   isPartner   designated a partner of this chamber+party
  * Returns { tier, label, score, donors, likeComps, likeTotal, toCandidate, why }.
  */
-function lobbyistTier(rows, isPartner) {
+function lobbyistTier(rows) {
   const donors = rows.length;
   const likeFilers = new Set();
   let likeTotal = 0, toCandidate = 0, lifetime = 0;
@@ -2156,8 +2153,8 @@ function lobbyistTier(rows, isPartner) {
     lifetime > 0 ? `${fmt$(lifetime)} to this committee to date` : "no prior gift to this committee",
   ];
   return {
-    tier: isPartner ? 0 : rule.tier,
-    label: isPartner ? "PARTNER" : rule.label,
+    tier: rule.tier,
+    label: rule.label,
     score, donors, likeComps: likeFilers.size, likeTotal, toCandidate, lifetime,
     why: why.join(" · "),
   };
@@ -2410,22 +2407,9 @@ function toggleDetail(idx, btn) {
 // donor_lobbyists view (supabase/migrations/016_lobbyists.sql), reviewed at
 // /admin/lobbyists.
 let lobbyistsById = null;
-let partnersById = null;      // lobbyist_id → Set("house|D")
 let planControlsWired = false;
 
 /** Which caucus this plan is for: "house|D" for a House Democrat. */
-function planPartnerKey() {
-  const f = window._targetFiler;
-  if (!f) return null;
-  const chamber = getChamber(f), party = getParty(f);
-  return chamber && party ? `${chamber}|${party}` : null;
-}
-
-function isPartner(lobbyistId) {
-  const key = planPartnerKey();
-  return !!(key && partnersById?.get(lobbyistId)?.has(key));
-}
-
 async function loadLobbyistPlan() {
   const status = document.getElementById("plan-status");
   window._lobbyAttr = null;
@@ -2442,7 +2426,6 @@ async function loadLobbyistPlan() {
     if (!lobbyistsById) {
       lobbyistsById = new Map((await LOB.loadLobbyists()).map(l => [l.lobbyist_id, { ...l, name: String(l.name || "").trim().replace(/\s+/g, " ") }]));
     }
-    if (!partnersById) partnersById = await LOB.loadPartners();
     const rows = planDonorRows()
       .flatMap(r => [...(window._planIdentityIds?.get(r.donor_key) || [r.donor_id])].map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
     const { byKey, contacts, bookTypes, rejected } = await LOB.planAttribution(rows, lobbyistsById);
@@ -2604,11 +2587,10 @@ function planGroups() {
     g.remaining = g.lobbyist ? Math.max(0, g.target - g.given) : g.rows.reduce((s, r) => s + r.remaining, 0);
     g.target_reason = g.lobbyist ? `Lobbyist target: at least last cycle’s eligible baseline of ${fmt$(g.baseline_last_cycle)} across currently attributed clients. ${primaryExclusionNote(window._targetProfile)}${window._targetProfile?._entryBaseline ? ` Giving through ${window._targetProfile._entryBaseline.primaryDate} is excluded from the ask floor; Last Cycle shows actual giving.` : ""}`
       + (g.additional_ask ? ` Includes ${fmt$(g.additional_ask)} beyond individual client asks; client allocation remains open.` : "") : "";
-    g.partner = g.lobbyist ? isPartner(g.lobbyist.lobbyist_id) : false;
-    g.tier = lobbyistTier(g.rows, g.partner);
+    g.tier = lobbyistTier(g.rows);
   }
-  // Partners first, then tier, then the size of the ask — the order the lobby
-  // list is worked. Donors with no lobbyist sit at the bottom.
+  // Tier, then the size of the ask — the order the lobby list is worked.
+  // Donors with no lobbyist sit at the bottom.
   out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (a.tier.tier - b.tier.tier)
     || (b.remaining - a.remaining));
   return out;
@@ -2667,10 +2649,10 @@ function lobbyistHeaderText(l) {
   return `${title}${lead}${more}`;
 }
 
-/** The tier chip in front of a lobbyist: PARTNER, Tier 1 … Tier 4. */
+/** The tier chip in front of a lobbyist: Tier 1 … Tier 4. */
 function tierChip(t) {
   if (!t) return "";
-  const cls = t.tier === 0 ? "is-partner" : `is-t${t.tier}`;
+  const cls = `is-t${t.tier}`;
   return `<span class="plan-tier ${cls}" title="${esc(t.why)}">${esc(t.label)}</span>`;
 }
 
@@ -3031,7 +3013,7 @@ function planSheetAoa(groups, cycle) {
     lead[3] = l ? g.tier.label : "";
     lead[4] = contact.name; lead[5] = contact.email; lead[6] = contact.phone;
     lead[7] = [l ? g.tier.why : "", g.target_reason].filter(Boolean).join(" · ");
-    body.push(lead); bodyRoles.push(l && g.partner ? "lobbyist-partner" : "lobbyist");
+    body.push(lead); bodyRoles.push("lobbyist");
     const groupSums = new Array(width).fill(0);
     for (const r of planExportRows(g)) {
       const row = blank();
@@ -3227,8 +3209,6 @@ function methodSheetRows(groups, cycle) {
     rows.push({ Item: t.label, Value: `score ≥ ${t.min === -Infinity ? "0" : t.min}`,
       Detail: "6 × donors in plan (max 30) + 2 × like candidates supported (max 30) + giving to them ÷ 5,000 (max 20) + 15 if they have given here before + 5 if they have given this cycle" });
   }
-  rows.push({ Item: "PARTNER", Value: "set by an admin",
-    Detail: "A standing relationship with this chamber and party, designated at /admin/lobbyists. Never computed." });
   return rows;
 }
 
@@ -3255,7 +3235,6 @@ async function loadExcelJs() {
 const INK = {
   head: "FF1F3864",        // header band
   headText: "FFFFFFFF",
-  partner: "FFFDE68A",
   tier1: "FFDCFCE7",
   lobbyist: "FFEFF3FA",
   total: "FFD9E2F3",
@@ -3272,9 +3251,7 @@ function styleHeaderCell(cell, { center = false } = {}) {
 }
 
 function tierFill(label) {
-  if (label === "PARTNER") return INK.partner;
-  if (label === "Tier 1") return INK.tier1;
-  return null;
+  return label === "Tier 1" ? INK.tier1 : null;
 }
 
 /** Sheet 1 of the workbook: the call list, styled. */
@@ -3312,7 +3289,7 @@ async function writeCallList(wb, groups, cycle, imageCache = new Map()) {
       row.eachCell({ includeEmpty: true }, cell => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.total } };
       });
-    } else if (role === "lobbyist" || role === "lobbyist-partner") {
+    } else if (role === "lobbyist") {
       row.font = { bold: true };
       const tier = String(row.getCell(5).value || "");
       const fill = tierFill(tier) || INK.lobbyist;
@@ -3325,7 +3302,7 @@ async function writeCallList(wb, groups, cycle, imageCache = new Map()) {
       row.hidden = true;
       row.getCell(4).alignment = { indent: 1 };
     }
-    if (role === "donor" || role === "lobbyist" || role === "lobbyist-partner" || role === "total") {
+    if (role === "donor" || role === "lobbyist" || role === "total") {
       for (let c = moneyFrom + 1; c <= rows[0].length; c++) row.getCell(c).numFmt = MONEY;
       row.getCell(9).alignment = { wrapText: true, vertical: "top" };
     }
@@ -3334,7 +3311,7 @@ async function writeCallList(wb, groups, cycle, imageCache = new Map()) {
   // for reading; it would otherwise be the first thing the eye lands on.
   ws.getColumn(1).hidden = true;
   ws.getColumn(1).width = 24;
-  const headers = roles.flatMap((role,i) => role === "lobbyist" || role === "lobbyist-partner" ? [i+1] : []);
+  const headers = roles.flatMap((role,i) => role === "lobbyist" ? [i+1] : []);
   for (let i = 0; i < headers.length; i++) {
     if (groups[i]?.lobbyist) {
       writeFirmName(ws, groups[i].lobbyist, headers[i], 3);
@@ -3420,7 +3397,7 @@ function writeCover(wb, groups, cycle) {
   ws.addRow([]);
 
   heading("How to read the call list");
-  para("Lobbyists are listed best-prospect first: PARTNER, then Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
+  para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
   para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in. The columns further right show what those same donors gave this candidate and a few comparable candidates in past cycles — that is the case for the ask.");
   para("Individual people are not in this plan. It lists organizations, PACs and businesses only, using ORESTAR's own category for each contributor.");
 
@@ -3845,7 +3822,7 @@ function listLobbyistsFor(row) {
 /**
  * The list, grouped under the lobbyist who carries each donor. Mirrors
  * planGroups(): same ownership preference, same firm handling, same order —
- * partners first, then tier, then the size of the ask.
+ * tier, then the size of the ask.
  */
 function chamberGroups() {
   const built = window._chamberList;
@@ -3883,13 +3860,10 @@ function chamberGroups() {
     // The asks are already round, so their total is too — the single number
     // in the Suggested ask column is exactly the breakdown added up.
     g.ask = g.rows.reduce((s, r) => s + r.ask, 0);
-    // No PARTNER here. A standing relationship with a caucus says nothing
-    // about a list that is the whole caucus, so everyone is scored and lands
-    // on the tier their book earns.
     g.tier = lobbyistTier(g.rows.map(r => ({
       given: 0, cycles: {},
       comp_gifts: r.per_cycle.flatMap(c => c.recipients.map(x => ({ filer: x.filer, amount: x.amount }))),
-    })), false);
+    })));
   }
   out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (a.tier.tier - b.tier.tier) || (b.ask - a.ask));
   return out;
@@ -4180,9 +4154,7 @@ function chamberMethodRows(built) {
     { Item: "Tier", Value: "1–4, all computed",
       Detail: "6 × donors carried (max 30) + 2 × like candidates their donors support (max 30) + what "
         + "those donors gave them ÷ 5,000 (max 20). The candidate plan's two remaining bonuses need a "
-        + "single committee to have given to, so they do not apply here. Nor does PARTNER: a standing "
-        + "relationship with a caucus says nothing about a list that is the whole caucus, so everyone "
-        + "lands on the tier their book earns." },
+        + "single committee to have given to, so they do not apply here." },
     { Item: "Giving history", Value: "sitting members only",
       Detail: "The giving columns name only members who currently hold the seat, checked against the "
         + "chamber roster in docs/assets/current_legislators.json. Money given to someone who lost or "
