@@ -43,6 +43,8 @@ MIGRATIONS = [
     "027_stored_donor_identities.sql",
     "028_donor_identity_label_indexes.sql",
     "029_stored_donor_identity_labels.sql",
+    "030_explore_source_name_indexes.sql",
+    "031_explore_complete_name_search.sql",
 ]
 
 
@@ -80,9 +82,11 @@ def apply(only: str | None = None):
             if row and not row[0]:
                 cur.execute("drop index concurrently public.idx_txn_donor_filer")
             sql = sql.replace("create index if not exists", "create index concurrently if not exists")
-        if name == "028_donor_identity_label_indexes.sql":
+        if name in ("028_donor_identity_label_indexes.sql", "030_explore_source_name_indexes.sql"):
             # Each CONCURRENTLY statement must be its own transaction.
-            for index in ("idx_aliases_identity_label", "idx_donors_identity_label"):
+            indexes = (("idx_aliases_identity_label", "idx_donors_identity_label") if name.startswith("028")
+                       else ("idx_txn_source_filer_trgm", "idx_txn_source_payee_trgm"))
+            for index in indexes:
                 cur.execute("select indisvalid from pg_index where indexrelid=to_regclass(%s)", ("public." + index,))
                 row = cur.fetchone()
                 if row and not row[0]:

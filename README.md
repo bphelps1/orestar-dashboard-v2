@@ -230,3 +230,20 @@ Uncertain matches (80–95% fuzzy confidence) are published to `dashboard_cache(
 ## License
 
 Data is public record from Oregon's Secretary of State. Code is MIT licensed.
+
+
+### Explore source-name search deployment
+
+Apply `030_explore_source_name_indexes.sql` before
+`031_explore_complete_name_search.sql`, then deploy the frontend. Use
+`scraper/db_admin.py apply <filename>` for each: the runner builds the two source
+name trigram indexes concurrently, one statement at a time, and repairs invalid
+indexes left by interrupted builds. Migration 031 searches both recorded and
+canonical names, supplies recorded-name display fallbacks, and expands selected
+donors through their stored merge group. Existing RPC arguments and output columns
+remain compatible. Filtered CSV downloads use the same name and merge filters.
+
+Validation includes a rollback-only database test that copies Daniel Nguyen's
+committee transactions into a private test schema and checks complete, duplicate-free
+pagination. Production search performance should be checked after the indexes are
+built; the test does not create production indexes or deploy either migration.
