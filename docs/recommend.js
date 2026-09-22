@@ -3533,6 +3533,11 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
 // for. The median single check is carried alongside for reference.
 
 const LIST_SIZE = 125;              // the list the user asked for: top 100–125
+// The next tranche down. These are not asked for — they carry no suggested
+// ask — but when a lobbyist already on the list also represents one of them,
+// it belongs in their giving columns: it is part of the conversation you are
+// about to have, even though it is not part of the ask.
+const LIST_CONTEXT_SIZE = 250;
 const LIST_MIN_RAISED = 5000;       // committees below this are paper filings
 const LIST_MIN_CYCLES = 2;          // one cycle is an event, not a habit
 const LIST_LOOKUP_BATCH = 300;      // donors whose category is read at a time
@@ -3731,12 +3736,14 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
   // comes first and categories are resolved down the ranking until the list
   // is full. A donor the resolver never gave an id has no category to read,
   // so it cannot be shown to be an organization and is left out.
-  const rows = [];
+  // Resolve categories down the ranking until both bands are full: the top
+  // LIST_SIZE get an ask, the next tranche is context for whoever carries it.
+  const organizations = [];
   let people = 0, unresolved = 0, examined = 0;
-  for (let i = 0; i < ranked.length && rows.length < LIST_SIZE; i += LIST_LOOKUP_BATCH) {
+  for (let i = 0; i < ranked.length && organizations.length < LIST_CONTEXT_SIZE; i += LIST_LOOKUP_BATCH) {
     const batch = ranked.slice(i, i + LIST_LOOKUP_BATCH);
-    onProgress(`Checking contributor categories — ${fmtNum(rows.length)} organizations of `
-      + `${LIST_SIZE} found in the top ${fmtNum(i + batch.length)}…`);
+    onProgress(`Checking contributor categories — ${fmtNum(organizations.length)} organizations of `
+      + `${LIST_CONTEXT_SIZE} found in the top ${fmtNum(i + batch.length)}…`);
     let bookTypes;
     try {
       bookTypes = await LOB.loadBookTypes(batch.flatMap(r => r.ids));
@@ -3749,13 +3756,16 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
       if (!types.length) { unresolved++; continue; }
       if (types.every(t => PERSON_BOOK_TYPES.has(t))) { people++; continue; }
       row.book_type = types.find(t => !PERSON_BOOK_TYPES.has(t)) || types[0];
-      rows.push(row);                 // row.ids stays: attribution looks donors up by id
-      if (rows.length >= LIST_SIZE) break;
+      row.list_rank = organizations.length + 1;
+      organizations.push(row);        // row.ids stays: attribution looks donors up by id
+      if (organizations.length >= LIST_CONTEXT_SIZE) break;
     }
   }
+  const rows = organizations.slice(0, LIST_SIZE);
+  const context = organizations.slice(LIST_SIZE).map(r => ({ ...r, context: true, ask: 0 }));
 
   const built = {
-    chamber, party, cycle, rows,
+    chamber, party, cycle, rows, context,
     considered: examined, ranked: ranked.length, committees: cohort.length,
     dropped: { people, unresolved },
     generated: new Date().toISOString(),
@@ -3812,7 +3822,15 @@ function givingParts(row, cycle) {
   const band = (row.per_cycle || []).find(c => c.cycle === cycle);
   if (!band || !band.recipients.length) return null;
   const names = band.recipients.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
-  return { donor: row.donor, rest: `: ${names}` };
+  // A client from the tranche below has no ask, and the giving column is the
+  // only place it appears — so it says so, rather than leaving the reader to
+  // wonder why there is no number for it.
+  return { donor: row.donor, rest: `${row.context ? " (no ask)" : ""}: ${names}` };
+}
+
+/** Every client whose giving belongs in a lobbyist's columns, asked or not. */
+function groupGivingRows(group) {
+  return [...group.rows, ...(group.context || [])];
 }
 
 let listControlsWired = false;
@@ -3849,6 +3867,18 @@ function chamberGroups() {
     groups.get(owner.lobbyist_id).rows.push(entry);
   }
   window._listUnattributed = unattributed;
+
+  // A lobbyist already on the list may also carry donors from the tranche
+  // below. Those get no ask and do not move anyone up the order — they ride
+  // along in the giving columns because they are part of the same call.
+  for (const row of built.context || []) {
+    const list = listLobbyistsFor(row);
+    const owner = list[0] ? owningFirm(list[0].lobbyist) : null;
+    if (!owner || !groups.has(owner.lobbyist_id)) continue;
+    const group = groups.get(owner.lobbyist_id);
+    (group.context ||= []).push({ ...row, attribution: list[0], also: [] });
+  }
+
   let out = [...groups.values()];
   const q = (document.getElementById("list-search")?.value || "").trim().toLowerCase();
   if (q) {
@@ -3857,12 +3887,14 @@ function chamberGroups() {
       const members = l ? [firmContacts(l).primary, ...firmContacts(l).others].filter(Boolean) : [];
       const hit = l && [l.name, l.firm, l.affiliation, l.email, ...members.map(m => m.name)]
         .join(" ").toLowerCase().includes(q);
-      return hit || g.rows.some(r => r.donor.toLowerCase().includes(q)) ? g : { ...g, rows: [] };
+      const donorHit = [...g.rows, ...(g.context || [])].some(r => r.donor.toLowerCase().includes(q));
+      return hit || donorHit ? g : { ...g, rows: [] };
     }).filter(g => g.rows.length);
   }
   for (const g of out) {
     g.rows.sort((a, b) => b.ask - a.ask || b.score - a.score);
     g.ask = g.rows.reduce((s, r) => s + r.ask, 0);
+    if (g.context) g.context.sort((a, b) => b.score - a.score);
     // Who to call first is a question about the donors, so it is answered
     // with the score that ranked them: consistency, breadth and size through
     // the recency window. A lobbyist's standing is their clients' added up —
@@ -3887,8 +3919,11 @@ async function loadChamberAttribution(built) {
         .map(l => [l.lobbyist_id, { ...l, name: donorDisplayName(l.name) }]));
     }
     if (typeof LP !== "undefined") LP.load().catch(() => {});
-    const rows = built.rows.flatMap(r => (r.ids || [r.donor_id]).filter(Boolean)
-      .map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
+    // Both bands: the tranche below the top LIST_SIZE needs looking up too,
+    // or no lobbyist can ever be shown to carry one of them.
+    const rows = [...built.rows, ...(built.context || [])]
+      .flatMap(r => (r.ids || [r.donor_id]).filter(Boolean)
+        .map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
     const { byKey } = await LOB.planAttribution(rows, lobbyistsById);
     window._listAttr = byKey;
   } catch (e) {
@@ -4043,11 +4078,14 @@ function renderChamberRows() {
          <div class="plan-contact">Assign these at <a href="/admin/lobbyists">/admin/lobbyists</a></div>`;
     const byClient = g.rows.map(r => `<div class="list-ask"><strong>${esc(r.donor)}</strong>: ${
       fmt$(r.ask)}</div>`).join("");
-    const donors = g.rows.map(r => esc(r.donor)).join("; ");
-    const giving = cy => g.rows.map(r => {
+    const donors = g.rows.map(r => esc(r.donor)).join("; ")
+      + (g.context?.length
+        ? `<div class="list-also-represents">also represents, no ask: ${
+            esc(g.context.map(r => r.donor).join("; "))}</div>` : "");
+    const giving = cy => groupGivingRows(g).map(r => {
       const parts = givingParts(r, cy);
-      return parts ? `<div class="list-giving"><strong>${esc(parts.donor)}</strong>${
-        esc(parts.rest)}</div>` : "";
+      return parts ? `<div class="list-giving${r.context ? " is-context" : ""}"><strong>${
+        esc(parts.donor)}</strong>${esc(parts.rest)}</div>` : "";
     }).join("");
     return `<tr class="list-row">
       <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
@@ -4114,15 +4152,17 @@ function listSheetRows(built, groups) {
       // can bold the donor — a call list is read by eye, down the column.
       rich: { [byClientCol]: g.rows.map(askParts),
               ...Object.fromEntries(cycles.map((c, i) =>
-                [givingFrom + i, g.rows.map(r => givingParts(r, c)).filter(Boolean)])) },
+                [givingFrom + i, groupGivingRows(g).map(r => givingParts(r, c)).filter(Boolean)])) },
       cells: [
         l ? g.tier.label : "",
         "",                                   // the portrait is drawn into this cell
         l ? first : "No lobbyist on file",
         l ? last : "",
         g.rows.map(askLine).join("\n"),
-        g.rows.map(r => r.donor).join("; "),
-        ...cycles.map(c => g.rows.map(r => givingLine(r, c)).filter(Boolean).join("\n")),
+        [g.rows.map(r => r.donor).join("; "),
+         ...(g.context?.length ? [`also represents, no ask: ${g.context.map(r => r.donor).join("; ")}`] : []),
+        ].join("\n"),
+        ...cycles.map(c => groupGivingRows(g).map(r => givingLine(r, c)).filter(Boolean).join("\n")),
         [...new Set(g.rows.flatMap(r => r.also.map(a => a.lobbyist.name)))].join("; "),
         l ? (l.kind === "firm" ? l.name : l.affiliation || l.firm || "") : "",
         contact.email || "",
@@ -4196,6 +4236,11 @@ function chamberMethodRows(built) {
         + `checked, ${fmtNum(built.dropped.people)} individuals and candidate families were dropped and `
         + `${fmtNum(built.dropped.unresolved)} had no resolved identity to read a category from. `
         + `A donor must also have given in at least ${LIST_MIN_CYCLES} cycles in the window.` },
+    { Item: "Clients with no ask", Value: `ranked ${LIST_SIZE + 1}–${LIST_CONTEXT_SIZE}`,
+      Detail: `A lobbyist already on the list may also carry donors from the tranche below the top `
+        + `${LIST_SIZE}. Those appear in the giving columns marked "(no ask)" and in the donor roster, `
+        + `because they are part of the same call — but they carry no suggested ask, and they do not `
+        + `count toward the lobbyist's tier or their place in the order.` },
     { Item: "Who carries a donor", Value: "one lobbyist per donor",
       Detail: "An admin's filing at /admin/lobbyists wins, then a link marked primary, then a confirmed "
         + "link over an unreviewed one, then the stronger match — the same order the candidate plan uses. "
