@@ -41,6 +41,15 @@ jobs:
         with:
           node-version: "20"
 
+      # tests/lobbyist_photos.test.cjs self-skips its Excel case unless ExcelJS
+      # resolves. That case covers the workbook writer — the least-covered and
+      # most fiddly part of the front end — so install it rather than let the
+      # test quietly skip. A registry hiccup must not fail the build: without
+      # the module the test skips exactly as it did before.
+      - name: Install ExcelJS (optional, for the workbook test)
+        continue-on-error: true
+        run: npm install --no-save --no-package-lock --no-audit --no-fund exceljs
+
       - name: Run the front-end tests
         # An explicit glob rather than the directory: tests/ also holds the
         # Python suite, and this should never quietly widen to it.
