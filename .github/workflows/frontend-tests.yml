@@ -1,0 +1,56 @@
+# The docs/*.js unit tests, which nothing ran until now.
+#
+# They are Node's built-in test runner over plain .cjs files — no package.json,
+# no dependencies, no install step. The dashboard is static files served from
+# docs/, so Node is only ever a test harness here, never a build step.
+#
+# These tests read docs/recommend.js and docs/admin/donors.js as text and
+# evaluate slices of them in a vm sandbox, because those files are browser
+# scripts rather than modules. That makes them sensitive to a renamed function
+# or a moved comment banner, which is exactly the drift CI should catch.
+name: Front-end tests
+
+on:
+  pull_request:
+    paths:
+      - "docs/**/*.js"
+      - "tests/*.test.cjs"
+      - ".github/workflows/frontend-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**/*.js"
+      - "tests/*.test.cjs"
+      - ".github/workflows/frontend-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # tests/lobbyist_photos.test.cjs self-skips its Excel case unless ExcelJS
+      # resolves. That case covers the workbook writer — the least-covered and
+      # most fiddly part of the front end — so install it rather than let the
+      # test quietly skip. A registry hiccup must not fail the build: without
+      # the module the test skips exactly as it did before.
+      - name: Install ExcelJS (optional, for the workbook test)
+        continue-on-error: true
+        run: npm install --no-save --no-package-lock --no-audit --no-fund exceljs
+
+      - name: Run the front-end tests
+        # An explicit glob rather than the directory: tests/ also holds the
+        # Python suite, and this should never quietly widen to it.
+        run: node --test tests/*.test.cjs
