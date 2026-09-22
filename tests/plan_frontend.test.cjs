@@ -27,6 +27,7 @@ const peerCode = slice("const PEER_WINDOWS = [", "async function findComparables
 const tierCode = slice("const TIER_RULES = [", "function renderRepeatDonors(");
 const exportCode = slice("/** Contact details for a lobbyist row", "/** Sheet 2: one line per lobbyist");
 const keyCode = slice("/** Oregon cycles run odd→even", "function _getAllYearGifts(");
+const listCode = slice("const LIST_SIZE = 125;", "// ── The standing list on screen");
 
 function context(extra = {}) {
   const ctx = vm.createContext({
@@ -150,7 +151,8 @@ test("the sheet is banded by cycle, with the candidate and its comparables", () 
                    ["This cycle (2025–2026)", "2023–2024", "2021–2022"]);
   assert.equal(nameRow.filter(Boolean)[0], "Friends of A");
   assert.ok(nameRow.includes("Fahey"));
-  assert.deepEqual([...new Set(kindRow.filter(Boolean))], ["Ask", "Given", "Gave"]);
+  assert.deepEqual([...new Set(kindRow.filter(Boolean))],
+                   ["Ask", "Given", "This candidate", "Comparable"]);
   assert.equal(merges.length, 3);          // one per cycle band
   // Roles drive the formatting, so every row must carry one.
   assert.equal(roles.length, rows.length);
@@ -214,7 +216,7 @@ test("only the five comparables this plan's donors gave most to get columns", ()
                     rows: [{ donor: "d", donor_key: "d", type: "Donor Target", target: 0, given: 0,
                              cycles: {}, contacts: [], attribution: null, also: [] }] }];
   const { comps } = ctx.planCycleColumns(groups, 2026);
-  assert.deepEqual(Array.from(comps), ["F7", "F6", "F5", "F4", "F3"]);
+  assert.deepEqual(comps.map(c => c.filer), ["F7", "F6", "F5", "F4", "F3"]);
 });
 
 // ── First-time asks and shared identity ──────────────────────────────────
@@ -355,4 +357,276 @@ test('first-time asks round after the initial-gift adjustment', () => {
  ctx.window._firstGifts=new Map([['a',[{amount:1125},{amount:1125},{amount:1125}]]]);
  const result=ctx.scoreDonors({top_donors_by_year:{}},comps,profiles,['2026'],2026,null).prospects[0];
  assert.equal(result.target_ask,1250);assert.equal(result.remaining_ask,1250);
+});
+
+// ── Recency: an ask is argued from what a donor does now ───────────────────
+//
+// Oregon Nurses gave Susan McLain $25,000 in the 2013–14 cycle and
+// $1,000–$2,000 in each of the last three. Taking a comparable's lifetime
+// maximum asked every candidate for $25,000 on a relationship that had ended.
+const NURSES_TO_MCLAIN = { 2014: 25000, 2016: 7500, 2018: 6000, 2022: 2000, 2024: 2000, 2026: 1000 };
+
+test("a comparable is benchmarked on the recent window, not a lifetime maximum", () => {
+  const ctx = context();
+  const pick = ctx.benchmarkCycle(NURSES_TO_MCLAIN, 2026);
+  assert.deepEqual(pick, { cycle: 2024, amount: 2000, stale: false });
+  assert.equal(Math.max(...Object.values(NURSES_TO_MCLAIN)), 25000);   // the old rule
+});
+
+test("the cycle being planned is not a benchmark for a peer", () => {
+  const ctx = context();
+  // $9,000 in the in-progress cycle is ignored; the window is the two completed ones.
+  assert.equal(ctx.benchmarkCycle({ 2026: 9000, 2024: 1500 }, 2026).cycle, 2024);
+});
+
+test("with nothing recent, older giving stands in and is flagged", () => {
+  const ctx = context();
+  const pick = ctx.benchmarkCycle({ 2018: 6000, 2020: 4000 }, 2026);
+  assert.deepEqual(pick, { cycle: 2020, amount: 4000, stale: true });
+  assert.match(ctx.recencyNote(true, 2026), /Nothing in 2021–2022 and 2023–2024/);
+  assert.match(ctx.recencyNote(false, 2026), /Benchmarked on 2021–2022 and 2023–2024/);
+});
+
+test("giving older than the stale window is history, not evidence", () => {
+  const ctx = context();
+  assert.equal(ctx.benchmarkCycle({ 2012: 9000 }, 2026), null);
+  assert.equal(ctx.cycleWeight(2012, 2026), 0);
+  assert.equal(ctx.cycleWeight(2028, 2026), 0, "a future cycle never prices an ask");
+  assert.deepEqual([2026, 2024, 2022, 2020, 2018, 2016].map(c => ctx.cycleWeight(c, 2026)),
+                   [1, 1, 1, 0.5, 0.25, 0.1]);
+});
+
+test("the weighted median answers what a donor gives now", () => {
+  const ctx = context();
+  // Three large relationships that ended, two small ones that are current.
+  const history = { 2016: 5000, 2018: 5000, 2020: 5000, 2024: 1000, 2026: 1000 };
+  const entries = Object.entries(history)
+    .map(([c, amount]) => ({ amount, weight: ctx.cycleWeight(Number(c), 2026) }));
+  assert.equal(ctx.weightedMedian(entries), 1000);
+  assert.equal(ctx.weightedMedian(entries.map(e => ({ ...e, weight: 1 }))), 5000,
+               "unweighted, the giving that stopped still sets the number");
+  assert.equal(ctx.weightedMedian([]), 0);
+});
+
+test("the stale fallback takes the last thing known, not the biggest", () => {
+  const ctx = context();
+  // Reaching back for a maximum is how one decade-old gift priced every ask.
+  assert.deepEqual(ctx.benchmarkCycle({ 2016: 25000, 2020: 4000 }, 2026),
+                   { cycle: 2020, amount: 4000, stale: true });
+});
+
+// ── Every ask is a blend ───────────────────────────────────────────────────
+function blendFixture(compCycles, { tier = 3 } = {}) {
+  const ctx = scoringContext();
+  const NAME = "Some PAC";
+  const rows = perCycle => Object.fromEntries(Object.entries(perCycle)
+    .map(([c, amount]) => [c, [{ name: NAME, donor_id: "d1", total: amount }]]));
+  const target = { top_donors_by_year: rows({ 2022: 2000, 2024: 2000, 2026: 2000 }),
+                   _leadershipTier: tier };
+  const comp = { top_donors_by_year: rows(compCycles), _leadershipTier: tier };
+  const comparables = [{ name: "Peer", slug: "peer", leadership_tier: tier,
+                         committee_type: "Candidate Committee",
+                         seat: { band: "unopposed", margin_pts: null } }];
+  const seat = { band: "unopposed", margin_pts: null, year: 2024 };
+  return ctx.buildRepeatDonorTargets(target, comparables, [comp], ["2025", "2026"], 2026, seat);
+}
+
+test("a same-tier peer's gift no longer becomes the whole ask", () => {
+  // The real shape of the Kropf case: a peer that once received $25,000.
+  const { targets } = blendFixture(NURSES_TO_MCLAIN);
+  assert.equal(targets.length, 1);
+  const row = targets[0];
+  assert.equal(row.comp_max, 2000, "the 2014 gift is history, not a benchmark");
+  assert.ok(row.target < 3000, `ask was ${row.target}`);
+  assert.ok(row.factors.some(f => f.startsWith("Benchmarked on 2021–2022 and 2023–2024")));
+});
+
+test("the row spells out the blend that produced the ask", () => {
+  const { targets } = blendFixture({ 2022: 20000, 2024: 20000 });
+  const row = targets[0];
+  const blend = row.factors.find(f => f.startsWith("Ask = "));
+  assert.ok(blend, `no blend line in ${JSON.stringify(row.factors)}`);
+  // Both sides, both weights and the result, in one sentence.
+  assert.match(blend, /Ask = \d+% × \$[\d,]+ \(own giving here, \+5%\) \+ \d+% × \$[\d,]+/);
+  assert.match(blend, /= \$[\d,]+ → \$[\d,]+/);
+  assert.ok(row.target > 2100 && row.target < 20000,
+            `a blend must sit between history and reference, got ${row.target}`);
+  assert.equal(row.same_tier_ref, 20000);
+});
+
+test("stale comparable giving still prices an ask, and says so", () => {
+  const { targets } = blendFixture({ 2016: 7500, 2018: 6000 });
+  assert.equal(targets[0].benchmark_stale, true);
+  assert.ok(targets[0].factors.some(f => f.startsWith("Nothing in 2021–2022 and 2023–2024")));
+});
+
+// ── The fundraising ladder ─────────────────────────────────────────────────
+//
+// The columns must span the ladder rather than repeat the five biggest
+// fundraisers: a back-bencher's sheet is useless benchmarked only on leaders.
+function ladderContext(extra = {}) {
+  const seat = pts => ({ band: pts < 10 ? "competitive" : pts < 20 ? "lean" : "safe",
+                         margin_pts: pts, year: 2024 });
+  const rung = (slug, name, tier, total, over = {}) => ({
+    slug, name, committee_type: "Candidate Committee", office: "State Representative",
+    party: "Democrat", total_in: total, leadership_tier: tier,
+    office_district: `State Representative, ${slug} District`,
+    election: "2026 Primary Election", ...over,
+  });
+  const index = [
+    rung("target", "Target", 0, 600000),
+    rung("speaker", "Speaker", 1, 2000000),
+    rung("senior", "Senior", 0, 1700000),
+    rung("middle", "Middle", 0, 700000),
+    rung("swing", "Swing", 0, 750000),
+    rung("bench", "Bench", 0, 200000),
+    rung("gone", "Gone", 0, 900000, { election: "2014 General Election" }),
+    rung("other", "Other Party", 0, 900000, { party: "Republican" }),
+  ];
+  const ctx = context({ filerIndex: index, adminTags: {}, LIST_MIN_RAISED: 5000, ...extra });
+  // peerCode declares `let raceMarginIndex`, a lexical binding the sandbox
+  // object cannot reach — it has to be assigned from inside the context.
+  ctx.__margins = index.map(f =>
+    [`State Representative|${f.slug} District`, seat(f.slug === "swing" ? 5 : 60)]);
+  vm.runInContext("raceMarginIndex = new Map(__margins);", ctx);
+  return { ctx, index, target: index[0] };
+}
+
+test("every rung of the chamber's ladder gets a place, the target does not", () => {
+  const { ctx, target } = ladderContext();
+  const ladder = ctx.fundraiserLadder(target, 2026);
+  assert.deepEqual(["Speaker", "Senior", "Middle", "Swing", "Bench"].map(n => ladder.get(n).level),
+                   [1, 2, 3, 4, 5]);
+  assert.equal(ladder.has("Target"), false, "the plan already has its own column");
+  assert.equal(ladder.has("Gone"), false, "a committee that stopped running is not a benchmark");
+  assert.equal(ladder.has("Other Party"), false);
+  assert.equal(ctx.ladderCandidates(ladder).length, 5);
+});
+
+test("an archetype tag pins a committee to a rung", () => {
+  const { ctx, target } = ladderContext();
+  ctx.adminTags = { bench: [{ tag: "archetype", value: "2" }] };
+  const pinned = ctx.fundraiserLadder(target, 2026).get("Bench");
+  assert.equal(pinned.level, 2);
+  assert.equal(pinned.pinned, true);
+});
+
+test("one column per rung, named for the rung it stands for", () => {
+  const { ctx, target } = ladderContext();
+  const ladder = ctx.fundraiserLadder(target, 2026);
+  ctx.window._fundraiserLevels = ladder;
+  ctx.window._compCycles = new Map([["d", new Map([...ladder.values()].map(s =>
+    [s.name, { 2024: 1000 }]))]]);
+  const { comps } = ctx.planCycleColumns([{ rows: [{ donor_key: "d" }] }], 2026);
+  assert.deepEqual(comps.map(c => c.level), [1, 2, 3, 4, 5]);
+  assert.deepEqual(comps.map(c => c.filer), ["Speaker", "Senior", "Middle", "Swing", "Bench"]);
+  assert.equal(comps[0].rung, "Caucus leadership");
+});
+
+test("a ladder committee's giving folds into the index the columns read", () => {
+  const { ctx, target } = ladderContext();
+  const ladder = ctx.fundraiserLadder(target, 2026);
+  ctx.window._compCycles = new Map();
+  ctx.indexLadderGiving(
+    new Map([["speaker", { 2023: [{ name: "Big PAC", donor_id: "d9", total: 5000 }],
+                           2024: [{ name: "Big PAC", donor_id: "d9", total: 1500 }] }]]), ladder);
+  assert.deepEqual(ctx.window._compCycles.get("d9").get("Speaker"), { 2024: 6500 });
+});
+
+// ── The standing donor list, by chamber and party ──────────────────────────
+//
+// Not "who should this candidate call?" but "who gives to candidates of this
+// kind, and how much does one of them get?" — so the unit is a candidate-cycle
+// relationship, and old money counts for less.
+function listContext(extra = {}) {
+  const ctx = context({
+    fmtNum: n => String(n),
+    cycleYears: c => [c - 1, c],
+    isDonorExcluded: () => false,
+    PERSON_BOOK_TYPES: new Set(["Individual", "Candidate & Immediate Family",
+                                "Candidate's Immediate Family"]),
+    filerIndex: [], adminTags: {}, DL: {}, LOB: {},
+    ...extra,
+  });
+  vm.runInContext(listCode, ctx);        // context() already ran the rest
+  return ctx;
+}
+
+function chamberFixture() {
+  const committee = (slug, name, party, total_in) => ({
+    slug, name, committee_type: "Candidate Committee",
+    office: "State Representative", party, total_in,
+  });
+  const rows = donors => donors.map(([name, donor_id, total]) => ({ name, donor_id, total }));
+  const history = {
+    a: { 2022: rows([["Big PAC", "d1", 2000], ["Jane Doe", "d2", 1500], ["Once PAC", "d3", 9000]]),
+         2024: rows([["Big PAC", "d1", 2000]]),
+         // Two cheques inside one cycle are one $2,000 relationship.
+         2026: rows([["Big PAC", "d1", 1000], ["Big PAC", "d1", 1000]]) },
+    b: { 2014: rows([["Big PAC", "d1", 25000]]),
+         2022: rows([["Big PAC", "d1", 3000]]),
+         2024: rows([["Big PAC", "d1", 2500], ["Jane Doe", "d2", 500]]),
+         2026: rows([["Big PAC", "d1", 2000]]) },
+    r: { 2024: rows([["Other PAC", "d4", 5000]]) },
+  };
+  return listContext({
+    filerIndex: [
+      committee("a", "Friends of A", "Democrat", 500000),
+      committee("b", "Friends of B", "Democrat", 300000),
+      committee("paper", "Paper Committee", "Democrat", 900),
+      committee("r", "Friends of R", "Republican", 400000),
+    ],
+    DL: { getFilerDonorYears: async slugs => new Map(slugs.map(s => [s, history[s] || {}])) },
+    LOB: { loadBookTypes: async ids => new Map(ids.map(id => [id, {
+      d1: "Political Committee", d2: "Individual", d3: "Business Entity", d4: "Political Committee",
+    }[id]])) },
+  });
+}
+
+test("the list is drawn from one chamber and one party, minus paper committees", async () => {
+  const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
+  assert.equal(built.committees, 2);
+  assert.equal(built.chamber.label, "House");
+  assert.equal(built.party.label, "Democratic");
+});
+
+test("the generic ask is what a donor gives one candidate across a cycle", async () => {
+  const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
+  assert.deepEqual(built.rows.map(r => r.donor), ["Big PAC"]);
+  const big = built.rows[0];
+  // 2026: $2,000 to A (two cheques) and $2,000 to B — two relationships, not four.
+  assert.deepEqual(big.gifts.filter(g => g.cycle === 2026).map(g => g.amount), [2000, 2000]);
+  assert.equal(big.ask, 2000);
+  assert.equal(big.campaigns, 2);
+  assert.deepEqual([big.cycles_given, big.cycles_in_window], [3, 6]);
+});
+
+test("a decade-old gift does not set the generic ask", async () => {
+  const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
+  assert.ok(built.rows[0].gifts.every(g => g.cycle >= 2016), "2013–14 is outside the window");
+  assert.equal(built.rows[0].ask, 2000);
+});
+
+test("individuals and one-cycle donors stay off the list", async () => {
+  const built = await chamberFixture().buildChamberList("house", "Democrat", 2026);
+  assert.equal(built.dropped.people, 1, "Jane Doe is an individual");
+  assert.equal(built.rows.some(r => r.donor === "Once PAC"), false);
+});
+
+test("a candidate committee is never listed as a donor to its own chamber", () => {
+  const ctx = listContext({ filerIndex: [
+    { slug: "x", name: "Friends of X", committee_type: "Candidate Committee" },
+  ] });
+  assert.equal(ctx.isCandidateCommittee("k", "Friends of X (12345)"), true);
+  assert.equal(ctx.isCandidateCommittee("k", "Some PAC"), false);
+});
+
+test("the list is cached per chamber, party and cycle", async () => {
+  let calls = 0;
+  const ctx = chamberFixture();
+  const inner = ctx.DL.getFilerDonorYears;
+  ctx.DL.getFilerDonorYears = async slugs => { calls++; return inner(slugs); };
+  await ctx.buildChamberList("house", "Democrat", 2026);
+  await ctx.buildChamberList("house", "Democrat", 2026);
+  assert.equal(calls, 1);
 });

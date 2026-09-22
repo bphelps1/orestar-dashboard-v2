@@ -110,6 +110,23 @@ async function initApp() {
   hideStatus();
   initSearch();
   initCycleSelector();
+  initChamberList();
+  initModeSwitch();
+}
+
+/** Two questions, two sets of controls: one candidate, or a whole chamber. */
+function initModeSwitch() {
+  const buttons = [...document.querySelectorAll(".mode-btn")];
+  if (!buttons.length) return;
+  buttons.forEach(button => button.addEventListener("click", () => {
+    buttons.forEach(b => {
+      const on = b === button;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", String(on));
+      document.getElementById(b.dataset.mode).hidden = !on;
+    });
+    hideStatus();
+  }));
 }
 
 // ── Filer search ───────────────────────────────────────────────────────────
@@ -384,6 +401,17 @@ async function runRecommendations() {
 
     // 6. Display results, with what seats of this closeness actually raise
     window._compCycles = buildCompCycleIndex(comparables, compProfiles);
+    // The export's earlier-cycle columns span the chamber's fundraising ladder,
+    // not just the comparables, so a few more committees' donor histories are
+    // indexed — the per-year tables only, a fraction of a full blob.
+    window._fundraiserLevels = fundraiserLadder(filer, cycle);
+    try {
+      const extra = ladderCandidates(window._fundraiserLevels)
+        .filter(slug => !comparables.some(c => c.slug === slug));
+      if (extra.length) indexLadderGiving(await DL.getFilerDonorYears(extra), window._fundraiserLevels);
+    } catch (e) {
+      console.warn("Ladder committees unavailable; columns fall back to the comparables:", e.message);
+    }
     window._primaryExclusionNotes = [targetProfile, ...compProfiles].flatMap((p,i) =>
         (p._primaryExclusions || []).map(x => ({...x, name:i ? comparables[i-1].name : x.name})));
     const seatContext = seatPeerContext(comparables, compProfiles, cycle, targetSeat, targetProfile);
@@ -462,6 +490,90 @@ const UNOPPOSED = { band: "unopposed", label: "unopposed last cycle" };
 // used instead and the fallback is stated in the explanation.
 const PEER_WINDOWS = [5, 10, 20];
 const MIN_PEER_GIFTS = 3;
+
+// ── Recency: an ask is argued from what a donor does now ──────────────────
+//
+// A gift is evidence of what a donor will give today only while the
+// relationship it describes still holds. Oregon Nurses gave Susan McLain
+// $25,000 in the 2013–14 cycle and $1,000–$2,000 in each of the last three;
+// taking a comparable's lifetime maximum asked every candidate for $25,000 on
+// the strength of a relationship that had ended a decade earlier.
+//
+// The window below is the one this engine already used for newer incumbents
+// (the two completed cycles before this one — the cycle being planned is
+// still in progress, so a peer's part-cycle total is not a benchmark), now
+// applied to everyone. With nothing in it, the best gift in the stale window
+// stands in and the row says so; older than that is history, not evidence.
+const RECENT_BENCHMARK_CYCLES = [2, 4];
+const STALE_BENCHMARK_CYCLES = [6, 8, 10];
+
+/** "2023–2024" — the cycle a gift was given in. */
+function cycleName(cycle) { return `${cycle - 1}–${cycle}`; }
+
+/**
+ * The cycle of a donor's giving to one comparable that argues an ask: their
+ * largest inside the recent window, else inside the stale window (flagged),
+ * else nothing at all.
+ */
+function benchmarkCycle(cyMap, cycle) {
+  const given = offsets => offsets.map(back => ({ cycle: cycle - back, amount: cyMap[cycle - back] }))
+    .filter(c => c.amount > 0);
+  // Inside the recent window both cycles describe a live relationship, so the
+  // larger of them is what the donor is good for.
+  const fresh = given(RECENT_BENCHMARK_CYCLES);
+  if (fresh.length) return { ...fresh.reduce((a, b) => (b.amount > a.amount ? b : a)), stale: false };
+  // Outside it, take the LAST thing known about the relationship rather than
+  // the biggest: reaching back twelve years for a maximum is how a single
+  // decade-old gift priced every ask in the first place.
+  const older = given(STALE_BENCHMARK_CYCLES);
+  return older.length ? { ...older[0], stale: true } : null;
+}
+
+// The graded form of the same window, for figures that blend many gifts
+// rather than choose one. Index = cycles ago; a gift older than this counts
+// for nothing.
+const CYCLE_WEIGHTS = [1, 1, 1, 0.5, 0.25, 0.1];
+
+/** How many cycles back `giftCycle` sits from the cycle being planned. */
+function cyclesAgo(giftCycle, planCycle) {
+  return Math.round((planCycle - Number(giftCycle)) / 2);
+}
+
+/** How much a gift from `giftCycle` counts toward a blended figure. */
+function cycleWeight(giftCycle, planCycle) {
+  const ago = cyclesAgo(giftCycle, planCycle);
+  return ago < 0 ? 0 : (CYCLE_WEIGHTS[ago] ?? 0);
+}
+
+/**
+ * The amount at which half the weight sits below, each gift weighted by how
+ * recent it is.
+ *
+ * Oregon Nurses gave Susan McLain $25,000 in 2013–14 and $1,000–$2,000 in
+ * each of the last three cycles. A plain median over that history is pulled
+ * up by a relationship that ended a decade ago; the weighted one answers
+ * $2,000, which is what they actually give now.
+ */
+function weightedMedian(entries) {
+  const sorted = entries.filter(e => e.weight > 0 && e.amount > 0)
+    .sort((a, b) => a.amount - b.amount);
+  const total = sorted.reduce((s, e) => s + e.weight, 0);
+  if (!total) return 0;
+  let seen = 0;
+  for (const e of sorted) {
+    seen += e.weight;
+    if (seen >= total / 2) return e.amount;
+  }
+  return sorted[sorted.length - 1].amount;
+}
+
+/** The phrase a row uses to say how old the giving behind its ask is. */
+function recencyNote(stale, cycle) {
+  const window = RECENT_BENCHMARK_CYCLES.map(back => cycleName(cycle - back)).reverse().join(" and ");
+  return stale
+    ? `Nothing in ${window} — benchmarked on older giving instead`
+    : `Benchmarked on ${window}`;
+}
 
 // Senior legislative leadership shares a primary pool across chambers.
 const HOUSE_MAJORITY_BENCHMARK_FACTOR = 0.90;
@@ -1266,14 +1378,18 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       observedComparableDonors.add(key); // Discovery is separate from the ask benchmark.
       // Newer incumbents need recent ordinary peer giving, not a peer's
       // lifetime maximum (or fundraising from the cycle being planned).
-      const recentCycles = [cycle - 2, cycle - 4].filter(c => cyMap[c] > 0);
+      const recentCycles = RECENT_BENCHMARK_CYCLES.map(back => cycle - back).filter(c => cyMap[c] > 0);
       if (historyWeight !== null && !recentCycles.length) continue;
-      const referenceCycle = historyWeight !== null ? recentCycles[0] : null;
-      const maxCy = referenceCycle !== null ? cyMap[referenceCycle] : Math.max(...Object.values(cyMap));
+      // Newer incumbents take the latest eligible cycle; everyone else takes
+      // the largest inside the same window rather than a lifetime maximum.
+      const pick = historyWeight !== null
+        ? { cycle: recentCycles[0], amount: cyMap[recentCycles[0]], stale: false }
+        : benchmarkCycle(cyMap, cycle);
+      if (!pick) continue;              // every gift is older than the stale window
       if (!compDonorDetails.has(key)) compDonorDetails.set(key, []);
-      compDonorDetails.get(key).push({ filer: comp.name, amount: maxCy, isLeadership: compIsLeadership,
+      compDonorDetails.get(key).push({ filer: comp.name, amount: pick.amount, isLeadership: compIsLeadership,
                                        leadershipTier: compTier, benchmarkFactor: comp.benchmarkFactor ?? 1, seatBand: comp.seat?.band, marginPts: comp.seat?.margin_pts ?? null,
-                                       cycles: cyMap, referenceCycle });
+                                       cycles: cyMap, referenceCycle: pick.cycle, stale: pick.stale });
     }
   }
 
@@ -1330,18 +1446,20 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // donor, use that as the starting point (not just a blend).
     const compGifts = compDonorDetails.get(key) || [];
     const targetTier = targetProfile._leadershipTier || 0;
+    // What a same-tier peer received is evidence, not the answer. Assigning it
+    // to the target outright made one peer's gift the whole ask — a donor
+    // giving this committee $2,000 a cycle was asked for $25,000 because it
+    // once gave another member of the same tier that much. It is now one more
+    // candidate reference, and the ask is always a stated blend of the donor's
+    // own giving here with whichever reference is larger.
+    let sameTierRef = 0;
     if (targetTier > 0 && historyWeight === null) {
-      const sameTierGifts = compGifts
-        .filter(g => g.leadershipTier === targetTier)
-        .sort((a, b) => b.amount - a.amount);
-      if (sameTierGifts.length > 0) {
-        // Outlier check within same-tier
-        const stRef = (sameTierGifts.length >= 2 && sameTierGifts[0].amount > sameTierGifts[1].amount * 1.5)
-          ? sameTierGifts[1].amount
-          : sameTierGifts[0].amount;
-        if (stRef > target) {
-          target = Math.round(stRef * 100) / 100;
-        }
+      const sameTier = compGifts
+        .filter(g => g.leadershipTier === targetTier && !g.stale)
+        .map(benchmarkAmount).sort((a, b) => b - a);
+      if (sameTier.length) {
+        sameTierRef = (sameTier.length >= 2 && sameTier[0] > sameTier[1] * 1.5)
+          ? sameTier[1] : sameTier[0];
       }
     }
 
@@ -1356,17 +1474,25 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     // gives a candidate in a 3-point race is the evidence for what they would
     // give this candidate in a 3-point race. Everything they gave is the
     // fallback, and the explanation says which was used.
-    const reference = leadershipReference(compGifts, comparables);
-    const peer = reference ? null : peerMarginGifts(compGifts, targetSeat);
-    const refGifts = reference?.gifts || (peer ? peer.gifts : compGifts);
+    // Recency first, then the seat: a gift counts only while the relationship
+    // it describes is current, and among current gifts the ones given in seats
+    // about as close as this one set the number.
+    const freshGifts = compGifts.filter(g => !g.stale);
+    const evidence = freshGifts.length ? freshGifts : compGifts;
+    const staleEvidence = !freshGifts.length && compGifts.length > 0;
+    const reference = leadershipReference(evidence, comparables);
+    const peer = reference ? null : peerMarginGifts(evidence, targetSeat);
+    const refGifts = reference?.gifts || (peer ? peer.gifts : evidence);
     // Discount single-filer outliers: if the max is >1.5x the second-highest,
     // it's an outlier — use the second-highest as the reference instead.
     const sortedAmts = refGifts.map(benchmarkAmount).sort((a, b) => b - a);
-    const compRef = historyWeight !== null
+    const seatRef = historyWeight !== null
       ? percentile([...sortedAmts].reverse(), 0.5)
       : (sortedAmts.length >= 2 && sortedAmts[0] > sortedAmts[1] * 1.5)
         ? sortedAmts[1] : (sortedAmts[0] || 0);
-    const refGift = refGifts.find(g => benchmarkAmount(g) === compRef);
+    const compRef = Math.max(seatRef, sameTierRef);
+    const refGift = refGifts.find(g => benchmarkAmount(g) === compRef)
+      || compGifts.find(g => benchmarkAmount(g) === compRef);
     const maxFromNonLeadership = refGift && !refGift.isLeadership;
     const historyBlend = historyWeight !== null && compRef > 0;
     const hasUplift = compRef > target;
@@ -1425,6 +1551,19 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       factors.push(`${comparables[i].name}: ${primaryExclusionNote(compProfiles[i])}`);
     if (compProfiles.some(p => p._entryBaseline)) factors.push("Comparable benchmarks exclude pre-entry-primary fundraising; reported historical contributions remain unchanged");
     leadershipFactors(factors, reference);
+    // The ask is a blend; show the arithmetic rather than only its result.
+    if (compWeight > 0) {
+      const ownShare = baselineAmt * 1.05;
+      const blended = ownShare * (1 - compWeight) + compRef * compWeight;
+      const source = [refGift?.filer, refGift?.referenceCycle ? cycleName(refGift.referenceCycle) : null]
+        .filter(Boolean).join(", ");
+      factors.push(`Ask = ${Math.round((1 - compWeight) * 100)}% × ${fmt$(ownShare)} (own giving here, +5%)`
+        + ` + ${Math.round(compWeight * 100)}% × ${fmt$(compRef)}${source ? ` (${source})` : ""}`
+        + ` = ${fmt$(blended)} → ${fmt$(target)}`
+        + (roundTarget(blended) === target ? " rounded" : " after capping and rounding"));
+    }
+    // How recent the giving behind the benchmark is, before quoting it.
+    if (compGifts.length) factors.push(recencyNote(staleEvidence, cycle));
     // Say which giving the benchmark came from before quoting a number from it.
     if (!reference && targetSeat && targetSeat.margin_pts != null && compGifts.length) {
       factors.push(peer
@@ -1468,6 +1607,7 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       last_cycle_amt: lastCycleAmt,
       baseline_cycle_amt: baselineAmt, baseline_cycle: baselineCycle,
       history_cycles: historyCycles, comparable_weight: compWeight,
+      benchmark_stale: staleEvidence, same_tier_ref: sameTierRef,
       avg_prev: Math.round(avgPrev * 100) / 100,
       comp_max: refGift?.amount || 0,
       comp_max_filers: refGifts.filter(g => benchmarkAmount(g) === compRef).map(g => g.filer),
@@ -2620,6 +2760,130 @@ function givenInCycle(key, filerName, cy, row) {
  * recent cycles, and the comparables this plan's donors actually gave the most
  * to in the earlier ones — the tracker names five, so do we.
  */
+// ── The fundraising ladder ────────────────────────────────────────────────
+//
+// The export's earlier-cycle columns exist to answer "what does this donor
+// give someone like my candidate?" Filling all five with the biggest
+// recipients answers a different question — it lists the five biggest
+// fundraisers, which is the same handful of leaders on every plan. The
+// columns span the ladder instead: one committee per rung, so a back-bench
+// plan shows what a donor gives a back-bencher next to what it gives a
+// Speaker, and the ask can be read against the right one.
+//
+// The rungs are built from what this dataset actually records — floor
+// leadership, how close the seat is, what the committee raises per cycle and
+// how long it has been raising. **Committee chairmanships and legislative
+// tenure are not in ORESTAR**, so a long-serving chair in a safe seat reads
+// as mid-ladder here rather than as the senior fundraiser they are. Pin a
+// committee where it belongs with an `archetype` admin tag on its slug
+// (value 1–5); a pin always wins.
+const FUNDRAISER_LEVELS = [
+  { level: 1, label: "Caucus leadership",   blurb: "Speaker, Senate President or Majority Leader" },
+  { level: 2, label: "Senior safe-seat",    blurb: "top of the pack, no election pressure, several cycles in" },
+  { level: 3, label: "Established mid",     blurb: "middle of the pack in a seat that is not close" },
+  { level: 4, label: "Competitive seat",    blurb: "a close last general — raising under election pressure" },
+  { level: 5, label: "Back bench",          blurb: "no leadership, no close race, least raised" },
+];
+const RUNG_BY_LEVEL = new Map(FUNDRAISER_LEVELS.map(r => [r.level, r]));
+
+/** The election year a committee is registered for, 0 when unknown. */
+function committeeElectionYear(filer) {
+  const m = /(\d{4})/.exec(filer.election || "");
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * The ladder for a chamber and party: every committee still standing for
+ * election, placed on a rung.
+ *
+ * Drawn from the whole chamber rather than from the fifty comparables,
+ * because the comparables are deliberately *alike* — a back-bencher's
+ * comparables hold no Speaker, so a plan built from them could never show
+ * what a donor gives a Speaker, which is exactly the comparison the columns
+ * exist to make.
+ *
+ * "How much they raise" is career total, which is the only per-committee
+ * figure the index carries. It blends how big a fundraiser someone is with
+ * how long they have been one — which is what the rungs describe, a
+ * long-serving chair sitting above a first-term member in the same kind of
+ * seat. Where it reads someone wrong, pin them with an `archetype` tag.
+ */
+function fundraiserLadder(targetFiler, cycle) {
+  const office = targetFiler?.office, party = (targetFiler?.party || "").trim();
+  const out = new Map();
+  if (!office || !party || !filerIndex) return out;
+  const active = filerIndex.filter(f =>
+    f.committee_type === "Candidate Committee"
+    && f.office === office && (f.party || "").trim() === party
+    && (f.total_in || 0) >= LIST_MIN_RAISED
+    && committeeElectionYear(f) >= cycle - 2
+    && f.slug !== targetFiler.slug          // the plan already has its own column
+    && !(adminTags[f.slug] || []).some(t => t.tag === "exclude"));
+  const totals = active.map(f => f.total_in || 0).sort((a, b) => a - b);
+  const high = percentile(totals, 2 / 3), low = percentile(totals, 1 / 3);
+  for (const f of active) {
+    const pin = Number((adminTags[f.slug] || []).find(t => t.tag === "archetype")?.value);
+    const tier = f.leadership_tier || 0;
+    const seat = seatCompetitiveness(f);
+    const close = !!seat && (seat.band === "competitive" || seat.band === "lean");
+    const raised = f.total_in || 0;
+    out.set(f.name, {
+      slug: f.slug, name: f.name, tier, seat, raised,
+      pinned: RUNG_BY_LEVEL.has(pin),
+      level: RUNG_BY_LEVEL.has(pin) ? pin
+        : (tier === 1 || tier === 2) ? 1
+        : close ? 4
+        : raised >= high ? 2
+        : (raised < low && tier === 0) ? 5
+        : 3,
+    });
+  }
+  return out;
+}
+
+/**
+ * The committees worth loading donor history for: the top few raisers on each
+ * rung, so the column for that rung can be filled by whichever of them this
+ * plan's donors actually support.
+ */
+function ladderCandidates(ladder, perRung = 3) {
+  const slugs = [];
+  for (const rung of FUNDRAISER_LEVELS) {
+    [...ladder.values()].filter(s => s.level === rung.level)
+      .sort((a, b) => b.raised - a.raised)
+      .slice(0, perRung)
+      .forEach(s => slugs.push(s.slug));
+  }
+  return slugs;
+}
+
+/** Fold extra committees' per-year donor tables into the comparable index. */
+function indexLadderGiving(byYear, ladder) {
+  const bySlug = new Map([...ladder.values()].map(s => [s.slug, s.name]));
+  for (const [slug, years] of byYear) {
+    const filer = bySlug.get(slug);
+    if (!filer) continue;
+    for (const [yrStr, donors] of Object.entries(years || {})) {
+      const cy = yearToCycle(parseInt(yrStr, 10));
+      for (const d of donors) {
+        const key = donorKey(d);
+        if (!window._compCycles.has(key)) window._compCycles.set(key, new Map());
+        const perFiler = window._compCycles.get(key);
+        if (!perFiler.has(filer)) perFiler.set(filer, {});
+        const byCycle = perFiler.get(filer);
+        byCycle[cy] = (byCycle[cy] || 0) + d.total;
+      }
+    }
+  }
+}
+
+/**
+ * Which cycles and which comparable candidates get columns: the three most
+ * recent cycles, and one comparable per rung of the fundraising ladder —
+ * within a rung, the committee this plan's donors gave the most to. A rung
+ * with no comparable gives its slot back to the next-largest recipient, so
+ * the sheet always carries five columns of evidence.
+ */
 function planCycleColumns(groups, cycle) {
   const cycles = [cycle, cycle - 2, cycle - 4];
   const totals = new Map();
@@ -2633,7 +2897,28 @@ function planCycleColumns(groups, cycle) {
       }
     }
   }
-  const comps = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => e[0]);
+  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+  const ladder = window._fundraiserLevels || new Map();
+  const comps = [], taken = new Set();
+  for (const rung of FUNDRAISER_LEVELS) {
+    // Within a rung, the committee this plan's donors actually support, so
+    // the column holds evidence rather than blanks. Nobody gave any of them
+    // anything → the biggest raiser on the rung, and the column stays empty.
+    const pick = [...ladder.values()]
+      .filter(s => s.level === rung.level && !taken.has(s.name))
+      .sort((a, b) => (totals.get(b.name) || 0) - (totals.get(a.name) || 0) || b.raised - a.raised)[0];
+    if (!pick) continue;
+    taken.add(pick.name);
+    comps.push({ filer: pick.name, level: rung.level, rung: rung.label });
+  }
+  for (const filer of ranked) {                 // fill empty rungs with the next best
+    if (comps.length >= FUNDRAISER_LEVELS.length) break;
+    if (taken.has(filer)) continue;
+    taken.add(filer);
+    const rung = RUNG_BY_LEVEL.get(ladder.get(filer)?.level);
+    comps.push({ filer, level: ladder.get(filer)?.level ?? null, rung: rung ? rung.label : "Comparable" });
+  }
+  comps.sort((a, b) => (a.level ?? 99) - (b.level ?? 99));
   return { cycles, comps };
 }
 
@@ -2666,8 +2951,8 @@ function planSheetAoa(groups, cycle) {
   width += 2;
   for (const c of cycles.slice(1)) {
     width += 1;                                       // spacer
-    const cols = [{ filer: PLAN_SELF, kind: "Gave" },
-                  ...comps.map(f => ({ filer: f, kind: "Gave" }))];
+    const cols = [{ filer: PLAN_SELF, kind: "This candidate" },
+                  ...comps.map(c => ({ filer: c.filer, kind: c.rung }))];
     bands.push({ cycle: c, start: width, cols });
     width += cols.length;
   }
@@ -2883,6 +3168,30 @@ function methodSheetRows(groups, cycle) {
       + `Legislative comparisons use current members verified against the official roster. Ordinary candidates use the same chamber; senior leaders use a cross-chamber primary leadership pool, with automatically identified fundraising outliers as secondary references only when the donor has no primary leadership giving. Unopposed seats are matched only to other unopposed seats, never numeric margins. Outliers exceed Q3 + 1.5 × IQR among at least eight current same-party non-primary members, using each member’s best two-year total in the preceding two completed cycles. Primary leaders are the House Speaker, Senate President, both Majority Leaders, and Ways and Means Co-Chairs. Speaker giving is discounted 10% for a House Majority Leader target. Other comparisons exclude mismatched unopposed seats, unknown peer margins when the target margin is known, and seats more than 20 points apart. Under ${MIN_PEER_GIFTS} such gifts, only eligible comparable giving is used and the donor row says so.` });
   rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
     Detail: "The greater of summed client asks or eligible last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. First-entry and flagged unusually large primary fundraising are excluded from this floor, while Last Cycle shows actual giving. The floor rounds up to $250 to avoid falling below eligible baseline giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
+  rows.push({ Item: "How recent the evidence is", Value: RECENT_BENCHMARK_CYCLES.map(b => cycleName(cycle - b)).reverse().join(" and "),
+    Detail: "Only giving from those two completed cycles sets an ask. A donor who gave a comparable candidate "
+      + "nothing in them is benchmarked on its older giving instead and the row says so; giving more than "
+      + `${STALE_BENCHMARK_CYCLES[STALE_BENCHMARK_CYCLES.length - 1] / 2} cycles back never prices an ask. `
+      + "Earlier giving is still shown as history." });
+  rows.push({ Item: "Every ask is a blend", Value: "own giving + comparable reference",
+    Detail: "A comparable's giving pulls an ask toward it and never replaces it: the donor row states the "
+      + "percentages, both amounts and the result. A same-tier peer's gift is one candidate reference among "
+      + "others rather than the answer." });
+  rows.push({ Item: "Fundraising ladder", Value: "one column per rung",
+    Detail: "The earlier-cycle columns hold one candidate per rung of this chamber's fundraising ladder "
+      + "rather than the five largest recipients, so an ask can be read against a candidate of this kind. "
+      + "Rungs come from floor leadership, how close the seat is, and career fundraising among committees "
+      + "still standing for election. Committee chairmanships are not in ORESTAR; pin a committee to a rung "
+      + "with an `archetype` admin tag (value 1–5) and the pin wins." });
+  const chosenRungs = new Map(planCycleColumns(groups, cycle).comps.map(c => [c.level, c.filer]));
+  for (const rung of FUNDRAISER_LEVELS) {
+    const named = [...(window._fundraiserLevels || new Map()).values()]
+      .filter(s => s.level === rung.level).sort((a, b) => b.raised - a.raised);
+    rows.push({ Item: `  rung ${rung.level} — ${rung.label}`,
+      Value: chosenRungs.get(rung.level) || "(no column)",
+      Detail: `${rung.blurb}. ${named.length} committee${named.length === 1 ? "" : "s"} on this rung`
+        + (named.length ? `: ${named.slice(0, 5).map(s => s.name).join(", ")}` : "") });
+  }
   rows.push({ Item: "First-time ask", Value: "lower introductory ask",
     Detail: "Median first observed cash contribution to comparable candidates, capped at 50% of the established-giving benchmark before rounding to the nearest $250. If first transactions are unavailable, earliest observed annual totals serve as an explicitly labeled proxy. The first observed record may not be the donor’s first-ever gift." });
   for (const t of TIER_RULES) {
@@ -3190,6 +3499,478 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+// THE STANDING DONOR LIST — top organizations by chamber and party
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The candidate view answers "who should *this* candidate call?" This one
+// answers the question a caucus asks before any candidate is in the room:
+// **who gives to House Democrats, and how much do they give one of them?**
+//
+// It is built from every candidate committee of that chamber and party — not
+// the fifty comparables — because the claim is about the seat type, not about
+// one race. Each donor is ranked on the three things that make a name worth
+// putting on a standing call list:
+//
+//   consistency  do they show up cycle after cycle, or did they appear once?
+//   breadth      how many of these campaigns do they give to in a cycle?
+//   magnitude    how much do they put into the chamber in a cycle?
+//
+// and each is measured through the same recency window the asks use, so a
+// donor who was everywhere in 2014 and nowhere since does not lead the list.
+//
+// The number beside each name is the **generic ask**: the recency-weighted
+// median of what that donor gives ONE candidate of this kind across a whole
+// cycle. Installments are added up first — a $1,000 primary check and a
+// $1,000 general check are a $2,000 relationship, and that is what you ask
+// for. The median single check is carried alongside for reference.
+
+const LIST_SIZE = 125;              // the list the user asked for: top 100–125
+const LIST_MIN_RAISED = 5000;       // committees below this are paper filings
+const LIST_MIN_CYCLES = 2;          // one cycle is an event, not a habit
+const LIST_LOOKUP_BATCH = 300;      // donors whose category is read at a time
+
+// Full marks. A donor giving to this many campaigns in a cycle, or this many
+// dollars into the chamber in a cycle, tops out the component; the curve in
+// between is logarithmic because the difference between 2 and 6 campaigns
+// says far more than the difference between 26 and 30.
+const LIST_BREADTH_FULL = 35;
+const LIST_MAGNITUDE_FULL = 150000;
+const LIST_WEIGHTS = { consistency: 40, breadth: 35, magnitude: 25 };
+
+const LIST_CHAMBERS = [
+  { key: "house",  label: "House",  office: "State Representative" },
+  { key: "senate", label: "Senate", office: "State Senator" },
+];
+const LIST_PARTIES = [
+  { key: "Democrat",   label: "Democratic", short: "D" },
+  { key: "Republican", label: "Republican", short: "R" },
+];
+
+const listCache = new Map();        // "house|Democrat|2026" → built list
+
+function listChamber(key) { return LIST_CHAMBERS.find(c => c.key === key) || LIST_CHAMBERS[0]; }
+function listParty(key) { return LIST_PARTIES.find(p => p.key === key) || LIST_PARTIES[0]; }
+function listTitle(chamber, party, cycle) {
+  return `${party.label} candidates for the Oregon ${chamber.label}, through ${cycleName(cycle)}`;
+}
+
+/** Every candidate committee of a chamber and party that ever really raised. */
+function chamberCohort(chamber, party) {
+  return (filerIndex || []).filter(f =>
+    f.committee_type === "Candidate Committee"
+    && f.office === chamber.office
+    && (f.party || "") === party.key
+    && (f.total_in || 0) >= LIST_MIN_RAISED
+    && !(adminTags[f.slug] || []).some(t => t.tag === "exclude"));
+}
+
+/** Committee names, so a candidate's own committee is never listed as a donor. */
+let candidateNameSet = null;
+function candidateCommitteeNames() {
+  if (!candidateNameSet) {
+    candidateNameSet = new Set((filerIndex || [])
+      .filter(f => f.committee_type === "Candidate Committee")
+      .map(f => f.name.toLowerCase()));
+  }
+  return candidateNameSet;
+}
+function isCandidateCommittee(key, name) {
+  const names = candidateCommitteeNames();
+  return names.has(key) || names.has(String(name).replace(/\s*\(\d+\)\s*$/, "").toLowerCase());
+}
+
+/**
+ * Build the list. Loads every cohort committee's per-year donor table, rolls
+ * it up per donor per committee per cycle, drops the people, and ranks what
+ * is left.
+ */
+async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => {}) {
+  const chamber = listChamber(chamberKey), party = listParty(partyKey);
+  const cacheKey = `${chamber.key}|${party.key}|${cycle}`;
+  if (listCache.has(cacheKey)) return listCache.get(cacheKey);
+
+  const cohort = chamberCohort(chamber, party);
+  if (!cohort.length) throw new Error(`No ${party.label} ${chamber.label} committees on file.`);
+  const windowCycles = CYCLE_WEIGHTS.map((_, i) => cycle - 2 * i);
+  const inWindow = new Map();                        // "2025" → 2026
+  for (const c of windowCycles) for (const y of cycleYears(c)) inWindow.set(String(y), c);
+
+  onProgress(`Loading donor history for ${cohort.length} ${party.label} ${chamber.label} committees…`);
+  const blobs = await DL.getFilerDonorYears(cohort.map(f => f.slug));
+
+  // donor → { name, ids, gifts: Map<"slug|cycle", amount> }
+  const donors = new Map();
+  for (const filer of cohort) {
+    const byYear = blobs.get(filer.slug) || {};
+    for (const [year, rows] of Object.entries(byYear)) {
+      const cy = inWindow.get(String(year));
+      if (!cy) continue;
+      for (const d of rows) {
+        const key = donorKey(d);
+        if (!donors.has(key)) {
+          donors.set(key, { name: donorDisplayName(d.name), ids: new Set(), gifts: new Map() });
+        }
+        const entry = donors.get(key);
+        if (d.donor_id) entry.ids.add(d.donor_id);
+        const slot = `${filer.slug}|${cy}`;
+        entry.gifts.set(slot, (entry.gifts.get(slot) || 0) + Number(d.total || 0));
+      }
+    }
+  }
+
+  const byName = new Map(cohort.map(f => [f.slug, f.name]));
+  const totalWeight = CYCLE_WEIGHTS.reduce((s, w) => s + w, 0);
+  const ranked = [];
+
+  for (const [key, donor] of donors) {
+    if (isDonorExcluded(donor.name)) continue;
+    if (isCandidateCommittee(key, donor.name)) continue;
+
+    // Per cycle: what they put in, and how many campaigns they put it into.
+    const perCycle = new Map();
+    const gifts = [];
+    for (const [slot, amount] of donor.gifts) {
+      if (!(amount > 0)) continue;
+      const [slug, cyStr] = slot.split("|");
+      const cy = Number(cyStr);
+      if (!perCycle.has(cy)) perCycle.set(cy, { total: 0, committees: [] });
+      const bucket = perCycle.get(cy);
+      bucket.total += amount;
+      bucket.committees.push({ filer: byName.get(slug) || slug, slug, amount });
+      gifts.push({ cycle: cy, amount, weight: cycleWeight(cy, cycle), filer: byName.get(slug) || slug });
+    }
+    if (perCycle.size < LIST_MIN_CYCLES) continue;
+
+    let consistency = 0, breadth = 0, magnitude = 0;
+    for (const [cy, bucket] of perCycle) {
+      const w = cycleWeight(cy, cycle);
+      consistency += w;
+      breadth += w * bucket.committees.length;
+      magnitude += w * bucket.total;
+    }
+    consistency /= totalWeight;
+    breadth /= totalWeight;
+    magnitude /= totalWeight;
+
+    const curve = (value, full) => Math.min(1, Math.log1p(Math.max(0, value)) / Math.log1p(full));
+    const score = LIST_WEIGHTS.consistency * consistency
+                + LIST_WEIGHTS.breadth * curve(breadth, LIST_BREADTH_FULL)
+                + LIST_WEIGHTS.magnitude * curve(magnitude, LIST_MAGNITUDE_FULL);
+
+    const ask = weightedMedian(gifts);
+    const campaigns = new Set([...donor.gifts.keys()].map(s => s.split("|")[0]));
+    const cyclesGiven = [...perCycle.keys()].sort((a, b) => b - a);
+    ranked.push({
+      donor_key: key, donor: donor.name, donor_id: [...donor.ids][0] || null,
+      ids: [...donor.ids], book_type: null,
+      ask: Math.round(ask),
+      score: Math.round(score * 10) / 10,
+      consistency, breadth, magnitude,
+      cycles_given: perCycle.size,
+      cycles_in_window: CYCLE_WEIGHTS.length,
+      campaigns: campaigns.size,
+      last_cycle: cyclesGiven[0] || null,
+      per_cycle: cyclesGiven.map(cy => ({
+        cycle: cy, total: perCycle.get(cy).total, committees: perCycle.get(cy).committees.length,
+        top: [...perCycle.get(cy).committees].sort((a, b) => b.amount - a.amount).slice(0, 5),
+      })),
+      gifts,
+    });
+  }
+
+  ranked.sort((a, b) => b.score - a.score || b.ask - a.ask);
+
+  // Organizations only, and ORESTAR's own contributor category decides it —
+  // never the shape of a name. Reading that category for all 11,000 donors to
+  // a chamber is seventy-odd round trips for a list of 125, so the ranking
+  // comes first and categories are resolved down the ranking until the list
+  // is full. A donor the resolver never gave an id has no category to read,
+  // so it cannot be shown to be an organization and is left out.
+  const rows = [];
+  let people = 0, unresolved = 0, examined = 0;
+  for (let i = 0; i < ranked.length && rows.length < LIST_SIZE; i += LIST_LOOKUP_BATCH) {
+    const batch = ranked.slice(i, i + LIST_LOOKUP_BATCH);
+    onProgress(`Checking contributor categories — ${fmtNum(rows.length)} organizations of `
+      + `${LIST_SIZE} found in the top ${fmtNum(i + batch.length)}…`);
+    let bookTypes;
+    try {
+      bookTypes = await LOB.loadBookTypes(batch.flatMap(r => r.ids));
+    } catch (e) {
+      throw new Error(`Could not read contributor categories: ${e.message}`);
+    }
+    for (const row of batch) {
+      examined++;
+      const types = row.ids.map(id => bookTypes.get(id)).filter(Boolean);
+      if (!types.length) { unresolved++; continue; }
+      if (types.every(t => PERSON_BOOK_TYPES.has(t))) { people++; continue; }
+      row.book_type = types.find(t => !PERSON_BOOK_TYPES.has(t)) || types[0];
+      delete row.ids;
+      rows.push(row);
+      if (rows.length >= LIST_SIZE) break;
+    }
+  }
+
+  const built = {
+    chamber, party, cycle, rows,
+    considered: examined, ranked: ranked.length, committees: cohort.length,
+    dropped: { people, unresolved },
+    generated: new Date().toISOString(),
+  };
+  listCache.set(cacheKey, built);
+  return built;
+}
+
+/** The sentence under a donor's name: why it is on the list. */
+function listWhy(row) {
+  const parts = [
+    `Gave in ${row.cycles_given} of the last ${row.cycles_in_window} cycles`,
+    `${fmtNum(row.campaigns)} campaign${row.campaigns === 1 ? "" : "s"} supported`,
+    `${fmt$(row.magnitude)} a cycle into the chamber`,
+  ];
+  const recent = row.per_cycle[0];
+  if (recent) {
+    parts.push(`${cycleName(recent.cycle)}: ${fmt$(recent.total)} across `
+      + `${recent.committees} campaign${recent.committees === 1 ? "" : "s"}`);
+  }
+  return parts.join(" · ");
+}
+
+
+// ── The standing list on screen ────────────────────────────────────────────
+
+function initChamberList() {
+  const chamberSel = document.getElementById("list-chamber");
+  const partySel = document.getElementById("list-party");
+  const cycleSel = document.getElementById("list-cycle");
+  if (!chamberSel || !partySel || !cycleSel) return;
+
+  chamberSel.innerHTML = LIST_CHAMBERS.map(c => `<option value="${c.key}">${c.label}</option>`).join("");
+  partySel.innerHTML = LIST_PARTIES.map(p => `<option value="${p.key}">${p.label}</option>`).join("");
+  const cur = currentCycle();
+  for (let c = cur; c >= 2010; c -= 2) {
+    cycleSel.insertAdjacentHTML("beforeend",
+      `<option value="${c}"${c === cur ? " selected" : ""}>${cycleName(c)}</option>`);
+  }
+  document.getElementById("list-run-btn").addEventListener("click", runChamberList);
+  document.getElementById("list-search").addEventListener("input", renderChamberRows);
+  for (const [id, fmt, scope] of [["list-export-csv", "csv", "one"], ["list-export-xlsx", "xlsx", "one"],
+                                  ["list-export-all-xlsx", "xlsx", "all"]]) {
+    document.getElementById(id).addEventListener("click", () => exportChamberList(fmt, scope));
+  }
+}
+
+async function runChamberList() {
+  const button = document.getElementById("list-run-btn");
+  const chamberKey = document.getElementById("list-chamber").value;
+  const partyKey = document.getElementById("list-party").value;
+  const cycle = parseInt(document.getElementById("list-cycle").value, 10);
+  button.disabled = true;
+  try {
+    const built = await buildChamberList(chamberKey, partyKey, cycle, msg => showStatus(msg, "loading"));
+    hideStatus();
+    window._chamberList = built;
+    renderChamberList(built);
+  } catch (err) {
+    showStatus(`Error: ${err.message}`, "error");
+    console.error(err);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderChamberList(built) {
+  document.getElementById("list-results").hidden = false;
+  document.getElementById("list-title").textContent =
+    `Top ${built.rows.length} organizations — ${listTitle(built.chamber, built.party, built.cycle)}`;
+  const asks = built.rows.map(r => r.ask).sort((a, b) => a - b);
+  const median = percentile(asks, 0.5);
+  const everyCycle = built.rows.filter(r => r.cycles_given === r.cycles_in_window).length;
+  document.getElementById("list-summary").innerHTML = `
+    <div class="summary-card"><span class="sc-label">Generic ask, median of the list
+      <span class="sc-help" title="The middle donor's generic ask. Each donor's own ask is the recency-weighted median of what it gives one candidate of this kind across a cycle.">?</span></span><br>
+      <span class="sc-value">${fmt$(median)}</span>
+      <div class="sc-sub">${fmt$(asks[0])} to ${fmt$(asks[asks.length - 1])} across the list</div></div>
+    <div class="summary-card"><span class="sc-label">If every one said yes
+      <span class="sc-help" title="The sum of the generic asks — one ask per donor, for one candidate.">?</span></span><br>
+      <span class="sc-value">${fmt$(built.rows.reduce((s, r) => s + r.ask, 0))}</span>
+      <div class="sc-sub">one candidate, one ask each</div></div>
+    <div class="summary-card sc-muted"><span class="sc-label">Every cycle</span><br>
+      <span class="sc-value">${fmtNum(everyCycle)}</span>
+      <div class="sc-sub">gave in all ${built.rows[0]?.cycles_in_window ?? CYCLE_WEIGHTS.length} cycles in the window</div></div>
+    <div class="summary-card sc-muted"><span class="sc-label">Drawn from</span><br>
+      <span class="sc-value">${fmtNum(built.committees)}</span>
+      <div class="sc-sub">${built.party.label} ${built.chamber.label} committees ·
+        ${fmtNum(built.ranked)} donors ranked, top ${fmtNum(built.considered)} checked for category</div></div>`;
+  document.getElementById("list-search").value = "";
+  renderChamberRows();
+}
+
+function renderChamberRows() {
+  const built = window._chamberList;
+  const tbody = document.getElementById("list-tbody");
+  if (!built || !tbody) return;
+  const term = (document.getElementById("list-search").value || "").toLowerCase().trim();
+  const rows = term ? built.rows.filter(r => r.donor.toLowerCase().includes(term)) : built.rows;
+  window._renderedList = rows;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="plan-empty">No donors match.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r, i) => `
+    <tr>
+      <td>${built.rows.indexOf(r) + 1}</td>
+      <td><button type="button" class="link-btn list-detail-btn" data-idx="${i}"
+            aria-expanded="false">${esc(r.donor)}</button>
+          <div class="list-why">${esc(listWhy(r))}</div></td>
+      <td class="num"><strong>${fmt$(r.ask)}</strong></td>
+      <td class="num">${r.score.toFixed(1)}</td>
+      <td class="num">${r.cycles_given}/${r.cycles_in_window}</td>
+      <td class="num">${fmtNum(r.campaigns)}</td>
+      <td class="num">${fmt$(r.magnitude)}</td>
+      <td>${r.last_cycle ? cycleName(r.last_cycle) : "—"}</td>
+    </tr>
+    <tr class="detail-row" id="list-detail-${i}" hidden><td colspan="8"></td></tr>`).join("");
+  tbody.querySelectorAll(".list-detail-btn").forEach(button =>
+    button.addEventListener("click", () => toggleListDetail(Number(button.dataset.idx), button)));
+}
+
+function toggleListDetail(idx, button) {
+  const row = document.getElementById(`list-detail-${idx}`);
+  const open = row.hidden;
+  button.setAttribute("aria-expanded", String(open));
+  row.hidden = !open;
+  if (!open || row.dataset.filled) return;
+  const r = (window._renderedList || [])[idx];
+  const cycles = r.per_cycle.map(c => `
+    <tr><td>${cycleName(c.cycle)}</td>
+        <td class="num">${fmt$(c.total)}</td>
+        <td class="num">${c.committees}</td>
+        <td>${esc(c.top.map(t => `${t.filer} (${fmt$(t.amount)})`).join(", "))}</td>
+        <td class="num">${(cycleWeight(c.cycle, window._chamberList.cycle)).toFixed(2)}×</td></tr>`).join("");
+  const singles = r.gifts.map(g => g.amount).sort((a, b) => a - b);
+  row.querySelector("td").innerHTML = `
+    <div class="detail-box">
+      <h4>${esc(r.donor)} — ${esc(r.book_type || "organization")}</h4>
+      <p class="detail-note">Generic ask <strong>${fmt$(r.ask)}</strong>: the recency-weighted median of
+        ${fmtNum(r.gifts.length)} candidate-cycle relationships
+        (plain median ${fmt$(percentile(singles, 0.5))}, largest ${fmt$(singles[singles.length - 1])}).
+        Score ${r.score.toFixed(1)} = ${LIST_WEIGHTS.consistency} × consistency ${r.consistency.toFixed(2)}
+        + ${LIST_WEIGHTS.breadth} × breadth (${r.breadth.toFixed(1)} campaigns a cycle)
+        + ${LIST_WEIGHTS.magnitude} × size (${fmt$(r.magnitude)} a cycle).</p>
+      <table class="detail-table">
+        <thead><tr><th>Cycle</th><th class="num">Given</th><th class="num">Campaigns</th>
+          <th>Largest recipients</th><th class="num">Weight</th></tr></thead>
+        <tbody>${cycles}</tbody>
+      </table>
+    </div>`;
+  row.dataset.filled = "1";
+}
+
+// ── The standing list as a file ────────────────────────────────────────────
+
+function chamberListRows(built) {
+  return built.rows.map((r, i) => ({
+    "Rank": i + 1,
+    "Donor": r.donor,
+    "Category": r.book_type || "",
+    "Chamber": built.chamber.label,
+    "Party": built.party.label,
+    "Generic Ask": r.ask,
+    "Score": r.score,
+    "Cycles Given": `${r.cycles_given} of ${r.cycles_in_window}`,
+    "Campaigns Supported": r.campaigns,
+    "Campaigns Per Cycle": Math.round(r.breadth * 10) / 10,
+    "Given Per Cycle": Math.round(r.magnitude),
+    "Last Cycle Given": r.last_cycle ? cycleName(r.last_cycle) : "",
+    "Largest Recipients Last Cycle": (r.per_cycle[0]?.top || [])
+      .map(t => `${t.filer} (${fmt$(t.amount)})`).join("; "),
+    "Why On The List": listWhy(r),
+  }));
+}
+
+function chamberMethodRows(built) {
+  return [
+    { Item: "List", Value: listTitle(built.chamber, built.party, built.cycle),
+      Detail: `Top ${built.rows.length} organizations, drawn from ${fmtNum(built.committees)} candidate `
+        + `committees that raised at least ${fmt$(LIST_MIN_RAISED)}. ${fmtNum(built.ranked)} donors were `
+        + `scored and the top ${fmtNum(built.considered)} checked against ORESTAR's contributor category `
+        + "until the list was full." },
+    { Item: "Generic ask", Value: "median gift to one candidate, one cycle",
+      Detail: "Contributions to the same candidate inside a cycle are added up first, so instalments read as "
+        + "one relationship. The median across those relationships is weighted by how recent each is." },
+    { Item: "Recency weights", Value: CYCLE_WEIGHTS.join(" · "),
+      Detail: `Weight by cycles ago, newest first. The last ${RECENT_CYCLES} cycles count in full; giving `
+        + `older than ${STALE_CYCLES} cycles is outside the window entirely.` },
+    { Item: "Window", Value: CYCLE_WEIGHTS.map((_, i) => cycleName(built.cycle - 2 * i)).join(", "),
+      Detail: "The cycles the list is built from." },
+    { Item: "Score", Value: "0–100",
+      Detail: `${LIST_WEIGHTS.consistency} × consistency (weighted share of those cycles with a gift) + `
+        + `${LIST_WEIGHTS.breadth} × breadth (campaigns per cycle, full marks at ${LIST_BREADTH_FULL}) + `
+        + `${LIST_WEIGHTS.magnitude} × size (given per cycle, full marks at ${fmt$(LIST_MAGNITUDE_FULL)}). `
+        + "Breadth and size are logarithmic: the step from 2 campaigns to 6 counts for more than 26 to 30." },
+    { Item: "Who is on it", Value: "organizations",
+      Detail: `ORESTAR's own contributor category decides it, never the shape of a name. Among the donors `
+        + `checked, ${fmtNum(built.dropped.people)} individuals and candidate families were dropped and `
+        + `${fmtNum(built.dropped.unresolved)} had no resolved identity to read a category from. `
+        + `A donor must also have given in at least ${LIST_MIN_CYCLES} cycles in the window.` },
+    { Item: "What it is not", Value: "not a plan for one candidate",
+      Detail: "No seat, no margin, no relationship with a particular committee is in these numbers. "
+        + "For a named candidate, use the candidate view — it benchmarks against comparable seats and "
+        + "subtracts what the donor has already given." },
+  ];
+}
+
+async function exportChamberList(format, scope) {
+  const built = window._chamberList;
+  if (!built) return;
+  const cycle = built.cycle;
+  const stamp = `${built.chamber.key}_${built.party.short.toLowerCase()}_${cycle}`;
+
+  if (scope === "one" && format === "csv") {
+    const rows = chamberListRows(built);
+    const headers = Object.keys(rows[0]);
+    const csv = [headers.join(","), ...rows.map(row => headers.map(h => {
+      const v = String(row[h] ?? "");
+      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    }).join(","))].join("\n");
+    downloadFile(csv, `top_donors_${stamp}.csv`, "text/csv");
+    return;
+  }
+
+  const button = document.getElementById(scope === "all" ? "list-export-all-xlsx" : "list-export-xlsx");
+  button.disabled = true;
+  try {
+    const builds = [built];
+    if (scope === "all") {
+      showStatus("Building all four lists…", "loading");
+      for (const chamber of LIST_CHAMBERS) {
+        for (const party of LIST_PARTIES) {
+          if (chamber.key === built.chamber.key && party.key === built.party.key) continue;
+          builds.push(await buildChamberList(chamber.key, party.key, cycle,
+            msg => showStatus(`${chamber.label} ${party.label}: ${msg}`, "loading")));
+        }
+      }
+      builds.sort((a, b) => a.chamber.label.localeCompare(b.chamber.label)
+        || a.party.label.localeCompare(b.party.label));
+      hideStatus();
+    }
+    const wb = XLSX.utils.book_new();
+    for (const b of builds) {
+      const sheet = `${b.chamber.label} ${b.party.short}`;
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(chamberListRows(b)), sheet);
+    }
+    XLSX.utils.book_append_sheet(wb,
+      XLSX.utils.json_to_sheet(builds.flatMap(b => chamberMethodRows(b))), "How these were set");
+    XLSX.writeFile(wb, scope === "all" ? `top_donors_all_${cycle}.xlsx` : `top_donors_${stamp}.xlsx`);
+  } catch (err) {
+    console.error(err);
+    showStatus(`Could not build the file: ${err.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function exportData(format, scope = "new") {
   const recs = window._recommendations || [];
   const repeats = window._repeatTargets || [];

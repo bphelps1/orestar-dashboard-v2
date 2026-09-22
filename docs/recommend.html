@@ -18,7 +18,7 @@
     <h1>Donor Recommendations</h1>
     <p class="subtitle">
       <a href="/">← Back to Dashboard</a> &mdash;
-      Find recommended donors for a candidate committee &mdash;
+      Who to ask, and for how much &mdash; for one candidate, or for a whole chamber &mdash;
       <a href="https://github.com/bphelps1/orestar-dashboard/blob/main/docs/RECOMMENDATIONS.md"
          target="_blank" rel="noopener">How this works &amp; the weights</a> &mdash;
       <a href="/admin/lobbyists">Lobbyist attribution</a>
@@ -50,6 +50,19 @@
     <button class="btn-small" id="sign-out-btn">Sign Out</button>
   </div>
 
+  <!-- Status — shared by both modes, so it must sit outside either panel -->
+  <div id="status-msg" class="status-msg" hidden></div>
+
+  <!-- Which question is being asked -->
+  <div class="mode-tabs" role="tablist" aria-label="Recommendation mode">
+    <button type="button" class="mode-btn active" role="tab" aria-selected="true"
+            data-mode="mode-candidate">For a candidate</button>
+    <button type="button" class="mode-btn" role="tab" aria-selected="false"
+            data-mode="mode-chamber">Top donors by chamber &amp; party</button>
+  </div>
+
+<div id="mode-candidate">
+
   <!-- Search -->
   <section class="search-section">
     <div class="search-box">
@@ -69,9 +82,6 @@
       <button class="btn-primary" id="run-btn">Generate Recommendations</button>
     </div>
   </section>
-
-  <!-- Status -->
-  <div id="status-msg" class="status-msg" hidden></div>
 
   <!-- Results -->
   <section id="results-section" hidden>
@@ -241,6 +251,68 @@
       <div id="detail-content"></div>
     </div>
   </section>
+
+</div><!-- /mode-candidate -->
+
+<!-- ══════ Mode: top donors by chamber and party ══════ -->
+<div id="mode-chamber" hidden>
+
+  <section class="search-section">
+    <p class="section-desc">
+      Who gives to candidates of this kind, and how much do they give one of them? The list ranks every
+      organization that gave to these committees on three things — whether they give cycle after cycle,
+      how many campaigns they give to, and how much they put in each cycle — and puts a
+      <strong>generic ask</strong> beside each name: the median of what they give one candidate of this
+      kind across a whole cycle, weighted toward the last three cycles. No seat, margin or existing
+      relationship enters these numbers; for a named candidate use the other mode.
+    </p>
+    <div class="controls-bar">
+      <label for="list-chamber">Chamber:</label>
+      <select id="list-chamber"></select>
+      <label for="list-party">Party:</label>
+      <select id="list-party"></select>
+      <label for="list-cycle">Through cycle:</label>
+      <select id="list-cycle"></select>
+      <button class="btn-primary" id="list-run-btn">Build Donor List</button>
+    </div>
+  </section>
+
+  <section id="list-results" hidden>
+    <div class="results-header">
+      <h2 id="list-title">Top donors</h2>
+      <div class="export-btns">
+        <span class="export-group-label">Export:</span>
+        <button class="btn-small" id="list-export-csv">CSV</button>
+        <button class="btn-small" id="list-export-xlsx">Excel</button>
+        <button class="btn-small" id="list-export-all-xlsx">Excel — all four lists</button>
+      </div>
+    </div>
+
+    <div class="results-summary" id="list-summary"></div>
+
+    <div class="table-search-bar">
+      <input type="search" id="list-search" class="table-search" placeholder="Search donors…" />
+    </div>
+    <div class="table-wrapper">
+      <table id="list-table" class="data-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Donor</th>
+            <th class="num">Generic Ask</th>
+            <th class="num">Score</th>
+            <th class="num">Cycles</th>
+            <th class="num">Campaigns</th>
+            <th class="num">Per Cycle</th>
+            <th>Last Gave</th>
+          </tr>
+        </thead>
+        <tbody id="list-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div><!-- /mode-chamber -->
 
 </main>
 
