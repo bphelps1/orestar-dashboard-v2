@@ -41,7 +41,7 @@ const listCode = slice("const LIST_SIZE = 125;", "// ── The standing list, s
 // The lobby-list shaping: asks, giving lines and the name/committee tidying.
 const listShapeCode = slice("// \u2500\u2500 The standing list, shaped like the lobby list",
                             "let listControlsWired = false;")
-  + slice("/** A lobbyist's name split the way", "const LIST_SHEET_CYCLES");
+  + slice("/** A lobbyist's name split the way", "/** Sheet 1: the lobby list itself");
 
 function context(extra = {}) {
   const ctx = vm.createContext({
@@ -565,16 +565,24 @@ function listContext(extra = {}) {
     PERSON_BOOK_TYPES: new Set(["Individual", "Candidate & Immediate Family",
                                 "Candidate's Immediate Family"]),
     filerIndex: [], adminTags: {}, DL: {}, LOB: {},
+    // currentMemberFor() asks which chamber a committee sits in; the cohort
+    // is one chamber by construction here.
+    getChamber: () => "house",
     ...extra,
   });
   vm.runInContext(listCode, ctx);        // context() already ran the rest
+  // Seeding the roster skips the fetch inside loadCurrentLegislators, and a
+  // `let` from the sliced code has to be assigned from a script in the same
+  // context rather than from a property on the sandbox.
+  ctx.__roster = { house: ["Julie Fahey", "Bobby Levy", "Emerson Levy"], senate: [] };
+  vm.runInContext("currentLegislators = __roster;", ctx);
   return ctx;
 }
 
 function chamberFixture() {
-  const committee = (slug, name, party, total_in) => ({
+  const committee = (slug, name, party, total_in, candidate_name) => ({
     slug, name, committee_type: "Candidate Committee",
-    office: "State Representative", party, total_in,
+    office: "State Representative", party, total_in, candidate_name,
   });
   const rows = donors => donors.map(([name, donor_id, total]) => ({ name, donor_id, total }));
   const history = {
@@ -590,10 +598,10 @@ function chamberFixture() {
   };
   return listContext({
     filerIndex: [
-      committee("a", "Friends of A", "Democrat", 500000),
-      committee("b", "Friends of B", "Democrat", 300000),
-      committee("paper", "Paper Committee", "Democrat", 900),
-      committee("r", "Friends of R", "Republican", 400000),
+      committee("a", "Friends of Julie Fahey", "Democrat", 500000, "Julie Fahey"),
+      committee("b", "Friends of Emerson Levy", "Democrat", 300000, "Emerson Levy"),
+      committee("paper", "Paper Committee", "Democrat", 900, "Nobody At All"),
+      committee("r", "Friends of R", "Republican", 400000, "Someone Else"),
     ],
     DL: { getFilerDonorYears: async slugs => new Map(slugs.map(s => [s, history[s] || {}])) },
     LOB: { loadBookTypes: async ids => new Map(ids.map(id => [id, {
@@ -660,37 +668,61 @@ function shapeContext() {
   return ctx;
 }
 
-test("an ask reads as the lobby list writes it", () => {
+test("an ask is one number, as a call list quotes it", () => {
   const ctx = shapeContext();
-  assert.equal(ctx.askLine({ donor: "Oregon Nurses PAC", ask: 2000, ask_low: 1500, ask_high: 2500 }),
-               "Oregon Nurses PAC: $1,500–$2,500");
-  // One observation, or a flat one: a single figure rather than a range.
-  assert.equal(ctx.askLine({ donor: "Kroger", ask: 750, ask_low: 750, ask_high: 750 }),
-               "Kroger: $750");
-  assert.equal(ctx.askLine({ donor: "Kroger", ask: 750 }), "Kroger: $750");
+  assert.equal(ctx.askLine({ donor: "Oregon Nurses PAC", ask: 2500 }), "Oregon Nurses PAC: $2,500");
+  // The donor is kept apart from the rest so a sheet can bold it.
+  assert.deepEqual(plain(ctx.askParts({ donor: "Kroger", ask: 1000 })),
+                   { donor: "Kroger", rest: ": $1,000" });
 });
 
-test("a giving line names the candidates, not the committees", () => {
+test("asks round to the nearest $500, and never to nothing", () => {
+  const ctx = listContext();
+  assert.equal(ctx.roundAsk(2400), 2500);
+  assert.equal(ctx.roundAsk(2600), 2500);
+  assert.equal(ctx.roundAsk(2750), 3000);
+  assert.equal(ctx.roundAsk(250), 500, "a donor worth listing is worth asking");
+  assert.equal(ctx.roundAsk(10), 500);
+  assert.equal(ctx.roundAsk(0), 500);
+});
+
+test("a giving line names sitting members by surname", () => {
   const ctx = shapeContext();
   const row = { donor: "Oregon Nurses PAC", per_cycle: [{ cycle: 2026, recipients: [
-    { filer: "Friends of Julie Fahey", amount: 20000 },
-    { filer: "Jason for Bend", amount: 2000 },
+    { filer: "Friends of Julie Fahey", member: "Fahey", amount: 20000 },
+    { filer: "Friends of Emerson Levy", member: "Levy E", amount: 2000 },
   ] }] };
-  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $20,000 Julie Fahey, $2,000 Jason");
+  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $20,000 Fahey, $2,000 Levy E");
   assert.equal(ctx.givingLine(row, 2024), "", "a cycle with no giving has no line");
+  assert.equal(ctx.givingLine({ donor: "X", per_cycle: [{ cycle: 2026, recipients: [] }] }, 2026), "",
+               "a cycle whose recipients all left has no line either");
+  assert.deepEqual(plain(ctx.givingParts(row, 2026)),
+                   { donor: "Oregon Nurses PAC", rest: ": $20,000 Fahey, $2,000 Levy E" });
 });
 
-test("committee names shorten to the candidate", () => {
-  const ctx = shapeContext();
-  const cases = [
-    ["Friends of Julie Fahey", "Julie Fahey"],
-    ["Committee to Elect Rachel Prusak", "Rachel Prusak"],
-    ["Jason for Bend", "Jason"],
-    ["Gomberg for State Rep", "Gomberg"],
-    ["Oregon Nurses Political Action Committee (12986)", "Oregon Nurses Political Action Committee"],
-    ["Mary Lou Gets Results", "Mary Lou Gets Results"],
-  ];
-  for (const [raw, want] of cases) assert.equal(ctx.shortCommitteeName(raw), want, raw);
+test("a surname alone, unless the chamber seats two of them", () => {
+  const ctx = context({ getChamber: () => "house" });
+  ctx.__roster = { house: ["Julie Fahey", "Bobby Levy", "Emerson Levy", "Rob Nosse"], senate: [] };
+  vm.runInContext("currentLegislators = __roster;", ctx);
+  const short = ctx.memberShortNames("house");
+  assert.equal(short.get("Julie Fahey"), "Fahey");
+  assert.equal(short.get("Rob Nosse"), "Nosse");
+  assert.equal(short.get("Bobby Levy"), "Levy B");
+  assert.equal(short.get("Emerson Levy"), "Levy E");
+});
+
+test("a committee resolves to the sitting member, or to nobody", () => {
+  // currentMemberFor() asks getChamber(), which is declared outside every
+  // slice — the cohort is one chamber by construction wherever it is called.
+  const ctx = context({ getChamber: () => "house" });
+  ctx.__roster = { house: ["Julie Fahey"], senate: [] };
+  vm.runInContext("currentLegislators = __roster;", ctx);
+  const house = { office: "State Representative" };
+  assert.equal(ctx.currentMemberFor({ ...house, candidate_name: "Julianne Fahey", name: "Friends of Julie Fahey" }),
+               "Julie Fahey");
+  // Brian Clem and RJ Navarro no longer hold seats; neither can be called.
+  assert.equal(ctx.currentMemberFor({ ...house, candidate_name: "Brian Clem", name: "Friends of Brian Clem" }), null);
+  assert.equal(ctx.currentMemberFor({ ...house, candidate_name: "RJ Navarro", name: "Friends of RJ Navarro" }), null);
 });
 
 test("a lobbyist's name splits into the list's two columns", () => {
@@ -701,12 +733,16 @@ test("a lobbyist's name splits into the list's two columns", () => {
   assert.deepEqual(plain(ctx.splitName("")), { first: "", last: "" });
 });
 
-test("the suggested ask carries a range around the median", async () => {
-  const ctx = chamberFixture();
-  const built = await ctx.buildChamberList("house", "Democrat", 2026);
-  const big = built.rows[0];
-  assert.ok(big.ask_low <= big.ask && big.ask <= big.ask_high,
-            `${big.ask_low} ≤ ${big.ask} ≤ ${big.ask_high}`);
+test("the sheet's column numbers come from its own headers", () => {
+  const ctx = shapeContext();
+  const h = ctx.listSheetHeaders({ cycle: 2026, chamber: { label: "House" }, party: { short: "D" } });
+  // Counting these by hand put the bolded donor lists one column left, over
+  // the ask and over Donors. They are read off the labels instead.
+  assert.equal(h.labels[h.askCol - 1], "Suggested Ask 2026");
+  assert.equal(h.labels[h.byClientCol - 1], "Suggested Ask 2026 by client");
+  assert.equal(h.labels[h.givingFrom - 1], "2025–2026 giving");
+  assert.equal(h.labels[h.givingFrom], "2023–2024 giving");
+  assert.equal(h.byClientCol, h.askCol + 1);
 });
 
 test("donor identities survive for the lobbyist lookup", async () => {
@@ -715,4 +751,38 @@ test("donor identities survive for the lobbyist lookup", async () => {
   // planAttribution needs the ids; dropping them is what left every donor
   // unattributed the first time round.
   assert.deepEqual(plain(built.rows[0].ids), ["d1"]);
+});
+
+test("giving history names only members who still hold the seat", async () => {
+  const seat = (slug, name, candidate_name) => ({
+    slug, name, candidate_name, committee_type: "Candidate Committee",
+    office: "State Representative", party: "Democrat", total_in: 400000,
+  });
+  const gave = amount => ({ 2024: [{ name: "Big PAC", donor_id: "d1", total: amount }],
+                            2026: [{ name: "Big PAC", donor_id: "d1", total: amount }] });
+  const ctx = listContext({
+    filerIndex: [seat("sitting", "Friends of Julie Fahey", "Julie Fahey"),
+                 // Brian Clem left the House; his giving is not a call to make.
+                 seat("gone", "Friends of Brian Clem", "Brian Clem")],
+    DL: { getFilerDonorYears: async slugs =>
+      new Map(slugs.map(s => [s, s === "gone" ? gave(7500) : gave(2000)])) },
+    LOB: { loadBookTypes: async ids => new Map(ids.map(id => [id, "Political Committee"])) },
+  });
+  const built = await ctx.buildChamberList("house", "Democrat", 2026);
+  const named = built.rows[0].per_cycle.flatMap(c => Array.from(c.recipients, r => r.member));
+  assert.equal(named.includes("Clem"), false);
+  assert.deepEqual([...new Set(named)], ["Fahey"]);
+  // The money still counts toward what the donor gives a candidate of this
+  // kind — it is the history column that names people you can ring.
+  assert.ok(built.rows[0].gifts.some(g => g.amount === 7500),
+            "Clem's giving still informs the ask, it just has no name on it");
+});
+
+test("a lobbyist's single ask is their clients' asks added up", async () => {
+  const ctx = listContext();
+  // Every client ask is already a multiple of the rounding, so the total is
+  // too: the column and the breakdown can never disagree.
+  const asks = [2400, 250, 1750].map(ctx.roundAsk);
+  assert.deepEqual(asks, [2500, 500, 2000]);
+  assert.equal(asks.reduce((a, b) => a + b, 0) % 500, 0);
 });

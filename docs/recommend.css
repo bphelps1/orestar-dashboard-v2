@@ -652,26 +652,20 @@
 
 /* ── The standing list, in the shape of the lobby list ──────────────────── */
 /* Column widths follow the lobby list: the money columns get the room. */
-.list-table { table-layout: fixed; min-width: 1320px; }
-.list-table th:nth-child(1) { width: 70px; }
-.list-table th:nth-child(2) { width: 210px; }
-.list-table th:nth-child(3) { width: 240px; }
-.list-table th:nth-child(4) { width: 180px; }
-.list-table th:nth-child(5),
-.list-table th:nth-child(6) { width: 310px; }
+.list-table { table-layout: fixed; min-width: 1400px; }
+.list-table th:nth-child(1) { width: 70px; }    /* Tier          */
+.list-table th:nth-child(2) { width: 210px; }   /* Who to call   */
+.list-table th:nth-child(3) { width: 110px; }   /* Suggested ask */
+.list-table th:nth-child(4) { width: 210px; }   /* By client     */
+.list-table th:nth-child(5) { width: 180px; }   /* Donors        */
+.list-table th:nth-child(6),
+.list-table th:nth-child(7) { width: 310px; }   /* giving        */
 .list-table td { vertical-align: top; }
 .list-row td { padding-top: 10px; padding-bottom: 10px; }
 .list-who { line-height: 1.35; }
 .list-ask { font-size: 0.82rem; line-height: 1.5; }
 .list-ask strong { font-weight: 600; }
-.list-ask-total {
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px solid var(--color-border);
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-}
+.list-ask-total { font-weight: 700; white-space: nowrap; }
 .list-donors { font-size: 0.78rem; line-height: 1.5; color: var(--color-text-muted); }
 .list-giving-cell { font-size: 0.75rem; line-height: 1.45; }
 .list-giving { margin-bottom: 5px; }

@@ -884,17 +884,44 @@ const CURRENT_MEMBER_NAME_ALIASES = {
   "Vikki Breese-Iverson": ["Vikki Iverson"],
   "Courtney Neron Misslin": ["Courtney Neron"],
 };
-function isCurrentLegislator(filer) {
+/** The sitting member this committee belongs to, by roster name, else null. */
+function currentMemberFor(filer) {
   const chamber = getChamber(filer);
-  if (!chamber || !currentLegislators) return false;
+  if (!chamber || !currentLegislators) return null;
   // Whole tokens accommodate middle initials and committee labels without fuzzy surname matches.
   const candidates = [filer.candidate_name, filer.name].map(n => new Set(memberNameTokens(n)));
-  return currentLegislators[chamber].some(name => {
-    return [name, ...(CURRENT_MEMBER_NAME_ALIASES[name] || [])].some(variant => {
+  return currentLegislators[chamber].find(name =>
+    [name, ...(CURRENT_MEMBER_NAME_ALIASES[name] || [])].some(variant => {
       const tokens = memberNameTokens(variant);
       return tokens.length >= 2 && candidates.some(candidate => tokens.every(t => candidate.has(t)));
-    });
-  });
+    })) || null;
+}
+
+function isCurrentLegislator(filer) {
+  return currentMemberFor(filer) !== null;
+}
+
+/**
+ * How a call list writes a candidate: the surname alone, and the surname plus
+ * a first initial when the chamber seats two of them — Bobby Levy and Emerson
+ * Levy both sit in the House, so both read "Levy B" and "Levy E".
+ */
+function memberShortNames(chamber) {
+  const roster = currentLegislators?.[chamber] || [];
+  const bySurname = new Map();
+  for (const name of roster) {
+    const tokens = String(name).trim().split(/\s+/);
+    const surname = tokens[tokens.length - 1];
+    if (!bySurname.has(surname)) bySurname.set(surname, []);
+    bySurname.get(surname).push(name);
+  }
+  const out = new Map();
+  for (const [surname, names] of bySurname) {
+    for (const name of names) {
+      out.set(name, names.length > 1 ? `${surname} ${name.trim()[0]}` : surname);
+    }
+  }
+  return out;
 }
 
 /** Only known, recent candidate elections can establish candidate comparability.
@@ -3533,6 +3560,14 @@ const LIST_MIN_RAISED = 5000;       // committees below this are paper filings
 const LIST_MIN_CYCLES = 2;          // one cycle is an event, not a habit
 const LIST_LOOKUP_BATCH = 300;      // donors whose category is read at a time
 const LIST_RECIPIENTS_SHOWN = 20;   // candidates named per donor per cycle
+// A call list asks for round numbers. Nothing rounds to nothing: a donor
+// worth listing is worth asking, so the smallest ask is one step.
+const LIST_ASK_ROUNDING = 500;
+
+function roundAsk(amount) {
+  return Math.max(LIST_ASK_ROUNDING,
+                  Math.round((Number(amount) || 0) / LIST_ASK_ROUNDING) * LIST_ASK_ROUNDING);
+}
 
 // Full marks. A donor giving to this many campaigns in a cycle, or this many
 // dollars into the chamber in a cycle, tops out the component; the curve in
@@ -3596,6 +3631,9 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
 
   const cohort = chamberCohort(chamber, party);
   if (!cohort.length) throw new Error(`No ${party.label} ${chamber.label} committees on file.`);
+  // The giving history names sitting members only, so the roster is required
+  // rather than optional here.
+  await loadCurrentLegislators();
   const windowCycles = CYCLE_WEIGHTS.map((_, i) => cycle - 2 * i);
   const inWindow = new Map();                        // "2025" → 2026
   for (const c of windowCycles) for (const y of cycleYears(c)) inWindow.set(String(y), c);
@@ -3624,6 +3662,14 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
   }
 
   const byName = new Map(cohort.map(f => [f.slug, f.name]));
+  // Every cohort committee whose candidate still holds the seat, by the name
+  // a call list would write: "Fahey", or "Levy B" where the chamber seats two.
+  const shortNames = memberShortNames(chamber.key);
+  const memberNames = new Map();
+  for (const filer of cohort) {
+    const member = currentMemberFor(filer);
+    if (member) memberNames.set(filer.slug, shortNames.get(member) || member);
+  }
   const totalWeight = CYCLE_WEIGHTS.reduce((s, w) => s + w, 0);
   const ranked = [];
 
@@ -3670,7 +3716,9 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
     ranked.push({
       donor_key: key, donor: donor.name, donor_id: [...donor.ids][0] || null,
       ids: [...donor.ids], book_type: null,
-      ask: Math.round(ask),
+      ask: roundAsk(ask),
+      // The spread behind the ask, kept for the flat sheet; the call list
+      // itself quotes one number.
       ask_low: Math.round(askLow), ask_high: Math.round(askHigh),
       score: Math.round(score * 10) / 10,
       consistency, breadth, magnitude,
@@ -3681,8 +3729,12 @@ async function buildChamberList(chamberKey, partyKey, cycle, onProgress = () => 
       per_cycle: cyclesGiven.map(cy => ({
         cycle: cy, total: perCycle.get(cy).total, committees: perCycle.get(cy).committees.length,
         top: [...perCycle.get(cy).committees].sort((a, b) => b.amount - a.amount).slice(0, 5),
-        // The lobby list prints who the money went to, not just how much.
+        // The lobby list prints who the money went to, not just how much —
+        // and only people you can still call. Money given to a member who
+        // lost or retired says nothing about who to ring now.
         recipients: [...perCycle.get(cy).committees].sort((a, b) => b.amount - a.amount)
+          .map(c => ({ ...c, member: memberNames.get(c.slug) || null }))
+          .filter(c => c.member)
           .slice(0, LIST_RECIPIENTS_SHOWN),
       })),
       gifts,
@@ -3758,28 +3810,27 @@ function listWhy(row) {
 // lobbyist, chosen the same way the candidate plan chooses: an admin's filing
 // first, then a primary link, then a confirmed one, then the stronger match.
 
-/** "Oregon Nurses PAC: $1,500–$2,500" — one ask, as the lobby list writes it. */
+/** "Oregon Nurses PAC: $2,500" — one ask, one number. */
 function askLine(row) {
-  const range = row.ask_low && row.ask_high && row.ask_low !== row.ask_high
-    ? `${fmt$(row.ask_low)}–${fmt$(row.ask_high)}` : fmt$(row.ask);
-  return `${row.donor}: ${range}`;
+  return `${row.donor}: ${fmt$(row.ask)}`;
+}
+
+/** The donor and the rest, kept apart so a sheet can bold the donor. */
+function askParts(row) {
+  return { donor: row.donor, rest: `: ${fmt$(row.ask)}` };
 }
 
 /** "Oregon Nurses PAC: $1,000 Fahey, $500 Kropf" — a cycle's giving. */
 function givingLine(row, cycle) {
-  const band = row.per_cycle.find(c => c.cycle === cycle);
-  if (!band) return "";
-  const names = band.recipients.map(r => `${fmt$(r.amount)} ${shortCommitteeName(r.filer)}`).join(", ");
-  return `${row.donor}: ${names}`;
+  const parts = givingParts(row, cycle);
+  return parts ? parts.donor + parts.rest : "";
 }
 
-/** Committee names are long; a call list wants the candidate. */
-function shortCommitteeName(name) {
-  return String(name || "")
-    .replace(/\s*\(\d+\)\s*$/, "")
-    .replace(/^(friends of|committee to elect|elect|the committee to elect)\s+/i, "")
-    .replace(/\s+for\s+(oregon|state (rep|representative|senate|senator).*|senate|house|bend|\w+ county)$/i, "")
-    .trim();
+function givingParts(row, cycle) {
+  const band = (row.per_cycle || []).find(c => c.cycle === cycle);
+  if (!band || !band.recipients.length) return null;
+  const names = band.recipients.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
+  return { donor: row.donor, rest: `: ${names}` };
 }
 
 let listControlsWired = false;
@@ -3789,14 +3840,6 @@ function listLobbyistsFor(row) {
   const list = window._listAttr?.get(row.donor_key) || [];
   const includeSuggested = document.getElementById("list-include-suggested")?.checked ?? true;
   return includeSuggested ? list : list.filter(a => a.status === "confirmed");
-}
-
-/** Is this lobbyist a standing partner of the chamber and party being listed? */
-function listIsPartner(lobbyistId) {
-  const built = window._chamberList;
-  if (!built) return false;
-  const key = `${built.chamber.key}|${built.party.short}`;
-  return !!partnersById?.get(lobbyistId)?.has(key);
 }
 
 /**
@@ -3837,14 +3880,16 @@ function chamberGroups() {
   }
   for (const g of out) {
     g.rows.sort((a, b) => b.ask - a.ask || b.score - a.score);
+    // The asks are already round, so their total is too — the single number
+    // in the Suggested ask column is exactly the breakdown added up.
     g.ask = g.rows.reduce((s, r) => s + r.ask, 0);
-    g.partner = g.lobbyist ? listIsPartner(g.lobbyist.lobbyist_id) : false;
-    // The candidate-plan tier, minus the two bonuses that need a committee:
-    // a chamber list has no single committee to have given to.
+    // No PARTNER here. A standing relationship with a caucus says nothing
+    // about a list that is the whole caucus, so everyone is scored and lands
+    // on the tier their book earns.
     g.tier = lobbyistTier(g.rows.map(r => ({
       given: 0, cycles: {},
       comp_gifts: r.per_cycle.flatMap(c => c.recipients.map(x => ({ filer: x.filer, amount: x.amount }))),
-    })), g.partner);
+    })), false);
   }
   out.sort((a, b) => (!a.lobbyist - !b.lobbyist) || (a.tier.tier - b.tier.tier) || (b.ask - a.ask));
   return out;
@@ -3859,7 +3904,6 @@ async function loadChamberAttribution(built) {
       lobbyistsById = new Map((await LOB.loadLobbyists())
         .map(l => [l.lobbyist_id, { ...l, name: donorDisplayName(l.name) }]));
     }
-    if (!partnersById) partnersById = await LOB.loadPartners();
     if (typeof LP !== "undefined") LP.load().catch(() => {});
     const rows = built.rows.flatMap(r => (r.ids || [r.donor_id]).filter(Boolean)
       .map(id => ({ name: r.donor, donor_id: id, key: r.donor_key })));
@@ -3964,7 +4008,7 @@ function renderChamberRows() {
     `${groups.filter(g => g.lobbyist).length} lobbyists · `
     + `${groups.reduce((s, g) => s + g.rows.length, 0)} donors`;
   if (!groups.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="plan-empty">No lobbyists or donors match.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="plan-empty">No lobbyists or donors match.</td></tr>';
     return;
   }
   const cycles = [built.cycle, built.cycle - 2];
@@ -3973,26 +4017,27 @@ function renderChamberRows() {
     const who = l ? lobbyistHeader(l)
       : `<div class="plan-lobbyist plan-none">No lobbyist on file</div>
          <div class="plan-contact">Assign these at <a href="/admin/lobbyists">/admin/lobbyists</a></div>`;
-    const asks = g.rows.map(r => `<div class="list-ask"><strong>${esc(r.donor)}</strong>: ${
-      r.ask_low && r.ask_high && r.ask_low !== r.ask_high
-        ? `${fmt$(r.ask_low)}–${fmt$(r.ask_high)}` : fmt$(r.ask)}</div>`).join("");
+    const byClient = g.rows.map(r => `<div class="list-ask"><strong>${esc(r.donor)}</strong>: ${
+      fmt$(r.ask)}</div>`).join("");
     const donors = g.rows.map(r => esc(r.donor)).join("; ");
     const giving = cy => g.rows.map(r => {
-      const line = givingLine(r, cy);
-      return line ? `<div class="list-giving"><strong>${esc(r.donor)}</strong>: ${
-        esc(line.slice(line.indexOf(": ") + 2))}</div>` : "";
+      const parts = givingParts(r, cy);
+      return parts ? `<div class="list-giving"><strong>${esc(parts.donor)}</strong>${
+        esc(parts.rest)}</div>` : "";
     }).join("");
     return `<tr class="list-row">
       <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
       <td class="list-who">${who}${g.rows.some(r => r.also.length)
         ? `<div class="plan-also">also: ${esc([...new Set(g.rows.flatMap(r =>
             r.also.map(a => a.lobbyist.name)))].join(", "))}</div>` : ""}</td>
-      <td class="list-asks">${asks}<div class="list-ask-total">Total ${fmt$(g.ask)}</div></td>
+      <td class="num list-ask-total">${fmt$(g.ask)}</td>
+      <td class="list-asks">${byClient}</td>
       <td class="list-donors">${donors}</td>
       <td class="list-giving-cell">${giving(cycles[0])}</td>
       <td class="list-giving-cell">${giving(cycles[1])}</td>
     </tr>`;
   }).join("");
+  document.getElementById("list-ask-head").textContent = `Suggested ask ${built.cycle}`;
   document.getElementById("list-cycle-head-0").textContent = `${cycleName(cycles[0])} giving`;
   document.getElementById("list-cycle-head-1").textContent = `${cycleName(cycles[1])} giving`;
 }
@@ -4015,19 +4060,27 @@ const LIST_SHEET_CYCLES = 3;          // cycles of giving printed, newest first
 /** Header labels, left to right, for a built list. */
 function listSheetHeaders(built) {
   const cycles = Array.from({ length: LIST_SHEET_CYCLES }, (_, i) => built.cycle - 2 * i);
+  const labels = ["Tier", "Photo", "First Name", "Last Name", `Suggested Ask ${built.cycle}`,
+                  `Suggested Ask ${built.cycle} by client`, "Donors",
+                  ...cycles.map(c => `${cycleName(c)} giving`),
+                  "Also lobbied by", "Firm", "Email", "Cell", "Work"];
+  // Column numbers are read off the labels rather than counted by hand: the
+  // writer addresses cells one-based, and an off-by-one silently overwrites
+  // the neighbouring column.
+  const at = label => labels.indexOf(label) + 1;
   return {
-    cycles,
-    labels: ["Tier", "Photo", "First Name", "Last Name", `Suggested Ask(s) ${built.cycle}`, "Donors",
-             ...cycles.map(c => `${cycleName(c)} giving`),
-             "Also lobbied by", "Firm", "Email", "Cell", "Work"],
+    cycles, labels,
+    askCol: at(`Suggested Ask ${built.cycle}`),
+    byClientCol: at(`Suggested Ask ${built.cycle} by client`),
+    givingFrom: at(`${cycleName(cycles[0])} giving`),
     // Money columns are the ones the fundraiser reads; the rest are contact.
-    moneyFrom: 4, moneyTo: 6 + cycles.length,
+    moneyFrom: 4, moneyTo: 7 + cycles.length,
   };
 }
 
 /** One row per lobbyist, in call order. */
 function listSheetRows(built, groups) {
-  const { cycles } = listSheetHeaders(built);
+  const { cycles, byClientCol, givingFrom } = listSheetHeaders(built);
   return groups.map(g => {
     const l = g.lobbyist;
     const contact = l ? planContact(l) : { name: "", email: "", phone: "", others: "" };
@@ -4035,11 +4088,17 @@ function listSheetRows(built, groups) {
     return {
       tier: l ? g.tier.label : "",
       person: portraitPerson(l),
+      // Cells that name donors are kept as {donor, rest} pairs so the writer
+      // can bold the donor — a call list is read by eye, down the column.
+      rich: { [byClientCol]: g.rows.map(askParts),
+              ...Object.fromEntries(cycles.map((c, i) =>
+                [givingFrom + i, g.rows.map(r => givingParts(r, c)).filter(Boolean)])) },
       cells: [
         l ? g.tier.label : "",
         "",                                   // the portrait is drawn into this cell
         l ? first : "No lobbyist on file",
         l ? last : "",
+        g.ask,                                // one number, the breakdown added up
         g.rows.map(askLine).join("\n"),
         g.rows.map(r => r.donor).join("; "),
         ...cycles.map(c => g.rows.map(r => givingLine(r, c)).filter(Boolean).join("\n")),
@@ -4094,9 +4153,10 @@ function chamberMethodRows(built) {
         + `scored and the top ${fmtNum(built.considered)} checked against ORESTAR's contributor category `
         + "until the list was full." },
     { Item: "Suggested ask", Value: "median gift to one candidate, one cycle",
-      Detail: "Contributions to the same candidate inside a cycle are added up first, so instalments read "
-        + "as one relationship. The median across those relationships is weighted by how recent each is; "
-        + "the range either side is the weighted 25th and 75th percentile of the same set." },
+      Detail: `Contributions to the same candidate inside a cycle are added up first, so instalments read `
+        + `as one relationship. The median across those relationships is weighted by how recent each is, `
+        + `then rounded to the nearest ${fmt$(LIST_ASK_ROUNDING)} — never to nothing. A lobbyist's single `
+        + `ask is their clients' asks added up, so the column and the breakdown always agree.` },
     { Item: "Recency weights", Value: CYCLE_WEIGHTS.join(" · "),
       Detail: `Weight by cycles ago, newest first. The first `
         + `${CYCLE_WEIGHTS.filter(w => w === 1).length} count in full; giving older than `
@@ -4117,11 +4177,17 @@ function chamberMethodRows(built) {
       Detail: "An admin's filing at /admin/lobbyists wins, then a link marked primary, then a confirmed "
         + "link over an unreviewed one, then the stronger match — the same order the candidate plan uses. "
         + "Anyone else attached to the donor is listed under \u2018Also lobbied by\u2019." },
-    { Item: "Tier", Value: "Partner, then 1–4",
+    { Item: "Tier", Value: "1–4, all computed",
       Detail: "6 × donors carried (max 30) + 2 × like candidates their donors support (max 30) + what "
         + "those donors gave them ÷ 5,000 (max 20). The candidate plan's two remaining bonuses need a "
-        + "single committee to have given to, so they do not apply to a chamber list. PARTNER is set by "
-        + "hand per chamber and party at /admin/lobbyists and is never computed." },
+        + "single committee to have given to, so they do not apply here. Nor does PARTNER: a standing "
+        + "relationship with a caucus says nothing about a list that is the whole caucus, so everyone "
+        + "lands on the tier their book earns." },
+    { Item: "Giving history", Value: "sitting members only",
+      Detail: "The giving columns name only members who currently hold the seat, checked against the "
+        + "chamber roster in docs/assets/current_legislators.json. Money given to someone who lost or "
+        + "retired is no guide to who to ring now. Candidates read as a surname, or a surname and first "
+        + "initial where the chamber seats two of them." },
     { Item: "What it is not", Value: "not a plan for one candidate",
       Detail: "No seat, no margin, no relationship with a particular committee is in these numbers. "
         + "For a named candidate, use the candidate view — it benchmarks against comparable seats and "
@@ -4131,7 +4197,7 @@ function chamberMethodRows(built) {
 
 /** Sheet 1: the lobby list itself, styled to be read rather than pivoted. */
 async function writeListSheet(wb, built, groups, imageCache) {
-  const { labels, cycles, moneyFrom, moneyTo } = listSheetHeaders(built);
+  const { labels, cycles, moneyFrom, moneyTo, askCol } = listSheetHeaders(built);
   const ws = wb.addWorksheet(`${built.chamber.label} ${built.party.short}`,
     { views: [{ state: "frozen", ySplit: 2, xSplit: 4 }] });
 
@@ -4160,10 +4226,22 @@ async function writeListSheet(wb, built, groups, imageCache) {
     if (fill) tierCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
     tierCell.font = { bold: true, size: 18 };
     tierCell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    // The single ask reads as money, not as text.
+    row.getCell(askCol).numFmt = MONEY;
+    row.getCell(askCol).font = { bold: true };
+    // Donor names in bold, so a column of them can be scanned.
+    for (const [column, parts] of Object.entries(entry.rich)) {
+      if (!parts.length) continue;
+      row.getCell(Number(column)).value = { richText: parts.flatMap((part, i) => [
+        ...(i ? [{ text: "\n" }] : []),
+        { font: { bold: true }, text: part.donor },
+        { text: part.rest },
+      ]) };
+    }
     if (entry.person) await addPortrait(wb, ws, entry.person, row.number, 2, imageCache);
   }
 
-  const widths = [8, 13, 14, 16, 42, 34, ...cycles.map(() => 46), 24, 24, 30, 16, 16];
+  const widths = [8, 13, 14, 16, 16, 34, 34, ...cycles.map(() => 46), 24, 24, 30, 16, 16];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: labels.length } };
   return ws;
