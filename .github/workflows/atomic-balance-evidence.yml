@@ -492,6 +492,14 @@ jobs:
         if: inputs.recovery_mode != 'identity_backfill' && always() && steps.publish.outcome == 'success'
         run: python scraper/process.py
 
+      # process.py rebuilds every filer_detail donor blob from the raw
+      # transaction labels, which drops donor_key/donor_id and with them the
+      # resolver's work and every merge saved at /admin/donors. Without this,
+      # the Recommend tab cannot read a contributor category for any donor.
+      - name: Re-key donors after the durable-evidence aggregation
+        if: always() && !cancelled() && steps.aggregate.outcome == 'success'
+        run: python scraper/refresh_donor_aggregates.py
+
       - name: Stabilize captured cash against fresh exact evidence
         id: stabilize
         if: >-
@@ -514,6 +522,10 @@ jobs:
           inputs.recovery_mode != 'identity_backfill' && steps.plan.outcome == 'success' &&
           steps.plan.outputs.filer_ids == ''
         run: python scraper/process.py
+
+      - name: Re-key donors after the empty-plan recovery aggregation
+        if: always() && !cancelled() && steps.recover_aggregate.outcome == 'success'
+        run: python scraper/refresh_donor_aggregates.py
 
       - name: Replan after recovering empty-plan aggregation
         id: recovery_plan

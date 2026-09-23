@@ -658,6 +658,11 @@ jobs:
             # After the last batch is merged, reload the full transactions
             # table so Postgres exactly mirrors the year shards.
             python scraper/process.py --supabase-full-load
+            # A full aggregation rebuilds the donor blobs from raw labels, so
+            # the resolver's identities and the saved merges have to be put
+            # back. The merge-only branches leave the blobs alone and need it
+            # no more than the daily refresh already gives them.
+            python scraper/refresh_donor_aggregates.py
           else
             # Intermediate date-range batch: merge only
             echo "Intermediate batch ($REMAINING windows remaining) — merge only..."
