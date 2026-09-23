@@ -3921,12 +3921,36 @@ function givingLine(row, cycle) {
   return parts ? parts.donor + parts.rest : "";
 }
 
+// A cheque far out of scale with the rest of a cycle is not a reference
+// anyone can call on. UFCW Local 555 put $70,000 into Bowman in 2024 and
+// again in 2026, against $5,000 and $25,000 for the next name on its list;
+// quoting that invites an ask nobody is going to get.
+//
+// Two tests, because either alone is wrong. The ratio alone would drop
+// $2,000 against $500, which is ordinary giving and a perfectly good
+// reference; the size alone would drop a $15,000 gift from a donor that
+// writes several. Both together find the single freak cheque and nothing
+// else — 24 of 343 cycle bands on the House Democratic list.
+const OUTSIZED_GIFT_RATIO = 2.5;
+const OUTSIZED_GIFT_MIN = 10000;
+
+/** One cycle's recipients, with a gift out of scale with the rest left out. */
+function outsizedTrimmed(recipients) {
+  const sorted = [...recipients].sort((a, b) => b.amount - a.amount);
+  if (sorted.length < 2) return sorted;
+  const [top, second] = sorted;
+  return top.amount >= OUTSIZED_GIFT_MIN && top.amount >= OUTSIZED_GIFT_RATIO * second.amount
+    ? sorted.slice(1) : sorted;
+}
+
 function givingParts(row, cycle) {
   const band = (row.per_cycle || []).find(c => c.cycle === cycle);
   if (!band || !band.recipients.length) return null;
-  const names = band.recipients.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
+  const shown = outsizedTrimmed(band.recipients);
+  if (!shown.length) return null;
+  const names = shown.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
   // Clients from the tranche below read the same as the rest here; the donor
-  // roster is where their having no ask is said.
+  // clients column is where their having no ask is said.
   return { donor: row.donor, rest: `: ${names}` };
 }
 
@@ -3965,6 +3989,19 @@ function alsoLine(entry) {
 function alsoParts(entry) {
   const line = alsoLine(entry);
   return { donor: entry.name, rest: line.slice(entry.name.length) };
+}
+
+/**
+ * The order lobbyists are worked in: tier first, then combined likelihood.
+ *
+ * Tier is the sort key rather than a label beside the name, so each colour
+ * band runs together down the page and in the workbook instead of
+ * alternating. Inside a tier, who to call first is a question about the
+ * donors, so it is answered with the score that ranked them, added up across
+ * everyone that lobbyist carries.
+ */
+function listGroupOrder(a, b) {
+  return a.tier.tier - b.tier.tier || b.likelihood - a.likelihood || b.ask - a.ask;
 }
 
 /** Every client whose giving belongs in a lobbyist's columns, asked or not. */
@@ -4044,7 +4081,7 @@ function chamberGroups() {
       comp_gifts: r.per_cycle.flatMap(c => c.recipients.map(x => ({ filer: x.filer, amount: x.amount }))),
     })));
   }
-  out.sort((a, b) => b.likelihood - a.likelihood || b.ask - a.ask);
+  out.sort(listGroupOrder);
   return out;
 }
 
@@ -4219,7 +4256,7 @@ function renderChamberRows() {
       fmt$(r.ask)}</div>`).join("");
     const donors = g.rows.map(r => esc(r.donor)).join("; ")
       + (g.context?.length
-        ? `<div class="list-also-represents">also represents, no ask: ${
+        ? `<div class="list-also-represents">also represents: ${
             esc(g.context.map(r => r.donor).join("; "))}</div>` : "");
     const giving = cy => groupGivingRows(g).map(r => {
       const parts = givingParts(r, cy);
@@ -4264,7 +4301,7 @@ const LIST_SHEET_CYCLES = 3;          // cycles of giving printed, newest first
 function listSheetHeaders(built) {
   const cycles = Array.from({ length: LIST_SHEET_CYCLES }, (_, i) => built.cycle - 2 * i);
   const labels = ["Tier", "Photo", "First Name", "Last Name",
-                  `Suggested Ask ${built.cycle} by client`, "Donors",
+                  `Suggested Ask ${built.cycle} by client`, "Donor clients",
                   ...cycles.map(c => `${cycleName(c)} giving`),
                   "Also lobbied by", "Firm", "Email", "Cell", "Work"];
   // Column numbers are read off the labels rather than counted by hand: the
@@ -4304,7 +4341,7 @@ function listSheetRows(built, groups) {
         l ? last : "",
         g.rows.map(askLine).join("\n"),
         [g.rows.map(r => r.donor).join("; "),
-         ...(g.context?.length ? [`also represents, no ask: ${g.context.map(r => r.donor).join("; ")}`] : []),
+         ...(g.context?.length ? [`also represents: ${g.context.map(r => r.donor).join("; ")}`] : []),
         ].join("\n"),
         ...cycles.map(c => groupGivingRows(g).map(r => givingLine(r, c)).filter(Boolean).join("\n")),
         alsoContacts(g).map(alsoLine).join("\n"),
@@ -4394,14 +4431,19 @@ function chamberMethodRows(built) {
         + "that gives nobody else is priced on its whole history, and its row says so." },
     { Item: "Clients with no ask", Value: `ranked ${LIST_SIZE + 1}–${LIST_CONTEXT_SIZE}`,
       Detail: `A lobbyist already on the list may also carry donors from the tranche below the top `
-        + `${LIST_SIZE}. Those appear in the giving columns marked "(no ask)" and in the donor roster, `
-        + `because they are part of the same call — but they carry no suggested ask, and they do not `
-        + `count toward the lobbyist's tier or their place in the order.` },
+        + `${LIST_SIZE}. Those appear in the giving columns and under "also represents" in the donor `
+        + `clients column, because they are part of the same call — but they carry no suggested ask, `
+        + `and they do not count toward the lobbyist's tier or their place in the order.` },
     { Item: "Who carries a donor", Value: "one lobbyist per donor",
       Detail: "An admin's filing at /admin/lobbyists wins, then a link marked primary, then a confirmed "
         + "link over an unreviewed one, then the stronger match — the same order the candidate plan uses. "
         + "Anyone else attached to the donor is listed under \u2018Also lobbied by\u2019, with the "
         + "clients they are an additional contact for in brackets and their firm, email and phone." },
+    { Item: "Row order", Value: "tier, then combined client likelihood",
+      Detail: "Rows are grouped by tier, so each colour band runs together down the sheet. Inside a "
+        + "tier the order is the donor scores of everyone that lobbyist carries, added up: who to "
+        + "call first is a question about the donors, and six likely ones are a better morning than "
+        + "one, so the total rather than the average." },
     { Item: "Tier", Value: "1–4, all computed",
       Detail: "6 × donors carried (max 30) + 2 × like candidates their donors support (max 30) + what "
         + "those donors gave them ÷ 5,000 (max 20). The candidate plan's two remaining bonuses need a "
@@ -4411,6 +4453,15 @@ function chamberMethodRows(built) {
         + "chamber roster in docs/assets/current_legislators.json. Money given to someone who lost or "
         + "retired is no guide to who to ring now. Candidates read as a surname, or a surname and first "
         + "initial where the chamber seats two of them." },
+    { Item: "Outsized gifts", Value: `dropped above ${fmt$(OUTSIZED_GIFT_MIN)} and `
+        + `${OUTSIZED_GIFT_RATIO}\u00d7 the next gift`,
+      Detail: "A cheque far out of scale with everything else a donor wrote that cycle is left out of "
+        + "the giving columns: it is not a number a caller can open on. UFCW Local 555 put $70,000 into "
+        + "one member in 2024 and again in 2026, against $5,000 and $25,000 for the next name on its "
+        + "list. Both tests have to hold — far larger than the second largest, and large in itself — so "
+        + `${fmt$(2000)} against ${fmt$(500)} stays, being ordinary giving. The gift still counts `
+        + "toward the donor's score, its tier and its suggested ask, and the per-donor sheet still "
+        + "reports it under Largest Recipients Last Cycle." },
     { Item: "What it is not", Value: "not a plan for one candidate",
       Detail: "No seat, no margin, no relationship with a particular committee is in these numbers. "
         + "For a named candidate, use the candidate view — it benchmarks against comparable seats and "

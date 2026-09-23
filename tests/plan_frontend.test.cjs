@@ -709,16 +709,18 @@ test("asks round coarsely above $1,000 and finely below it", () => {
 
 test("a giving line names sitting members by surname", () => {
   const ctx = shapeContext();
+  // Ordinary amounts: $20,000 against $2,000 would now read as out of scale
+  // and lose the Fahey gift, which is a different test's business.
   const row = { donor: "Oregon Nurses PAC", per_cycle: [{ cycle: 2026, recipients: [
-    { filer: "Friends of Julie Fahey", member: "Fahey", amount: 20000 },
+    { filer: "Friends of Julie Fahey", member: "Fahey", amount: 4000 },
     { filer: "Friends of Emerson Levy", member: "Levy E", amount: 2000 },
   ] }] };
-  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $20,000 Fahey, $2,000 Levy E");
+  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $4,000 Fahey, $2,000 Levy E");
   assert.equal(ctx.givingLine(row, 2024), "", "a cycle with no giving has no line");
   assert.equal(ctx.givingLine({ donor: "X", per_cycle: [{ cycle: 2026, recipients: [] }] }, 2026), "",
                "a cycle whose recipients all left has no line either");
   assert.deepEqual(plain(ctx.givingParts(row, 2026)),
-                   { donor: "Oregon Nurses PAC", rest: ": $20,000 Fahey, $2,000 Levy E" });
+                   { donor: "Oregon Nurses PAC", rest: ": $4,000 Fahey, $2,000 Levy E" });
 });
 
 test("a surname alone, unless the chamber seats two of them", () => {
@@ -865,7 +867,7 @@ test("a client with no ask reads like any other in the giving history", () => {
     { filer: "Friends of Ben Bowman", member: "Bowman", amount: 1000 },
   ] }] };
   // The giving history is about the money, not about the ask. That a client
-  // carries no ask is said once, in the donor roster.
+  // carries no ask is said once, in the donor clients column.
   assert.equal(ctx.givingLine(row, 2026), "Zillow Group: $1,000 Bowman");
   assert.equal(ctx.givingLine({ ...row, context: true }, 2026),
                "Zillow Group: $1,000 Bowman");
@@ -995,6 +997,57 @@ test("an additional contact names the clients they are a contact for", () => {
 test("nobody attached means no column content", () => {
   const ctx = shapeContext();
   assert.deepEqual(plain(ctx.alsoContacts({ rows: [{ donor: "A PAC", also: [] }, { donor: "B PAC" }] })), []);
+});
+
+test("tiers stick together, and likelihood orders the people inside one", () => {
+  const ctx = shapeContext();
+  const g = (tier, likelihood, ask, name) => ({ tier: { tier }, likelihood, ask, name });
+  const order = [
+    g(2, 90, 5000, "second tier, likeliest"),
+    g(1, 10, 500, "first tier, least likely"),
+    g(3, 99, 9000, "third tier, likeliest of all"),
+    g(1, 40, 1000, "first tier, likelier"),
+    g(2, 90, 7000, "second tier, same likelihood, larger book"),
+  ].sort(ctx.listGroupOrder);
+  assert.deepEqual(Array.from(order, x => x.name), [
+    "first tier, likelier", "first tier, least likely",
+    "second tier, same likelihood, larger book", "second tier, likeliest",
+    "third tier, likeliest of all",
+  ]);
+});
+
+test("a gift out of scale with its cycle is left out of the giving columns", () => {
+  const ctx = shapeContext();
+  const band = (cycle, ...pairs) => ({ cycle,
+    recipients: pairs.map(([member, amount]) => ({ member, amount, filer: member })) });
+  const row = { donor: "UFCW Local 555", per_cycle: [
+    // $70,000 against $5,000: far larger, and large in itself.
+    band(2024, ["Bowman", 70000], ["Nelson", 5000]),
+    // Far larger, but $2,000 is ordinary giving — a usable reference.
+    band(2022, ["Bowman", 2000], ["Nosse", 500]),
+    // Large, but only twice the next gift: not one freak cheque.
+    band(2020, ["Fahey", 10000], ["Ruiz", 5000]),
+    // Both enormous, so neither is the outlier.
+    band(2018, ["Bowman", 70000], ["Nosse", 65000], ["Evans", 2000]),
+  ] };
+  assert.equal(ctx.givingLine(row, 2024), "UFCW Local 555: $5,000 Nelson");
+  assert.equal(ctx.givingLine(row, 2022), "UFCW Local 555: $2,000 Bowman, $500 Nosse");
+  assert.equal(ctx.givingLine(row, 2020), "UFCW Local 555: $10,000 Fahey, $5,000 Ruiz");
+  assert.equal(ctx.givingLine(row, 2018),
+    "UFCW Local 555: $70,000 Bowman, $65,000 Nosse, $2,000 Evans");
+  // A donor with one recipient has nothing to be out of scale with.
+  assert.deepEqual(plain(ctx.outsizedTrimmed([{ member: "Bowman", amount: 70000 }])),
+                   [{ member: "Bowman", amount: 70000 }]);
+});
+
+test("a client below the cut is named without being marked", () => {
+  const ctx = shapeContext();
+  // The giving columns read the same for both, and the donor clients column
+  // says which are only riding along.
+  const row = { donor: "Below PAC", per_cycle: [{ cycle: 2026,
+    recipients: [{ member: "Fahey", amount: 1000, filer: "f" }] }] };
+  assert.deepEqual(plain(ctx.givingParts(row, 2026)), { donor: "Below PAC", rest: ": $1,000 Fahey" });
+  assert.equal(ctx.groupGivingRows({ rows: [{ donor: "Asked PAC" }], context: [row] }).length, 2);
 });
 
 test("each tier is a different colour, and Tier 4 is none", () => {

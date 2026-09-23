@@ -639,7 +639,7 @@ so a candidate reads down the *Suggested ask(s)* column and makes the calls.
 | **Tier** | Tier 1–4, all computed |
 | **Who to call** | portrait, name, firm and contact details, and anyone else attached to those donors |
 | **Suggested ask ⟨cycle⟩ by client** | one line per donor — *donor: $2,500* |
-| **Donors** | the donors this lobbyist carries, as a list |
+| **Donor clients** | the donors this lobbyist carries, as a list |
 | **⟨cycle⟩ giving** | one line per donor: *donor: $20,000 Fahey, $15,000 Levy E …*, for each of the three most recent cycles |
 | **Also lobbied by** | anyone else attached to those donors: the name, the clients they are an additional contact for in brackets, then firm, email and phone |
 
@@ -656,22 +656,24 @@ match. Everyone else attached to the donor is listed as *also*.
 
 ### The order lobbyists are worked in
 
-**Combined client likelihood** — the donor scores of everyone they carry,
+**Tier first, then combined client likelihood.** Rows are grouped by tier, so
+each colour band runs together down the page and in the workbook rather than
+alternating with the others.
+
+Inside a tier the order is the donor scores of everyone that lobbyist carries,
 added up. Who to call first is a question about the donors, so it is answered
 with the same score that ranked them: consistency, breadth and per-cycle size
 through the recency window. Six likely donors are a better morning than one,
 so the total rather than the average.
 
-The tier beside each name is still the book-size rule below, and it is a
-label rather than the sort key, so tiers are not strictly in order down the
-page.
-
 ### Clients below the cut
 
 A lobbyist already on the list often carries donors ranked just below the top
-125. Those appear in that lobbyist's **giving columns**, marked *(no ask)*,
-and in the donor roster under *also represents, no ask* — they are part of the
-call you are about to make even though they are not part of the ask.
+125. Those appear in that lobbyist's **giving columns**, and in **Donor
+clients** under *also represents* — they are part of the call you are about to
+make even though they are not part of the ask. Nothing marks them *(no ask)*:
+*also represents* already says it, and the marker only cluttered a column read
+by eye.
 
 They carry **no suggested ask**, and they count toward neither the lobbyist's
 tier nor their place in the order, which stay on the clients that do. The band
@@ -689,6 +691,33 @@ with a badge naming the list, the rank they would have had and the ask.
 That hand-off is per-browser: the list writes it when you build it, and the
 admin banner says when that was. It is a note to the person building the
 list, not a record anything depends on.
+
+### A gift that is out of scale is left out
+
+A cheque far larger than anything else a donor wrote that cycle is not a
+reference a caller can open on. UFCW Local 555 put **$70,000** into one member
+in 2024 and again in 2026, against $5,000 and $25,000 for the next name on its
+list — quoting that invites an ask nobody is going to get.
+
+So the largest gift in a cycle is dropped from the giving columns when **both**
+hold:
+
+| Test | Threshold |
+|---|---|
+| far larger than the second largest that cycle | **2.5×** (`OUTSIZED_GIFT_RATIO`) |
+| large in itself | **$10,000** (`OUTSIZED_GIFT_MIN`) |
+
+Either test alone gets it wrong. The ratio alone drops $2,000 against $500,
+which is ordinary giving and a perfectly good reference; the size alone drops
+a $15,000 gift from a donor that writes several. Together they find the single
+freak cheque and nothing else — **24 of 343 cycle bands** on the House
+Democratic list.
+
+Only the largest is ever considered: if the top two are both enormous, that is
+not one freak cheque and both stay. The gift still counts toward the donor's
+score, its tier and its suggested ask — which is a median, and so barely moves
+for one outlier — and the per-donor sheet still reports it under *Largest
+Recipients Last Cycle*.
 
 ### Who the giving history names
 
