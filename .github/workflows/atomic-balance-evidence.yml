@@ -221,11 +221,18 @@ jobs:
         if: inputs.recovery_mode == 'identity_backfill' && steps.identity_fetch.outcome == 'success'
         run: python scraper/bounded_identity_recovery.py fetched --plan "$IDENTITY_PLAN_PATH"
 
+      # Every step that runs process.py or the donor re-key has its own timeout.
+      # The Supavisor pooler keeps the client socket open when its backend dies,
+      # so a Postgres crash (2026-09-23) leaves these waiting silently instead of
+      # failing; one sat 2h10m. See supabase_sync._connect.
+      #
       # The existing merger writes Postgres. Publish its raw facts immediately;
       # a later exact failure is an incomplete recovery and cannot undo them.
       - name: Merge only verified complete scope exports
         id: identity_merge
         if: inputs.recovery_mode == 'identity_backfill' && steps.identity_fetched.outcome == 'success'
+        # Not yet seen here; other --merge-only steps take 1.5-3 minutes.
+        timeout-minutes: 30
         run: python scraper/process.py --merge-only
 
       - name: Publish recovered transaction facts before verification
@@ -321,11 +328,14 @@ jobs:
       - name: Project durable recovered facts into balance caches
         id: identity_aggregate
         if: always() && !cancelled() && steps.identity_projection_start.outcome == 'success'
+        # Same aggregation as "Re-aggregate from durable evidence" below.
+        timeout-minutes: 60
         run: python scraper/process.py
 
       - name: Re-key donors after the recovered projection
         id: identity_donors
         if: always() && !cancelled() && steps.identity_aggregate.outcome == 'success'
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
 
       - name: Verify the recovered projection was published unchanged
@@ -490,6 +500,8 @@ jobs:
       - name: Re-aggregate from durable evidence
         id: aggregate
         if: inputs.recovery_mode != 'identity_backfill' && always() && steps.publish.outcome == 'success'
+        # 17-28 minutes over 26 runs (2026-09-12..23).
+        timeout-minutes: 60
         run: python scraper/process.py
 
       # process.py rebuilds every filer_detail donor blob from the raw
@@ -498,6 +510,8 @@ jobs:
       # the Recommend tab cannot read a contributor category for any donor.
       - name: Re-key donors after the durable-evidence aggregation
         if: always() && !cancelled() && steps.aggregate.outcome == 'success'
+        # ~2.5 minutes wherever it runs (max 3.6).
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
 
       - name: Stabilize captured cash against fresh exact evidence
@@ -521,10 +535,12 @@ jobs:
         if: >-
           inputs.recovery_mode != 'identity_backfill' && steps.plan.outcome == 'success' &&
           steps.plan.outputs.filer_ids == ''
+        timeout-minutes: 60
         run: python scraper/process.py
 
       - name: Re-key donors after the empty-plan recovery aggregation
         if: always() && !cancelled() && steps.recover_aggregate.outcome == 'success'
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
 
       - name: Replan after recovering empty-plan aggregation

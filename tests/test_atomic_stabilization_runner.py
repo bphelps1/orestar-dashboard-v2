@@ -318,6 +318,22 @@ def test_uncertified_exact_scope_projects_partial_without_continuation(monkeypat
     assert h.events.count("assess") == 1
 
 
+def test_a_hung_aggregation_fails_the_pass_instead_of_waiting(monkeypatch, tmp_path):
+    # Real subprocesses this time. Behind the Supavisor pooler a dead backend
+    # never errors, so process.py can wait forever; the runner must give up.
+    monkeypatch.delenv(ENVIRONMENT_KEY, raising=False)
+    h = Harness(monkeypatch, tmp_path, [["10"]])
+    for script in ("scraper/fetch_earliest_balances.py", "scraper/diff_coverage.py",
+                   "scripts/pipeline_state.py"):
+        (tmp_path / script).parent.mkdir(exist_ok=True)
+        (tmp_path / script).write_text("")
+    (tmp_path / "scraper/process.py").write_text("import time\ntime.sleep(60)\n")
+    monkeypatch.setattr(RUN, "COMMAND_TIMEOUTS", {"scraper/process.py": 1})
+
+    with pytest.raises(RUN.ABE.AtomicEvidenceError, match="aggregation failed"):
+        RUN.run_stabilization(_ready(), root=tmp_path, cache_reader=h.cache)
+
+
 @pytest.mark.parametrize("stage", ["ready", "verify"])
 def test_validation_drift_never_publishes_or_aggregates(monkeypatch, tmp_path, stage):
     h = Harness(monkeypatch, tmp_path, [["10"]])
