@@ -3967,6 +3967,19 @@ function alsoParts(entry) {
   return { donor: entry.name, rest: line.slice(entry.name.length) };
 }
 
+/**
+ * The order lobbyists are worked in: tier first, then combined likelihood.
+ *
+ * Tier is the sort key rather than a label beside the name, so each colour
+ * band runs together down the page and in the workbook instead of
+ * alternating. Inside a tier, who to call first is a question about the
+ * donors, so it is answered with the score that ranked them, added up across
+ * everyone that lobbyist carries.
+ */
+function listGroupOrder(a, b) {
+  return a.tier.tier - b.tier.tier || b.likelihood - a.likelihood || b.ask - a.ask;
+}
+
 /** Every client whose giving belongs in a lobbyist's columns, asked or not. */
 function groupGivingRows(group) {
   return [...group.rows, ...(group.context || [])];
@@ -4044,7 +4057,7 @@ function chamberGroups() {
       comp_gifts: r.per_cycle.flatMap(c => c.recipients.map(x => ({ filer: x.filer, amount: x.amount }))),
     })));
   }
-  out.sort((a, b) => b.likelihood - a.likelihood || b.ask - a.ask);
+  out.sort(listGroupOrder);
   return out;
 }
 
@@ -4219,7 +4232,7 @@ function renderChamberRows() {
       fmt$(r.ask)}</div>`).join("");
     const donors = g.rows.map(r => esc(r.donor)).join("; ")
       + (g.context?.length
-        ? `<div class="list-also-represents">also represents, no ask: ${
+        ? `<div class="list-also-represents">also represents: ${
             esc(g.context.map(r => r.donor).join("; "))}</div>` : "");
     const giving = cy => groupGivingRows(g).map(r => {
       const parts = givingParts(r, cy);
@@ -4264,7 +4277,7 @@ const LIST_SHEET_CYCLES = 3;          // cycles of giving printed, newest first
 function listSheetHeaders(built) {
   const cycles = Array.from({ length: LIST_SHEET_CYCLES }, (_, i) => built.cycle - 2 * i);
   const labels = ["Tier", "Photo", "First Name", "Last Name",
-                  `Suggested Ask ${built.cycle} by client`, "Donors",
+                  `Suggested Ask ${built.cycle} by client`, "Donor clients",
                   ...cycles.map(c => `${cycleName(c)} giving`),
                   "Also lobbied by", "Firm", "Email", "Cell", "Work"];
   // Column numbers are read off the labels rather than counted by hand: the
@@ -4304,7 +4317,7 @@ function listSheetRows(built, groups) {
         l ? last : "",
         g.rows.map(askLine).join("\n"),
         [g.rows.map(r => r.donor).join("; "),
-         ...(g.context?.length ? [`also represents, no ask: ${g.context.map(r => r.donor).join("; ")}`] : []),
+         ...(g.context?.length ? [`also represents: ${g.context.map(r => r.donor).join("; ")}`] : []),
         ].join("\n"),
         ...cycles.map(c => groupGivingRows(g).map(r => givingLine(r, c)).filter(Boolean).join("\n")),
         alsoContacts(g).map(alsoLine).join("\n"),
@@ -4394,14 +4407,19 @@ function chamberMethodRows(built) {
         + "that gives nobody else is priced on its whole history, and its row says so." },
     { Item: "Clients with no ask", Value: `ranked ${LIST_SIZE + 1}–${LIST_CONTEXT_SIZE}`,
       Detail: `A lobbyist already on the list may also carry donors from the tranche below the top `
-        + `${LIST_SIZE}. Those appear in the giving columns marked "(no ask)" and in the donor roster, `
-        + `because they are part of the same call — but they carry no suggested ask, and they do not `
-        + `count toward the lobbyist's tier or their place in the order.` },
+        + `${LIST_SIZE}. Those appear in the giving columns and under "also represents" in the donor `
+        + `clients column, because they are part of the same call — but they carry no suggested ask, `
+        + `and they do not count toward the lobbyist's tier or their place in the order.` },
     { Item: "Who carries a donor", Value: "one lobbyist per donor",
       Detail: "An admin's filing at /admin/lobbyists wins, then a link marked primary, then a confirmed "
         + "link over an unreviewed one, then the stronger match — the same order the candidate plan uses. "
         + "Anyone else attached to the donor is listed under \u2018Also lobbied by\u2019, with the "
         + "clients they are an additional contact for in brackets and their firm, email and phone." },
+    { Item: "Row order", Value: "tier, then combined client likelihood",
+      Detail: "Rows are grouped by tier, so each colour band runs together down the sheet. Inside a "
+        + "tier the order is the donor scores of everyone that lobbyist carries, added up: who to "
+        + "call first is a question about the donors, and six likely ones are a better morning than "
+        + "one, so the total rather than the average." },
     { Item: "Tier", Value: "1–4, all computed",
       Detail: "6 × donors carried (max 30) + 2 × like candidates their donors support (max 30) + what "
         + "those donors gave them ÷ 5,000 (max 20). The candidate plan's two remaining bonuses need a "

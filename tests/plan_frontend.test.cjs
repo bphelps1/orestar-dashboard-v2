@@ -997,6 +997,33 @@ test("nobody attached means no column content", () => {
   assert.deepEqual(plain(ctx.alsoContacts({ rows: [{ donor: "A PAC", also: [] }, { donor: "B PAC" }] })), []);
 });
 
+test("tiers stick together, and likelihood orders the people inside one", () => {
+  const ctx = shapeContext();
+  const g = (tier, likelihood, ask, name) => ({ tier: { tier }, likelihood, ask, name });
+  const order = [
+    g(2, 90, 5000, "second tier, likeliest"),
+    g(1, 10, 500, "first tier, least likely"),
+    g(3, 99, 9000, "third tier, likeliest of all"),
+    g(1, 40, 1000, "first tier, likelier"),
+    g(2, 90, 7000, "second tier, same likelihood, larger book"),
+  ].sort(ctx.listGroupOrder);
+  assert.deepEqual(Array.from(order, x => x.name), [
+    "first tier, likelier", "first tier, least likely",
+    "second tier, same likelihood, larger book", "second tier, likeliest",
+    "third tier, likeliest of all",
+  ]);
+});
+
+test("a client below the cut is named without being marked", () => {
+  const ctx = shapeContext();
+  // The giving columns read the same for both, and the donor clients column
+  // says which are only riding along.
+  const row = { donor: "Below PAC", per_cycle: [{ cycle: 2026,
+    recipients: [{ member: "Fahey", amount: 1000, filer: "f" }] }] };
+  assert.deepEqual(plain(ctx.givingParts(row, 2026)), { donor: "Below PAC", rest: ": $1,000 Fahey" });
+  assert.equal(ctx.groupGivingRows({ rows: [{ donor: "Asked PAC" }], context: [row] }).length, 2);
+});
+
 test("each tier is a different colour, and Tier 4 is none", () => {
   const ctx = context();
   const fills = ["Tier 1", "Tier 2", "Tier 3"].map(t => ctx.tierFill(t));
