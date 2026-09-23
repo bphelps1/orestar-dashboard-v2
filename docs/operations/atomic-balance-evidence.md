@@ -7,7 +7,7 @@ GitHub run attempts; `chain_index` alone never grants a new budget. Creating a
 new effort requires a deliberate policy change with a new ID. Failed history
 must remain available for accounting.
 
-The September 14 recovery effort permits at most 12 attempts, 12 complete
+The original September 14 recovery effort permitted at most 12 attempts, 12 complete
 canonical scopes per batch and 45 exact search submissions per workflow. Filers
 33 and 191 are deferred in the default three-pass mode. A request containing
 another member of an excluded canonical scope is rejected before capture. This does not change the
@@ -45,9 +45,9 @@ remediation requires its own complete-scope verification and fresh aggregation
 and atomic proof after any transaction change. Preserve source exceptions and
 annual gaps until authoritative evidence supports their treatment.
 
-## Isolated single-pass recovery
+## Historical September 14 single-pass recovery
 
-The reviewed policy allows filer 191 alone to request `max_passes=1` with an
+The September 14 policy allowed filer 191 alone to request `max_passes=1` with an
 explicit `filer_ids=191`. This makes one real summary capture followed by one
 complete exact collection, publication, aggregation and stabilization
 assessment. The policy keeps 33 and 191 excluded from ordinary three-pass
