@@ -54,5 +54,11 @@ jobs:
       - name: Regenerate dashboard aggregate tables
         run: python scraper/process.py
 
+      # process.py rebuilds the donor blobs from raw transaction labels, which
+      # drops donor_key/donor_id and with them the resolver's work and every
+      # merge saved at /admin/donors.
+      - name: Re-key donor aggregates onto resolved entities
+        run: python scraper/refresh_donor_aggregates.py
+
       - name: Verify
         run: python scraper/db_admin.py verify
