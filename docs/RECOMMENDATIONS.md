@@ -692,6 +692,33 @@ That hand-off is per-browser: the list writes it when you build it, and the
 admin banner says when that was. It is a note to the person building the
 list, not a record anything depends on.
 
+### A gift that is out of scale is left out
+
+A cheque far larger than anything else a donor wrote that cycle is not a
+reference a caller can open on. UFCW Local 555 put **$70,000** into one member
+in 2024 and again in 2026, against $5,000 and $25,000 for the next name on its
+list — quoting that invites an ask nobody is going to get.
+
+So the largest gift in a cycle is dropped from the giving columns when **both**
+hold:
+
+| Test | Threshold |
+|---|---|
+| far larger than the second largest that cycle | **2.5×** (`OUTSIZED_GIFT_RATIO`) |
+| large in itself | **$10,000** (`OUTSIZED_GIFT_MIN`) |
+
+Either test alone gets it wrong. The ratio alone drops $2,000 against $500,
+which is ordinary giving and a perfectly good reference; the size alone drops
+a $15,000 gift from a donor that writes several. Together they find the single
+freak cheque and nothing else — **24 of 343 cycle bands** on the House
+Democratic list.
+
+Only the largest is ever considered: if the top two are both enormous, that is
+not one freak cheque and both stay. The gift still counts toward the donor's
+score, its tier and its suggested ask — which is a median, and so barely moves
+for one outlier — and the per-donor sheet still reports it under *Largest
+Recipients Last Cycle*.
+
 ### Who the giving history names
 
 The giving columns name **only members who currently hold the seat**, checked

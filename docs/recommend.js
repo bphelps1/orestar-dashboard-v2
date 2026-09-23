@@ -3921,12 +3921,36 @@ function givingLine(row, cycle) {
   return parts ? parts.donor + parts.rest : "";
 }
 
+// A cheque far out of scale with the rest of a cycle is not a reference
+// anyone can call on. UFCW Local 555 put $70,000 into Bowman in 2024 and
+// again in 2026, against $5,000 and $25,000 for the next name on its list;
+// quoting that invites an ask nobody is going to get.
+//
+// Two tests, because either alone is wrong. The ratio alone would drop
+// $2,000 against $500, which is ordinary giving and a perfectly good
+// reference; the size alone would drop a $15,000 gift from a donor that
+// writes several. Both together find the single freak cheque and nothing
+// else — 24 of 343 cycle bands on the House Democratic list.
+const OUTSIZED_GIFT_RATIO = 2.5;
+const OUTSIZED_GIFT_MIN = 10000;
+
+/** One cycle's recipients, with a gift out of scale with the rest left out. */
+function outsizedTrimmed(recipients) {
+  const sorted = [...recipients].sort((a, b) => b.amount - a.amount);
+  if (sorted.length < 2) return sorted;
+  const [top, second] = sorted;
+  return top.amount >= OUTSIZED_GIFT_MIN && top.amount >= OUTSIZED_GIFT_RATIO * second.amount
+    ? sorted.slice(1) : sorted;
+}
+
 function givingParts(row, cycle) {
   const band = (row.per_cycle || []).find(c => c.cycle === cycle);
   if (!band || !band.recipients.length) return null;
-  const names = band.recipients.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
+  const shown = outsizedTrimmed(band.recipients);
+  if (!shown.length) return null;
+  const names = shown.map(r => `${fmt$(r.amount)} ${r.member}`).join(", ");
   // Clients from the tranche below read the same as the rest here; the donor
-  // roster is where their having no ask is said.
+  // clients column is where their having no ask is said.
   return { donor: row.donor, rest: `: ${names}` };
 }
 
@@ -4429,6 +4453,15 @@ function chamberMethodRows(built) {
         + "chamber roster in docs/assets/current_legislators.json. Money given to someone who lost or "
         + "retired is no guide to who to ring now. Candidates read as a surname, or a surname and first "
         + "initial where the chamber seats two of them." },
+    { Item: "Outsized gifts", Value: `dropped above ${fmt$(OUTSIZED_GIFT_MIN)} and `
+        + `${OUTSIZED_GIFT_RATIO}\u00d7 the next gift`,
+      Detail: "A cheque far out of scale with everything else a donor wrote that cycle is left out of "
+        + "the giving columns: it is not a number a caller can open on. UFCW Local 555 put $70,000 into "
+        + "one member in 2024 and again in 2026, against $5,000 and $25,000 for the next name on its "
+        + "list. Both tests have to hold — far larger than the second largest, and large in itself — so "
+        + `${fmt$(2000)} against ${fmt$(500)} stays, being ordinary giving. The gift still counts `
+        + "toward the donor's score, its tier and its suggested ask, and the per-donor sheet still "
+        + "reports it under Largest Recipients Last Cycle." },
     { Item: "What it is not", Value: "not a plan for one candidate",
       Detail: "No seat, no margin, no relationship with a particular committee is in these numbers. "
         + "For a named candidate, use the candidate view — it benchmarks against comparable seats and "

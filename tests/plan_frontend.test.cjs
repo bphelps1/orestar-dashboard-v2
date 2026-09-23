@@ -1014,6 +1014,30 @@ test("tiers stick together, and likelihood orders the people inside one", () => 
   ]);
 });
 
+test("a gift out of scale with its cycle is left out of the giving columns", () => {
+  const ctx = shapeContext();
+  const band = (cycle, ...pairs) => ({ cycle,
+    recipients: pairs.map(([member, amount]) => ({ member, amount, filer: member })) });
+  const row = { donor: "UFCW Local 555", per_cycle: [
+    // $70,000 against $5,000: far larger, and large in itself.
+    band(2024, ["Bowman", 70000], ["Nelson", 5000]),
+    // Far larger, but $2,000 is ordinary giving — a usable reference.
+    band(2022, ["Bowman", 2000], ["Nosse", 500]),
+    // Large, but only twice the next gift: not one freak cheque.
+    band(2020, ["Fahey", 10000], ["Ruiz", 5000]),
+    // Both enormous, so neither is the outlier.
+    band(2018, ["Bowman", 70000], ["Nosse", 65000], ["Evans", 2000]),
+  ] };
+  assert.equal(ctx.givingLine(row, 2024), "UFCW Local 555: $5,000 Nelson");
+  assert.equal(ctx.givingLine(row, 2022), "UFCW Local 555: $2,000 Bowman, $500 Nosse");
+  assert.equal(ctx.givingLine(row, 2020), "UFCW Local 555: $10,000 Fahey, $5,000 Ruiz");
+  assert.equal(ctx.givingLine(row, 2018),
+    "UFCW Local 555: $70,000 Bowman, $65,000 Nosse, $2,000 Evans");
+  // A donor with one recipient has nothing to be out of scale with.
+  assert.deepEqual(plain(ctx.outsizedTrimmed([{ member: "Bowman", amount: 70000 }])),
+                   [{ member: "Bowman", amount: 70000 }]);
+});
+
 test("a client below the cut is named without being marked", () => {
   const ctx = shapeContext();
   // The giving columns read the same for both, and the donor clients column
