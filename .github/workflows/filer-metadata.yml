@@ -144,8 +144,20 @@ jobs:
           echo "remaining=$REMAINING" >> "$GITHUB_OUTPUT"
 
       - name: Re-aggregate with updated metadata
+        id: aggregate
         if: always() && steps.orestar_wait.outcome == 'success' && steps.state.outcome == 'success'
         run: python scraper/process.py
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_STORAGE_BUCKET: exports
+
+      # See the note in atomic-balance-evidence.yml: process.py rebuilds the
+      # donor blobs from raw labels, so the re-key has to follow it every time.
+      - name: Re-key donors onto resolved entities
+        if: always() && !cancelled() && steps.aggregate.outcome == 'success'
+        run: python scraper/refresh_donor_aggregates.py
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
