@@ -36,6 +36,10 @@ function slice(from, to) {
 const peerCode = slice("const PEER_WINDOWS = [", "async function findComparables(");
 const tierCode = slice("const TIER_RULES = [", "function renderRepeatDonors(");
 const exportCode = slice("/** Contact details for a lobbyist row", "/** Sheet 2: one line per lobbyist");
+// How a lobbyist is reached, and the workbook's palette: both sit outside the
+// blocks above, and the "Also lobbied by" column and the tier fills need them.
+const contactCode = slice("function contactLine(", "function portraitPerson(");
+const inkCode = slice("const INK = {", "/** Sheet 1 of the workbook: the call list, styled. */");
 const keyCode = slice("/** Oregon cycles run odd→even", "function _getAllYearGifts(");
 const listCode = slice("const LIST_SIZE = 125;", "// ── The standing list, shaped like the lobby list");
 // The lobby-list shaping: asks, giving lines and the name/committee tidying.
@@ -53,7 +57,8 @@ function context(extra = {}) {
     window: {},
     ...extra,
   });
-  vm.runInContext(fs.readFileSync(path.join(root, "docs/lib/donor-names.js"), "utf8") + keyCode + peerCode + tierCode + exportCode, ctx);
+  vm.runInContext(fs.readFileSync(path.join(root, "docs/lib/donor-names.js"), "utf8")
+    + keyCode + peerCode + tierCode + exportCode + contactCode + inkCode, ctx);
   return ctx;
 }
 
@@ -989,7 +994,7 @@ test("an additional contact names the clients they are a contact for", () => {
 
 test("nobody attached means no column content", () => {
   const ctx = shapeContext();
-  assert.deepEqual(ctx.alsoContacts({ rows: [{ donor: "A PAC", also: [] }, { donor: "B PAC" }] }), []);
+  assert.deepEqual(plain(ctx.alsoContacts({ rows: [{ donor: "A PAC", also: [] }, { donor: "B PAC" }] })), []);
 });
 
 test("each tier is a different colour, and Tier 4 is none", () => {
