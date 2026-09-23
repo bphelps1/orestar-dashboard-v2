@@ -89,3 +89,20 @@ repaired large scopes from the fresh verification. Telemetry does not replace
 full-scope identity evidence or relax the 45-search atomic ceiling. After the
 projection, complete a fresh atomic window for the affected canonical scopes
 and inspect residual cash differences and annual/source exceptions.
+
+## September 22 targeted follow-up
+
+The user authorized follow-up recovery for the 19 committees localized in the
+September 22 review. `balance-recovery-20260922` allows eight total attempts,
+including failures and reruns, retaining the 12-scope and 45-search ceilings.
+Only explicit named-scope dispatches are planned; do not initiate a blank-scope
+automatic chain under this effort. No one-pass exceptions are authorized.
+
+Target scopes: 24826, 17090, 20344, 221, 11, 314, 24767, 24574, 324, 1524,
+4708, 306, 18748, 17995, 25021, 19751, 19280, 24918, 17240.
+
+Inspect the 45 identified surplus IDs' source histories before changing stored
+transactions. Four scopes have one missing ID each: 24767/5574984,
+24574/5589079, 1524/71276, 4708/72406. Complete-scope verification, projection
+and fresh paired evidence are required before declaring any discrepancy closed.
+The prior effort's 12 attempts remain exhausted and its history stays intact.
