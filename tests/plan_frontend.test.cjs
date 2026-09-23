@@ -709,16 +709,18 @@ test("asks round coarsely above $1,000 and finely below it", () => {
 
 test("a giving line names sitting members by surname", () => {
   const ctx = shapeContext();
+  // Ordinary amounts: $20,000 against $2,000 would now read as out of scale
+  // and lose the Fahey gift, which is a different test's business.
   const row = { donor: "Oregon Nurses PAC", per_cycle: [{ cycle: 2026, recipients: [
-    { filer: "Friends of Julie Fahey", member: "Fahey", amount: 20000 },
+    { filer: "Friends of Julie Fahey", member: "Fahey", amount: 4000 },
     { filer: "Friends of Emerson Levy", member: "Levy E", amount: 2000 },
   ] }] };
-  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $20,000 Fahey, $2,000 Levy E");
+  assert.equal(ctx.givingLine(row, 2026), "Oregon Nurses PAC: $4,000 Fahey, $2,000 Levy E");
   assert.equal(ctx.givingLine(row, 2024), "", "a cycle with no giving has no line");
   assert.equal(ctx.givingLine({ donor: "X", per_cycle: [{ cycle: 2026, recipients: [] }] }, 2026), "",
                "a cycle whose recipients all left has no line either");
   assert.deepEqual(plain(ctx.givingParts(row, 2026)),
-                   { donor: "Oregon Nurses PAC", rest: ": $20,000 Fahey, $2,000 Levy E" });
+                   { donor: "Oregon Nurses PAC", rest: ": $4,000 Fahey, $2,000 Levy E" });
 });
 
 test("a surname alone, unless the chamber seats two of them", () => {
@@ -865,7 +867,7 @@ test("a client with no ask reads like any other in the giving history", () => {
     { filer: "Friends of Ben Bowman", member: "Bowman", amount: 1000 },
   ] }] };
   // The giving history is about the money, not about the ask. That a client
-  // carries no ask is said once, in the donor roster.
+  // carries no ask is said once, in the donor clients column.
   assert.equal(ctx.givingLine(row, 2026), "Zillow Group: $1,000 Bowman");
   assert.equal(ctx.givingLine({ ...row, context: true }, 2026),
                "Zillow Group: $1,000 Bowman");
