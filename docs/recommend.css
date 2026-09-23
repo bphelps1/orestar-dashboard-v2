@@ -698,3 +698,20 @@
   line-height: 1.45;
   color: var(--color-text-muted);
 }
+
+/* Anyone else attached to a lobbyist's donors, and how to reach them. */
+.list-also { margin-top: 8px; padding-top: 6px; border-top: 1px dotted var(--color-border); }
+.list-also-head {
+  display: block;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-light, #94a3b8);
+}
+.list-also-row { font-size: 0.74rem; line-height: 1.45; margin-top: 3px; }
+.list-also-for { color: var(--color-text-muted); }
+.list-also-reach { display: block; color: var(--color-text-muted); }
+
+/* One colour per tier, matching the workbook: green, amber, blue, then none. */
+.plan-tier.is-t2 { background: #fef3c7; color: #92400e; }
+.plan-tier.is-t3 { background: #dbeafe; color: #1e40af; }

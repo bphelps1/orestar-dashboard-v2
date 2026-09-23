@@ -641,6 +641,10 @@ so a candidate reads down the *Suggested ask(s)* column and makes the calls.
 | **Suggested ask ⟨cycle⟩ by client** | one line per donor — *donor: $2,500* |
 | **Donors** | the donors this lobbyist carries, as a list |
 | **⟨cycle⟩ giving** | one line per donor: *donor: $20,000 Fahey, $15,000 Levy E …*, for each of the three most recent cycles |
+| **Also lobbied by** | anyone else attached to those donors: the name, the clients they are an additional contact for in brackets, then firm, email and phone |
+
+Tiers are colour-coded — green, amber, blue, and nothing for Tier 4 — the same
+on screen and in the workbook.
 
 Donor names are **bold** in the ask breakdown and the giving columns, so a
 column of them can be read down rather than across.

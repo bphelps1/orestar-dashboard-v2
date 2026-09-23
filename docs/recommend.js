@@ -3235,7 +3235,11 @@ async function loadExcelJs() {
 const INK = {
   head: "FF1F3864",        // header band
   headText: "FFFFFFFF",
+  // One colour per tier, matching the chips on screen: green, amber, blue,
+  // and nothing for Tier 4 — an unfilled row reads as "the rest".
   tier1: "FFDCFCE7",
+  tier2: "FFFEF3C7",
+  tier3: "FFDBEAFE",
   lobbyist: "FFEFF3FA",
   total: "FFD9E2F3",
   rule: "FFBFBFBF",
@@ -3250,8 +3254,9 @@ function styleHeaderCell(cell, { center = false } = {}) {
   cell.alignment = { vertical: "middle", horizontal: center ? "center" : "left", wrapText: true };
 }
 
+const TIER_FILLS = { "Tier 1": INK.tier1, "Tier 2": INK.tier2, "Tier 3": INK.tier3 };
 function tierFill(label) {
-  return label === "Tier 1" ? INK.tier1 : null;
+  return TIER_FILLS[label] || null;
 }
 
 /** Sheet 1 of the workbook: the call list, styled. */
@@ -3925,6 +3930,43 @@ function givingParts(row, cycle) {
   return { donor: row.donor, rest: `: ${names}` };
 }
 
+/**
+ * Anyone else attached to this lobbyist's donors: who they are, which of the
+ * clients they are an additional contact for, and how to reach them. A name
+ * on its own is not actionable — the point of the column is that you can ring
+ * this person about that client.
+ */
+function alsoContacts(group) {
+  const byLobbyist = new Map();
+  for (const row of group.rows) {
+    for (const a of row.also || []) {
+      const id = a.lobbyist.lobbyist_id;
+      if (!byLobbyist.has(id)) byLobbyist.set(id, { lobbyist: a.lobbyist, clients: [] });
+      const entry = byLobbyist.get(id);
+      if (!entry.clients.includes(row.donor)) entry.clients.push(row.donor);
+    }
+  }
+  return [...byLobbyist.values()]
+    .map(({ lobbyist, clients }) => ({
+      name: lobbyist.name,
+      clients,
+      reach: [lobbyist.affiliation || lobbyist.firm, contactLine(lobbyist)].filter(Boolean).join(" · "),
+    }))
+    .sort((a, b) => b.clients.length - a.clients.length || a.name.localeCompare(b.name));
+}
+
+/** "Paige Spence (Oregon Nurses PAC) — Thorn Run · paige@… · 503-…" */
+function alsoLine(entry) {
+  const who = `${entry.name} (${entry.clients.join(", ")})`;
+  return entry.reach ? `${who} — ${entry.reach}` : who;
+}
+
+/** The name apart from the rest, so a sheet can bold it. */
+function alsoParts(entry) {
+  const line = alsoLine(entry);
+  return { donor: entry.name, rest: line.slice(entry.name.length) };
+}
+
 /** Every client whose giving belongs in a lobbyist's columns, asked or not. */
 function groupGivingRows(group) {
   return [...group.rows, ...(group.context || [])];
@@ -4186,9 +4228,12 @@ function renderChamberRows() {
     }).join("");
     return `<tr class="list-row">
       <td class="plan-tier-cell">${l ? tierChip(g.tier) : ""}</td>
-      <td class="list-who">${who}${g.rows.some(r => r.also.length)
-        ? `<div class="plan-also">also: ${esc([...new Set(g.rows.flatMap(r =>
-            r.also.map(a => a.lobbyist.name)))].join(", "))}</div>` : ""}</td>
+      <td class="list-who">${who}${(also => also.length
+        ? `<div class="list-also"><span class="list-also-head">also lobbied by</span>${also.map(a =>
+            `<div class="list-also-row"><strong>${esc(a.name)}</strong>
+               <span class="list-also-for">(${esc(a.clients.join(", "))})</span>
+               ${a.reach ? `<span class="list-also-reach">${esc(a.reach)}</span>` : ""}</div>`).join("")}</div>`
+        : "")(alsoContacts(g))}</td>
       <td class="list-asks">${byClient}</td>
       <td class="list-donors">${donors}</td>
       <td class="list-giving-cell">${giving(cycles[0])}</td>
@@ -4230,6 +4275,7 @@ function listSheetHeaders(built) {
     cycles, labels,
     byClientCol: at(`Suggested Ask ${built.cycle} by client`),
     givingFrom: at(`${cycleName(cycles[0])} giving`),
+    alsoCol: at("Also lobbied by"),
     // Money columns are the ones the fundraiser reads; the rest are contact.
     moneyFrom: 4, moneyTo: 6 + cycles.length,
   };
@@ -4237,7 +4283,7 @@ function listSheetHeaders(built) {
 
 /** One row per lobbyist, in call order. */
 function listSheetRows(built, groups) {
-  const { cycles, byClientCol, givingFrom } = listSheetHeaders(built);
+  const { cycles, byClientCol, givingFrom, alsoCol } = listSheetHeaders(built);
   return groups.map(g => {
     const l = g.lobbyist;
     const contact = l ? planContact(l) : { name: "", email: "", phone: "", others: "" };
@@ -4248,6 +4294,7 @@ function listSheetRows(built, groups) {
       // Cells that name donors are kept as {donor, rest} pairs so the writer
       // can bold the donor — a call list is read by eye, down the column.
       rich: { [byClientCol]: g.rows.map(askParts),
+              [alsoCol]: alsoContacts(g).map(alsoParts),
               ...Object.fromEntries(cycles.map((c, i) =>
                 [givingFrom + i, groupGivingRows(g).map(r => givingParts(r, c)).filter(Boolean)])) },
       cells: [
@@ -4260,7 +4307,7 @@ function listSheetRows(built, groups) {
          ...(g.context?.length ? [`also represents, no ask: ${g.context.map(r => r.donor).join("; ")}`] : []),
         ].join("\n"),
         ...cycles.map(c => groupGivingRows(g).map(r => givingLine(r, c)).filter(Boolean).join("\n")),
-        [...new Set(g.rows.flatMap(r => r.also.map(a => a.lobbyist.name)))].join("; "),
+        alsoContacts(g).map(alsoLine).join("\n"),
         l ? (l.kind === "firm" ? l.name : l.affiliation || l.firm || "") : "",
         contact.email || "",
         l && l.kind !== "firm" ? l.phone || "" : contact.phone || "",
@@ -4353,7 +4400,8 @@ function chamberMethodRows(built) {
     { Item: "Who carries a donor", Value: "one lobbyist per donor",
       Detail: "An admin's filing at /admin/lobbyists wins, then a link marked primary, then a confirmed "
         + "link over an unreviewed one, then the stronger match — the same order the candidate plan uses. "
-        + "Anyone else attached to the donor is listed under \u2018Also lobbied by\u2019." },
+        + "Anyone else attached to the donor is listed under \u2018Also lobbied by\u2019, with the "
+        + "clients they are an additional contact for in brackets and their firm, email and phone." },
     { Item: "Tier", Value: "1–4, all computed",
       Detail: "6 × donors carried (max 30) + 2 × like candidates their donors support (max 30) + what "
         + "those donors gave them ÷ 5,000 (max 20). The candidate plan's two remaining bonuses need a "
@@ -4413,7 +4461,7 @@ async function writeListSheet(wb, built, groups, imageCache) {
     if (entry.person) await addPortrait(wb, ws, entry.person, row.number, 2, imageCache);
   }
 
-  const widths = [8, 13, 14, 16, 36, 34, ...cycles.map(() => 46), 24, 24, 30, 16, 16];
+  const widths = [8, 13, 14, 16, 36, 34, ...cycles.map(() => 46), 52, 24, 30, 16, 16];
   widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
   ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: labels.length } };
   return ws;
