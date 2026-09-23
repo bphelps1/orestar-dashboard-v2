@@ -109,3 +109,101 @@ def test_large_camera_jpeg_is_decoder_downsampled_and_exif_orientation_preserved
     assert result.size == (160, 200)
     assert min(result.getpixel((0, 100))) > 245  # upright portrait has white side padding
     assert result.getpixel((80, 100))[0] > 240
+
+
+# ── Individually reviewed portraits from official sites ────────────────────
+#
+# The Capitol Club lists plenty of in-house association staff with the
+# placeholder avatar and no photo of their own. Those portraits come from the
+# organization's own staff page, keyed lobbyist-<id> rather than user-<id>.
+
+def _reviewed(tmp_path, monkeypatch):
+    import add_reviewed_photo as module
+    import refresh_lobbyist_photos as refresh_module
+    manifest = tmp_path / 'docs/assets/lobbyist-photos.json'
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('{"version":1,"photos":{}}')
+    for target in (module, refresh_module):
+        monkeypatch.setattr(target, 'ROOT', tmp_path, raising=False)
+        monkeypatch.setattr(target, 'MANIFEST', manifest, raising=False)
+        monkeypatch.setattr(target, 'IMAGE_DIR', manifest.parent / 'lobbyist-photos', raising=False)
+    return module, manifest
+
+
+class _Session:
+    """A staff page and its portrait, enough for one add()."""
+    def __init__(self, page_text, image=None):
+        self.text_response = page_text
+        source = Image.new('RGB', (400, 500), 'red')
+        buffer = io.BytesIO()
+        source.save(buffer, format='JPEG')
+        self.image = image if image is not None else buffer.getvalue()
+
+    def get(self, url, headers=None, timeout=None, stream=False):
+        return _Response(self.image if stream else self.text_response, stream)
+
+
+class _Response:
+    def __init__(self, payload, stream):
+        self.headers = {'Content-Type': 'image/jpeg' if stream else 'text/html'}
+        self._payload = payload
+        self.text = payload if isinstance(payload, str) else ''
+    def raise_for_status(self): pass
+    def iter_content(self, size): yield self._payload
+    def close(self): pass
+
+
+def test_reviewed_portrait_is_keyed_by_lobbyist_and_sized_like_the_rest(tmp_path, monkeypatch):
+    module, manifest = _reviewed(tmp_path, monkeypatch)
+    entry = module.add(958, 'Chris Carpenter',
+                       'https://example.org/uploads/Chris-Carpenter-Headshot.jpeg',
+                       'https://example.org/about/leadership/', _Session('<p>staff</p>'))
+    assert entry['path'].startswith('assets/lobbyist-photos/lobbyist-958-')
+    saved = tmp_path / 'docs' / entry['path']
+    assert Image.open(saved).size == (160, 200)
+    # The same shape refresh() preserves, and the file it checks for.
+    photos = __import__('json').loads(manifest.read_text())['photos']
+    assert set(photos) == {'lobbyist-958'}
+    assert photos['lobbyist-958']['source'].endswith('Headshot.jpeg')
+
+
+def test_a_portrait_nothing_ties_to_the_person_is_refused(tmp_path, monkeypatch):
+    module, _ = _reviewed(tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match='Nothing on'):
+        module.add(958, 'Chris Carpenter', 'https://example.org/uploads/headshot-2026.jpeg',
+                   'https://example.org/about/leadership/', _Session('<p>somebody else</p>'))
+
+
+def test_the_surname_may_be_vouched_for_by_the_profile_page(tmp_path, monkeypatch):
+    module, _ = _reviewed(tmp_path, monkeypatch)
+    entry = module.add(509, 'Cynthia Branger Muñoz', 'https://example.org/uploads/staff-17.jpeg',
+                       'https://example.org/staff/', _Session('<p>Cynthia Branger Muñoz</p>'))
+    assert entry['name'] == 'Cynthia Branger Muñoz'
+    # Accents differ between a URL and a page; matching folds them away.
+    assert module.attribution('Cynthia Branger Muñoz',
+                              'https://example.org/uploads/branger-munoz.jpg', '') == 'the image filename'
+
+
+def test_placeholder_avatars_and_plain_http_are_refused(tmp_path, monkeypatch):
+    module, _ = _reviewed(tmp_path, monkeypatch)
+    for source, complaint in [
+            ('https://example.org/uploads/img_placeholder_avatar.jpg', 'placeholder'),
+            ('http://example.org/uploads/Chris-Carpenter.jpg', 'https')]:
+        with pytest.raises(ValueError, match=complaint):
+            module.add(958, 'Chris Carpenter', source,
+                       'https://example.org/about/leadership/', _Session('<p>staff</p>'))
+
+
+def test_replacing_a_portrait_removes_the_file_it_supersedes(tmp_path, monkeypatch):
+    module, _ = _reviewed(tmp_path, monkeypatch)
+    page = '<p>staff</p>'
+    first = module.add(958, 'Chris Carpenter', 'https://example.org/uploads/Carpenter.jpeg',
+                       'https://example.org/about/leadership/', _Session(page))
+    other = Image.new('RGB', (400, 500), 'blue')
+    buffer = io.BytesIO()
+    other.save(buffer, format='JPEG')
+    second = module.add(958, 'Chris Carpenter', 'https://example.org/uploads/Carpenter-2027.jpeg',
+                        'https://example.org/about/leadership/', _Session(page, buffer.getvalue()))
+    assert first['path'] != second['path']
+    assert not (tmp_path / 'docs' / first['path']).exists()
+    assert (tmp_path / 'docs' / second['path']).exists()

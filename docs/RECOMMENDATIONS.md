@@ -654,6 +654,29 @@ chooses: an admin's filing at `/admin/lobbyists` first, then a link marked
 primary, then a confirmed link over an unreviewed one, then the stronger
 match. Everyone else attached to the donor is listed as *also*.
 
+### Where the portraits come from
+
+Two sources, one manifest (`docs/assets/lobbyist-photos.json`), both fetched
+ahead of time so neither the page nor the export ever makes a remote image
+request.
+
+| Key | Source | Maintained by |
+|---|---|---|
+| `user-<cc_id>` | the Capitol Club directory | `scraper/refresh_lobbyist_photos.py`, monthly |
+| `lobbyist-<lobbyist_id>` | the organization's own staff page | `scraper/add_reviewed_photo.py`, one at a time |
+
+The directory run takes images only from oregoncapitolclub.org and rejects the
+placeholder avatar, which is why plenty of in-house association staff have a
+Capitol Club entry and still read *Photo unavailable*: the directory has them,
+with no photo of their own. Those come from their employer's staff page
+instead, and the refresh deliberately preserves `lobbyist-*` keys so a
+directory run never drops one.
+
+The check that matters there is attribution, because a portrait of the wrong
+person is worse than none. The surname has to appear in the image URL or the
+person's full name on the profile page, both folded for accents, and the
+script prints which of the two vouched for it.
+
 ### The order lobbyists are worked in
 
 **Tier first, then combined client likelihood.** Rows are grouped by tier, so
