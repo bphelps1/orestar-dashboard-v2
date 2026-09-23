@@ -570,6 +570,43 @@ Pick a chamber, a party and a cycle to count back from, and it returns the top
 **125 organizations**, each with a suggested ask, sorted under the lobbyist who
 carries them.
 
+### Who sets the ask
+
+The median is what this donor gives an **ordinary member** of the caucus.
+Three kinds of recipient come out of it:
+
+| Out of the median | Why |
+|---|---|
+| Speaker, Senate President, Majority Leader, **Minority Leader** | given money on a scale a first call will not match |
+| The full **Ways and Means** Co-Chairs | the same — they sit alongside the floor leaders |
+| A **senior** member who also holds a leadership post or a committee gavel **and** raises far above the caucus | seniority and a gavel are common; only the combination distorts a median |
+
+Senior means three or more completed cycles of giving — more than two terms.
+"Raises far above" is Q3 + 1.5 × IQR of what **sitting members** raised in the
+two completed cycles, the same outlier rule the candidate plan uses. Measuring
+that against the whole cohort does not work: it holds decades of dormant
+committees, which drags Q1 to almost nothing and puts the bar at $424,000,
+where only the Speaker and the Majority Leader clear it. Against sitting
+members it lands near $377,000.
+
+Everyone excluded **keeps everything else**: their place in the giving
+columns, and their weight in a donor's breadth, consistency and size. Only the
+median leaves them out. A donor that gives nobody but leaders is priced on its
+whole history, and its row says so.
+
+#### Co-chairships are not chairships
+
+OLIS lists 34 chairs and 62 co-chairs, because the full Ways and Means, every
+one of its subcommittees and the Emergency Board's all have two. Counting
+co-chairs as chairs put **Emerson Levy** in the roster as chair of Natural
+Resources and **Paul Evans** as chair of Public Safety, when what they
+co-chair is a Ways and Means subcommittee.
+
+`scraper/refresh_legislators.py` now counts a co-chairship only for the full
+Ways and Means (`JWM`), whose co-chairs really do sit with the floor leaders.
+The roster went from 51 names to 35. This feeds the candidate plan's leadership
+tiers as well, so it was mis-tiering comparables there too.
+
 ### The suggested ask
 
 The recency-weighted median of what that donor gives **one candidate of this

@@ -569,14 +569,21 @@ function listContext(extra = {}) {
     // currentMemberFor() asks which chamber a committee sits in; the cohort
     // is one chamber by construction here.
     getChamber: () => "house",
+    // Declared outside every slice, so it is a sandbox property rather than
+    // something a seed script can assign — reading it in one throws.
+    leadershipRoles: {},
     ...extra,
   });
   vm.runInContext(listCode, ctx);        // context() already ran the rest
   // Seeding the roster skips the fetch inside loadCurrentLegislators, and a
   // `let` from the sliced code has to be assigned from a script in the same
   // context rather than from a property on the sandbox.
+  // Seeding both rosters skips the fetches inside loadCurrentLegislators and
+  // loadCommitteeChairs; an empty chair list is truthy, so it still short-
+  // circuits. A `let` from the sliced code has to be assigned from a script in
+  // the same context rather than from a property on the sandbox.
   ctx.__roster = { house: ["Julie Fahey", "Bobby Levy", "Emerson Levy"], senate: [] };
-  vm.runInContext("currentLegislators = __roster;", ctx);
+  vm.runInContext("currentLegislators = __roster; committeeChairs = committeeChairs || [];", ctx);
   return ctx;
 }
 
@@ -847,14 +854,16 @@ test("the build returns both bands, and only the first one is asked for", async 
   assert.ok(built.rows.every(r => r.ask >= 250));
 });
 
-test("a client with no ask says so wherever it appears", () => {
+test("a client with no ask reads like any other in the giving history", () => {
   const ctx = shapeContext();
   const row = { donor: "Zillow Group", per_cycle: [{ cycle: 2026, recipients: [
     { filer: "Friends of Ben Bowman", member: "Bowman", amount: 1000 },
   ] }] };
+  // The giving history is about the money, not about the ask. That a client
+  // carries no ask is said once, in the donor roster.
   assert.equal(ctx.givingLine(row, 2026), "Zillow Group: $1,000 Bowman");
   assert.equal(ctx.givingLine({ ...row, context: true }, 2026),
-               "Zillow Group (no ask): $1,000 Bowman");
+               "Zillow Group: $1,000 Bowman");
 });
 
 test("a lobbyist's giving columns cover both bands, their asks only one", () => {
@@ -865,4 +874,89 @@ test("a lobbyist's giving columns cover both bands, their asks only one", () => 
   assert.deepEqual(Array.from(ctx.groupGivingRows(group), r => r.donor), ["Big PAC", "Small PAC"]);
   // The ask column is built from group.rows alone, so it never names the other.
   assert.equal(group.rows.map(ctx.askLine).join("\n"), "Big PAC: $2,500");
+});
+
+// ── Who sets a typical ask ─────────────────────────────────────────────────
+//
+// A Speaker is given money on a different scale from a back-bencher, and so
+// is a veteran chair who has raised for a decade. Leaving them in the median
+// opens a first call at a number only a leader ever sees.
+function leadershipContext(roles = {}, chairs = []) {
+  const ctx = listContext({ leadershipRoles: roles });
+  ctx.__chairs = chairs;
+  vm.runInContext("committeeChairs = __chairs;", ctx);
+  return ctx;
+}
+const seat = (candidate_name, leadership_role) => ({
+  candidate_name, name: `Friends of ${candidate_name}`, leadership_role,
+  office: "State Representative", party: "Democrat",
+});
+
+test("chamber leadership never sets a typical ask", () => {
+  const ctx = leadershipContext();
+  for (const title of ["Speaker of the House", "House Majority Leader", "House Minority Leader",
+                       "Ways and Means Co-Chair"]) {
+    assert.equal(ctx.askMedianExclusion(seat("A Member", title), { senior: false, outlier: false }),
+                 "chamber leadership", title);
+  }
+});
+
+test("a deputy is not a leader for this purpose", () => {
+  const ctx = leadershipContext();
+  for (const title of ["House Assistant Minority Leader", "House Deputy Minority Leader",
+                       "House Assistant Majority Leader", "House Minority Whip"]) {
+    assert.equal(ctx.askMedianExclusion(seat("A Member", title), { senior: false, outlier: false }),
+                 null, title);
+  }
+});
+
+test("a senior chair is set aside only when they also raise like an outlier", () => {
+  const ctx = leadershipContext({}, [{ chamber: "house", name: "Dacia Grayber",
+                                       committees: ["Labor and Workforce Development"] }]);
+  const chair = seat("Dacia Grayber", "");
+  // The gavel and the seniority are common; the money is what distorts a median.
+  assert.equal(ctx.askMedianExclusion(chair, { senior: true, outlier: true }),
+               "senior leader or chair, outsized");
+  assert.equal(ctx.askMedianExclusion(chair, { senior: true, outlier: false }), null);
+  assert.equal(ctx.askMedianExclusion(chair, { senior: false, outlier: true }), null);
+  // A first-term member with no gavel is ordinary however much they raise.
+  assert.equal(ctx.askMedianExclusion(seat("New Member", ""), { senior: true, outlier: true }), null);
+});
+
+test("an outsized raiser is one the rest of the caucus is measured against", () => {
+  const ctx = listContext();
+  // Eleven ordinary members and one far above them.
+  const totals = new Map(Array.from({ length: 11 }, (_, i) => [`m${i}`, 100000 + i * 10000]));
+  totals.set("leader", 900000);
+  assert.deepEqual([...ctx.outsizedRaisers(totals)], ["leader"]);
+  // Too few to judge: nobody is called an outlier on four observations.
+  assert.equal(ctx.outsizedRaisers(new Map([["a", 1], ["b", 2], ["c", 3], ["d", 9999]])).size, 0);
+});
+
+test("a leader's giving is left out of the ask but not out of the donor", async () => {
+  const member = (slug, candidate_name, leadership_role) => ({
+    slug, candidate_name, name: `Friends of ${candidate_name}`, leadership_role,
+    committee_type: "Candidate Committee", office: "State Representative",
+    party: "Democrat", total_in: 400000,
+  });
+  const gave = amount => Object.fromEntries([2022, 2024, 2026].map(c =>
+    [c, [{ name: "Big PAC", donor_id: "d1", total: amount }]]));
+  const ctx = listContext({
+    filerIndex: [member("speaker", "Julie Fahey", "Speaker of the House"),
+                 member("backbench", "Emerson Levy", "")],
+    DL: { getFilerDonorYears: async slugs => new Map(slugs.map(s =>
+      [s, s === "speaker" ? gave(20000) : gave(1000)])) },
+    LOB: { loadBookTypes: async ids => new Map(ids.map(id => [id, "Political Committee"])) },
+  });
+  ctx.__roster = { house: ["Julie Fahey", "Emerson Levy"], senate: [] };
+  vm.runInContext("currentLegislators = __roster; committeeChairs = [];", ctx);
+  const built = await ctx.buildChamberList("house", "Democrat", 2026);
+  const row = built.rows[0];
+  // $1,000 to the back-bencher, not the $20,000 the Speaker gets.
+  assert.equal(row.ask, 1000);
+  assert.equal(row.ask_set_aside, 3, "the Speaker's three cycles are set aside");
+  // The Speaker's money still counts toward what this donor is: it is in the
+  // gift list, the cycle totals and the giving history.
+  assert.ok(row.gifts.some(g => g.amount === 20000));
+  assert.ok(row.per_cycle.some(c => c.recipients.some(r => r.member === "Fahey")));
 });
