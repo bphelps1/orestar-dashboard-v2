@@ -45,10 +45,21 @@ MIGRATIONS = [
     "029_stored_donor_identity_labels.sql",
     "030_explore_source_name_indexes.sql",
     "031_explore_complete_name_search.sql",
+    "033_explore_sub_type_index.sql",
+    "034_explore_sub_types.sql",
     # Last on purpose: it patches the functions 027 and 029 define, so it has
     # to run after them on every apply.
     "032_merge_refresh_safe_deletes.sql",
 ]
+
+# Index-only migrations built CONCURRENTLY, one statement at a time, and the
+# indexes each creates (a cancelled concurrent build leaves an invalid index
+# that IF NOT EXISTS would skip, so those are dropped and rebuilt).
+CONCURRENT_INDEXES = {
+    "028_donor_identity_label_indexes.sql": ("idx_aliases_identity_label", "idx_donors_identity_label"),
+    "030_explore_source_name_indexes.sql": ("idx_txn_source_filer_trgm", "idx_txn_source_payee_trgm"),
+    "033_explore_sub_type_index.sql": ("idx_txn_sub_type_date",),
+}
 
 
 def apply(only: str | None = None):
@@ -85,17 +96,15 @@ def apply(only: str | None = None):
             if row and not row[0]:
                 cur.execute("drop index concurrently public.idx_txn_donor_filer")
             sql = sql.replace("create index if not exists", "create index concurrently if not exists")
-        if name in ("028_donor_identity_label_indexes.sql", "030_explore_source_name_indexes.sql"):
+        if name in CONCURRENT_INDEXES:
             # Each CONCURRENTLY statement must be its own transaction.
-            indexes = (("idx_aliases_identity_label", "idx_donors_identity_label") if name.startswith("028")
-                       else ("idx_txn_source_filer_trgm", "idx_txn_source_payee_trgm"))
-            for index in indexes:
+            for index in CONCURRENT_INDEXES[name]:
                 cur.execute("select indisvalid from pg_index where indexrelid=to_regclass(%s)", ("public." + index,))
                 row = cur.fetchone()
                 if row and not row[0]:
                     cur.execute("drop index concurrently public." + index)
-            # This migration contains only two CREATE INDEX statements, with
-            # no procedural SQL or semicolons inside literals/comments.
+            # These migrations contain only CREATE INDEX statements, with no
+            # procedural SQL or semicolons inside literals/comments.
             for statement in sql.split(";"):
                 if statement.strip():
                     cur.execute(statement.replace("create index if not exists", "create index concurrently if not exists"))

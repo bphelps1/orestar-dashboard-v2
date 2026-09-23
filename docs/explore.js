@@ -17,7 +17,9 @@ const PAGE_SIZE = 100;
 // deliberately not offered as filters or columns here.
 const COLS = [
   { key: "tran_date",                   label: "Date" },
-  { key: "tran_type",                   label: "Type" },
+  // ORESTAR's sub-type ("In-Kind Contribution", "Loan Received (Non-Exempt)")
+  // says what a row is; the one- or two-letter type code only groups them.
+  { key: "sub_type",                    label: "Type" },
   { key: "amount",                      label: "Amount", num: true },
   { key: "filer_canonical",             label: "Committee" },
   { key: "contributor_payee_canonical", label: "Donor / Payee" },
@@ -46,11 +48,15 @@ const fmtAmount = v => (v == null || v === "") ? "" : Number(v).toLocaleString("
 let selectedDonor = null; // {donor_id, display_name}
 
 function readFilters() {
+  // The type menu's values are "C" (every contribution) or "C|In-Kind
+  // Contribution" (one sub-type within it).
+  const [type = "", subType = ""] = $("f-type").value.split("|");
   return {
     filer: $("f-filer").value.trim(),
     payee: $("f-payee").value.trim(),
     donorId: selectedDonor ? selectedDonor.donor_id : "",
-    type: $("f-type").value,
+    type,
+    subType,
     ctype: $("f-ctype").value.trim(),
     dateStart: $("f-date-start").value,
     dateEnd: $("f-date-end").value,
@@ -72,6 +78,7 @@ function applyFilters(q, f) {
   else if (f.payee) names.push(`or(${nameFilter("contributor_payee_canonical", "contributor_payee", f.payee)})`);
   if (names.length) q = q.or(`and(${names.join(",")})`);
   if (f.type)      q = q.eq("tran_type", f.type);
+  if (f.subType)   q = q.eq("sub_type", f.subType);
   if (f.ctype)     q = q.ilike("book_type", `%${f.ctype}%`);
   if (f.dateStart) q = q.gte("tran_date", f.dateStart);
   if (f.dateEnd)   q = q.lte("tran_date", f.dateEnd);
@@ -135,13 +142,14 @@ async function runSearch() {
       return;
     }
     const sb = await getSupabase();
-    // Goes through search_transactions() rather than PostgREST filters: for a
+    // Goes through explore_transactions() rather than PostgREST filters: for a
     // substring search the planner mis-estimates selectivity and walks the date
     // index row by row (~2s, HTTP 500 under load). The function denies that
-    // plan so the trigram index is used instead — "nike" 3.5s -> 0.23s.
-    const { data, error } = await sb.rpc("search_transactions", {
+    // plan so the trigram index is used instead — "nike" 3.5s -> 0.23s. It is
+    // search_transactions() plus sub-types (migration 034).
+    const { data, error } = await sb.rpc("explore_transactions", {
       p_filer: f.filer, p_payee: f.payee, p_donor_id: f.donorId,
-      p_tran_type: f.type, p_book_type: f.ctype,
+      p_tran_type: f.type, p_sub_type: f.subType, p_book_type: f.ctype,
       p_date_from: f.dateStart || null, p_date_to: f.dateEnd || null,
       p_amt_min: f.amtMin === "" ? null : Number(f.amtMin),
       p_amt_max: f.amtMax === "" ? null : Number(f.amtMax),
@@ -176,12 +184,19 @@ async function runSearch() {
   }
 }
 
+/** A cell's text; a row without a recorded sub-type still shows its type code. */
+function cellText(row, col) {
+  if (col.key === "sub_type") return row.sub_type || row.tran_type;
+  if (col.key === "contributor_payee_canonical") return DN.display(row[col.key]);
+  return row[col.key];
+}
+
 function renderTable(rows) {
   $("xp-thead").innerHTML = "<tr>" + COLS.map(c =>
     `<th class="${c.num ? "num" : ""}" data-col="${c.key}">${c.label}${sortCol === c.key ? (sortDir ? " ▲" : " ▼") : ""}</th>`
   ).join("") + "</tr>";
   $("xp-tbody").innerHTML = rows.map(r => "<tr>" + COLS.map(c =>
-    `<td class="${c.num ? "num" : ""}">${c.num ? fmtAmount(r[c.key]) : esc(c.key === "contributor_payee_canonical" ? DN.display(r[c.key]) : r[c.key])}</td>`
+    `<td class="${c.num ? "num" : ""}">${c.num ? fmtAmount(r[c.key]) : esc(cellText(r, c))}</td>`
   ).join("") + "</tr>").join("");
   $("xp-thead").querySelectorAll("th").forEach(th => {
     th.onclick = () => {

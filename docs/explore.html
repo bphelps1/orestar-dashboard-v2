@@ -93,10 +93,55 @@
       <label for="f-type">Transaction type</label>
       <select id="f-type">
         <option value="">Any</option>
-        <option value="C">Contribution (C)</option>
-        <option value="E">Expenditure (E)</option>
-        <option value="OR">Other receipt (OR)</option>
-        <option value="OD">Other disbursement (OD)</option>
+        <optgroup label="Contributions (C)">
+          <option value="C">All contributions</option>
+          <option value="C|Cash Contribution">Cash Contribution</option>
+          <option value="C|In-Kind Contribution">In-Kind Contribution</option>
+          <option value="C|Loan Received (Non-Exempt)">Loan Received (Non-Exempt)</option>
+          <option value="C|Pledge of Cash">Pledge of Cash</option>
+          <option value="C|In-Kind/Forgiven Personal Expenditures">In-Kind/Forgiven Personal Expenditures</option>
+          <option value="C|In-Kind/Forgiven Account Payable">In-Kind/Forgiven Account Payable</option>
+          <option value="C|Pledge of In-Kind">Pledge of In-Kind</option>
+          <option value="C|Pledge of Loan">Pledge of Loan</option>
+        </optgroup>
+        <optgroup label="Expenditures (E)">
+          <option value="E">All expenditures</option>
+          <option value="E|Cash Expenditure">Cash Expenditure</option>
+          <option value="E|Personal Expenditure for Reimbursement">Personal Expenditure for Reimbursement</option>
+          <option value="E|Account Payable">Account Payable</option>
+          <option value="E|Expenditure Made by an Agent">Expenditure Made by an Agent</option>
+          <option value="E|Loan Payment (Non-Exempt)">Loan Payment (Non-Exempt)</option>
+        </optgroup>
+        <optgroup label="Other receipts (OR)">
+          <option value="OR">All other receipts</option>
+          <option value="OR|Items Sold at Fair Market Value">Items Sold at Fair Market Value</option>
+          <option value="OR|Miscellaneous Other Receipt">Miscellaneous Other Receipt</option>
+          <option value="OR|Interest/Investment Income">Interest/Investment Income</option>
+          <option value="OR|Refunds and Rebates">Refunds and Rebates</option>
+          <option value="OR|Lost or Returned Check">Lost or Returned Check</option>
+          <option value="OR|Loan Received (Exempt)">Loan Received (Exempt)</option>
+        </optgroup>
+        <optgroup label="Other disbursements (OD)">
+          <option value="OD">All other disbursements</option>
+          <option value="OD|Miscellaneous Other Disbursement">Miscellaneous Other Disbursement</option>
+          <option value="OD|Return or Refund of Contribution">Return or Refund of Contribution</option>
+          <option value="OD|Nonpartisan Activity">Nonpartisan Activity</option>
+          <option value="OD|Loan Payment (Exempt)">Loan Payment (Exempt)</option>
+        </optgroup>
+        <optgroup label="Adjustments (O)">
+          <option value="O">All adjustments</option>
+          <option value="O|Cash Balance Adjustment">Cash Balance Adjustment</option>
+          <option value="O|Loan Forgiven (Non-Exempt)">Loan Forgiven (Non-Exempt)</option>
+          <option value="O|Account Payable Rescinded">Account Payable Rescinded</option>
+          <option value="O|Uncollectible Pledge of Cash">Uncollectible Pledge of Cash</option>
+          <option value="O|Personal Expenditure Balance Adjustment">Personal Expenditure Balance Adjustment</option>
+          <option value="O|Uncollectible Pledge of In-Kind">Uncollectible Pledge of In-Kind</option>
+        </optgroup>
+        <optgroup label="Receivables (OA)">
+          <option value="OA">All receivables</option>
+          <option value="OA|Miscellaneous Account Receivable">Miscellaneous Account Receivable</option>
+          <option value="OA|Unexpended Agent Balance">Unexpended Agent Balance</option>
+        </optgroup>
       </select>
     </div>
     <div class="xp-field">
