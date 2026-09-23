@@ -45,6 +45,9 @@ MIGRATIONS = [
     "029_stored_donor_identity_labels.sql",
     "030_explore_source_name_indexes.sql",
     "031_explore_complete_name_search.sql",
+    # Last on purpose: it patches the functions 027 and 029 define, so it has
+    # to run after them on every apply.
+    "032_merge_refresh_safe_deletes.sql",
 ]
 
 
