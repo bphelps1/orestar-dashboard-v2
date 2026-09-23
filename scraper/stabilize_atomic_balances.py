@@ -109,8 +109,8 @@ def run_stabilization(
         try:
             if command_runner is not None:
                 return command_runner(argv)
-            return subprocess.run(argv, cwd=root, check=False).returncode
-        except (OSError, subprocess.CalledProcessError) as exc:
+            return subprocess.run(argv, cwd=root, check=False, timeout=45 * 60).returncode
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             print(f"ERROR: {' '.join(argv)}: {exc}", file=sys.stderr)
             return 1
 

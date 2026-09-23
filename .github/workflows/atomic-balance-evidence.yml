@@ -321,6 +321,7 @@ jobs:
       - name: Project durable recovered facts into balance caches
         id: identity_aggregate
         if: always() && !cancelled() && steps.identity_projection_start.outcome == 'success'
+        timeout-minutes: 45
         run: python scraper/process.py
 
       - name: Re-key donors after the recovered projection
@@ -407,7 +408,7 @@ jobs:
             /tmp/atomic-search-budget.json
 
       - name: Enforce truthful identity recovery terminal status
-        if: always() && inputs.recovery_mode == 'identity_backfill'
+        if: always() && !cancelled() && inputs.recovery_mode == 'identity_backfill'
         env:
           FETCH: ${{ steps.identity_fetch.outcome }}
           FETCHED: ${{ steps.identity_fetched.outcome }}
@@ -443,7 +444,7 @@ jobs:
 
       - name: Select scopes paired inside this window
         id: ready
-        if: inputs.recovery_mode != 'identity_backfill' && always() && steps.plan.outcome == 'success' && steps.plan.outputs.filer_ids != ''
+        if: inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.plan.outcome == 'success' && steps.plan.outputs.filer_ids != ''
         run: |
           python scraper/atomic_balance_evidence.py ready \
             --plan "$PLAN_PATH" --output "$READY_PATH"
@@ -456,7 +457,7 @@ jobs:
       - name: Diff exactly the freshly paired scopes
         id: diff
         if: >-
-          inputs.recovery_mode != 'identity_backfill' && always() && steps.summaries.outcome == 'success' &&
+          inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.summaries.outcome == 'success' &&
           steps.ready.outcome == 'success' &&
           steps.ready.outputs.filer_ids != ''
         continue-on-error: true
@@ -469,7 +470,7 @@ jobs:
 
       - name: Verify atomic exact evidence
         id: verify
-        if: inputs.recovery_mode != 'identity_backfill' && always() && steps.ready.outcome == 'success'
+        if: inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.ready.outcome == 'success'
         run: |
           python scraper/atomic_balance_evidence.py verify \
             --plan "$READY_PATH" --output "$REPORT_PATH"
@@ -484,12 +485,13 @@ jobs:
       # to call its incomplete scope certified.
       - name: Publish atomic evidence state
         id: publish
-        if: inputs.recovery_mode != 'identity_backfill' && always() && steps.state.outcome == 'success' && steps.verify.outcome == 'success'
+        if: inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.state.outcome == 'success' && steps.verify.outcome == 'success'
         run: python scripts/pipeline_state.py push summaries auxiliary
 
       - name: Re-aggregate from durable evidence
         id: aggregate
-        if: inputs.recovery_mode != 'identity_backfill' && always() && steps.publish.outcome == 'success'
+        if: inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.publish.outcome == 'success'
+        timeout-minutes: 45
         run: python scraper/process.py
 
       # process.py rebuilds every filer_detail donor blob from the raw
@@ -521,6 +523,7 @@ jobs:
         if: >-
           inputs.recovery_mode != 'identity_backfill' && steps.plan.outcome == 'success' &&
           steps.plan.outputs.filer_ids == ''
+        timeout-minutes: 45
         run: python scraper/process.py
 
       - name: Re-key donors after the empty-plan recovery aggregation
@@ -549,7 +552,7 @@ jobs:
           echo "Recovered aggregation exposed $SELECTED scopes needing another real capture window."
 
       - name: Enforce truthful terminal status
-        if: inputs.recovery_mode != 'identity_backfill' && always() && steps.plan.outputs.filer_ids != ''
+        if: inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.plan.outputs.filer_ids != ''
         run: |
           if [ "${{ steps.summaries.outcome }}" != "success" ]; then
             echo "::error::Summary capture failed; exact coverage was not started on the refusing runner."

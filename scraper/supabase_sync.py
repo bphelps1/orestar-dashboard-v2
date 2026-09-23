@@ -25,6 +25,12 @@ import io
 import json
 import logging
 import os
+import time
+import uuid
+import hashlib
+import tempfile
+from contextlib import contextmanager, closing
+from contextvars import ContextVar
 from pathlib import Path
 
 import pandas as pd
@@ -139,7 +145,7 @@ def _parse_dsn(dsn: str) -> dict:
     }
 
 
-def _connect(attempts: int = 6):
+def _connect(attempts: int = 6, *, maintenance: bool = False):
     """Connect, retrying transient pool-checkout failures with backoff.
 
     Supabase's session pooler has a finite slot count; a cancelled job or a
@@ -152,7 +158,8 @@ def _connect(attempts: int = 6):
     params = _parse_dsn(os.environ["SUPABASE_DB_URL"])
     # TLS + TCP keepalives keep long bulk-load connections from being dropped.
     params.update(sslmode="require", keepalives=1, keepalives_idle=30,
-                  keepalives_interval=10, keepalives_count=5)
+                  keepalives_interval=10, keepalives_count=5,
+                  connect_timeout=15, tcp_user_timeout=60000)
     last = None
     for attempt in range(1, attempts + 1):
         try:
@@ -176,12 +183,16 @@ def _connect(attempts: int = 6):
             time.sleep(wait)
     else:  # pragma: no cover — loop always breaks or raises
         raise last
-    # Supabase enforces a 2-min statement_timeout by default, which cancels
-    # building a GIN trigram index over 3M rows. This is a trusted maintenance
-    # connection (service role), so disable the per-statement timeout.
-    with conn.cursor() as cur:
-        cur.execute("SET statement_timeout = 0")
-    conn.commit()
+    # Ordinary reads/publication must fail promptly. Only explicit index
+    # maintenance gets a longer (still bounded) statement allowance.
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET statement_timeout = %s", (1800000 if maintenance else 120000,))
+            cur.execute("SET lock_timeout = 30000")
+        conn.commit()
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 
@@ -321,7 +332,7 @@ def full_reload_transactions(shard_dir: Path) -> None:
     # indexes per-row during a 3M-row COPY is the dominant cost (it slows to a
     # crawl as the table fills). We capture their definitions, drop them, load
     # into a PK-only table, then rebuild each once — far faster overall.
-    with _connect() as conn:
+    with _connect(maintenance=True) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(
@@ -344,7 +355,7 @@ def full_reload_transactions(shard_dir: Path) -> None:
         log.info("Supabase: loaded %s (%d rows, %d total)", shard.name, len(frame), total)
 
     log.info("Supabase: rebuilding %d indexes + analyzing…", len(saved_indexes))
-    with _connect() as conn:
+    with _connect(maintenance=True) as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             for name, indexdef in saved_indexes:
@@ -443,8 +454,114 @@ def require_filer_comparison_details() -> list[dict]:
     return details
 
 
+_PUBLICATION = ContextVar("dashboard_publication", default=None)
+_CACHE_SQL = """INSERT INTO dashboard_cache (key, data, updated_at)
+                VALUES (%s, %s::jsonb, now()) ON CONFLICT (key) DO UPDATE
+                SET data=EXCLUDED.data, updated_at=now()"""
+_DETAIL_SQL = """INSERT INTO filer_detail (slug, name, filer_id, detail, updated_at)
+                 VALUES %s ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name,
+                 filer_id=EXCLUDED.filer_id, detail=EXCLUDED.detail, updated_at=now()"""
+
+
+def _publish_dashboard(staged):
+    """One commit for all staged outputs; failed writes leave the old generation."""
+    from psycopg2.extras import execute_values
+    required = {"filer_index", "balance_snapshot_source", "balance_discrepancies"}
+    if not required <= staged["caches"].keys() or staged["details"] is None:
+        raise RuntimeError("Incomplete balance publication; refusing partial generation")
+    index = json.loads(staged["caches"]["filer_index"].read_text())
+    expected = {row["slug"] for row in index}
+    seen = set()
+    with staged["details"].open() as stream:
+        for line in stream:
+            slug = json.loads(line)["slug"]
+            if slug in seen:
+                raise RuntimeError("Duplicate committee in staged publication")
+            seen.add(slug)
+    if seen != expected or len(expected) != len(index):
+        raise RuntimeError("Index and committee-detail scopes differ")
+    receipt = {"generation": staged["id"], "detail_count": len(seen),
+               "cache_sha256": {key: hashlib.sha256(path.read_bytes()).hexdigest()
+                                for key, path in staged["caches"].items()}}
+    started = time.monotonic()
+    log.info("Publication %s: opening transaction for %d details and %d caches",
+             staged["id"], len(seen), len(staged["caches"]))
+    # Explicit close matters: psycopg's transaction context alone does not close.
+    with closing(_connect()) as conn, conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL idle_in_transaction_session_timeout = 120000")
+            def check_deadline():
+                remaining_ms = int((900 - (time.monotonic() - started)) * 1000)
+                if remaining_ms <= 0:
+                    raise TimeoutError("Dashboard publication exceeded 15 minutes")
+                cur.execute("SET LOCAL statement_timeout = %s", (min(120000, remaining_ms),))
+
+            def write_batch(batch, done):
+                check_deadline()
+                execute_values(cur, _DETAIL_SQL, batch,
+                               template="(%s, %s, %s, %s::jsonb, now())", page_size=50)
+                log.info("Publication %s: uploaded %d/%d details (%.1fs)",
+                         staged["id"], done, len(seen), time.monotonic() - started)
+            batch, done = [], 0
+            with staged["details"].open() as stream:
+                for line in stream:
+                    row = json.loads(line)
+                    batch.append((row["slug"], row.get("name"), row.get("filer_id") or None,
+                                  json.dumps(row["detail"], default=str)))
+                    done += 1
+                    if len(batch) == 50:
+                        write_batch(batch, done)
+                        batch = []
+                if batch:
+                    write_batch(batch, done)
+            for key, path in staged["caches"].items():
+                check_deadline()
+                cur.execute(_CACHE_SQL, (key, path.read_text()))
+                log.info("Publication %s: uploaded cache %s", staged["id"], key)
+            check_deadline()
+            cur.execute(_CACHE_SQL, ("balance_publication", json.dumps(receipt)))
+    receipt_path = Path(os.environ.get("BALANCE_PUBLICATION_RECEIPT_PATH",
+                                        "data/aggregated/balance_publication.json"))
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path.write_text(json.dumps(receipt))
+    log.info("BALANCE_PUBLICATION_COMMITTED generation=%s details=%d elapsed=%.1fs",
+             staged["id"], len(seen), time.monotonic() - started)
+
+
+@contextmanager
+def dashboard_publication():
+    """Stage a full aggregation without holding a database transaction open."""
+    if not sync_enabled() or _PUBLICATION.get() is not None:
+        yield
+        return
+    with tempfile.TemporaryDirectory(prefix="balance-publication-") as directory:
+        staged = {"id": str(uuid.uuid4()), "directory": Path(directory),
+                  "caches": {}, "details": None}
+        token = _PUBLICATION.set(staged)
+        started = time.monotonic()
+        log.info("Publication %s: starting local aggregation", staged["id"])
+        try:
+            yield
+            log.info("Publication %s: aggregation complete (%.1fs); publishing",
+                     staged["id"], time.monotonic() - started)
+            _publish_dashboard(staged)
+        except BaseException:
+            log.exception("Publication %s failed; no success claim. Check generation receipt before retrying.",
+                          staged["id"])
+            raise
+        finally:
+            _PUBLICATION.reset(token)
+
+
 def upsert_dashboard_cache(key: str, data) -> None:
     if not sync_enabled():
+        return
+    staged = _PUBLICATION.get()
+    if staged is not None:
+        path = staged["directory"] / (hashlib.sha256(key.encode()).hexdigest() + ".json")
+        path.write_text(json.dumps(data, default=str))
+        staged["caches"][key] = path
+        log.info("Publication %s: staged cache %s", staged["id"], key)
         return
     payload = json.dumps(data, default=str)
     with _connect() as conn, conn.cursor() as cur:
@@ -461,6 +578,18 @@ def upsert_dashboard_cache(key: str, data) -> None:
 def bulk_upsert_filer_detail(rows: list[dict]) -> None:
     """rows: list of {slug, name, filer_id, detail(dict)}."""
     if not sync_enabled() or not rows:
+        return
+    staged = _PUBLICATION.get()
+    if staged is not None:
+        if staged["details"] is not None:
+            raise RuntimeError("Committee details staged more than once")
+        path = staged["directory"] / "details.jsonl"
+        with path.open("w") as stream:
+            for row in rows:
+                stream.write(json.dumps(row, default=str) + "\n")
+        staged["details"] = path
+        staged["detail_count"] = len(rows)
+        log.info("Publication %s: staged %d committee details", staged["id"], len(rows))
         return
     from psycopg2.extras import execute_values
     values = [
