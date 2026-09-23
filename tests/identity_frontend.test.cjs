@@ -123,3 +123,45 @@ test('empty chart data does not load label identities',async()=>{
  await id.rekeyBlob({by_year:{},top_donors:[]});
  assert.equal(reads.includes('donor_identity_labels'),false);
 });
+
+// A chamber's donor history is read straight out of the by-year tables, where
+// rekeyBlob leaves the rows alone — so the merges have to be applied there.
+test('per-year donor tables collapse merged identities onto the canonical one',async()=>{
+ const {id,reads}=identityHarness();
+ const out=await id.rekeyDonorYears({
+  2024:[{donor_id:'b',name:'Acme of Clackamas',total:1000},{donor_id:'x',name:'Other',total:4000}],
+  2026:[{donor_id:'b',name:'Acme of Clackamas',total:500},{donor_id:'a',name:'Acme',total:250}],
+ });
+ // One row per identity per year, summed, under the canonical name, still by total.
+ assert.deepEqual(plain(out[2024]),[
+  {donor_id:'x',name:'Other',total:4000},
+  {donor_id:'a',donor_key:'a',name:'Acme',total:1000},
+ ]);
+ assert.deepEqual(plain(out[2026]),[{donor_id:'a',donor_key:'a',name:'Acme',total:750}]);
+ assert.equal(reads.includes('donor_identity_labels'),false,'every row carries an id');
+});
+test('per-year tables with no merges saved are handed back untouched',async()=>{
+ const {id}=identityHarness({donor_identity_map:[]});
+ const byYear={2026:[{donor_id:'b',name:'Acme of Clackamas',total:500}]};
+ assert.equal(await id.rekeyDonorYears(byYear),byYear);
+});
+test('a chamber of donor history is merged as it is read',async()=>{
+ const blobs={fahey:{2026:[{donor_id:'a',name:'Acme',total:1000},{donor_id:'b',name:'Acme of Clackamas',total:500}]}};
+ const ctx=vm.createContext({ID:{hasMerges:async()=>true,
+  rekeyDonorYears:async byYear=>Object.fromEntries(Object.entries(byYear).map(([y,rows])=>
+   [y,[{donor_id:'a',name:'Acme',total:rows.reduce((t,r)=>t+r.total,0)}]]))},
+  getSupabase:async()=>({from:()=>({select(){return this;},in:async(col,slugs)=>
+   ({data:slugs.map(slug=>({slug,top_donors_by_year:blobs[slug]}))})})})});
+ vm.runInContext(read('docs/lib/data.js')+'\nthis.data=DL;',ctx);
+ const out=await ctx.data.getFilerDonorYears(['fahey']);
+ assert.deepEqual(plain(out.get('fahey')[2026]),[{donor_id:'a',name:'Acme',total:1500}]);
+});
+test('a database with no merges saved does not rewrite the chamber blobs',async()=>{
+ const byYear={2026:[{donor_id:'b',name:'Acme of Clackamas',total:500}]};
+ const ctx=vm.createContext({ID:{hasMerges:async()=>false,
+  rekeyDonorYears:async()=>{throw Error('unexpected re-key');}},
+  getSupabase:async()=>({from:()=>({select(){return this;},in:async()=>
+   ({data:[{slug:'fahey',top_donors_by_year:byYear}]})})})});
+ vm.runInContext(read('docs/lib/data.js')+'\nthis.data=DL;',ctx);
+ assert.equal((await ctx.data.getFilerDonorYears(['fahey'])).get('fahey'),byYear);
+});

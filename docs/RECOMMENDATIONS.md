@@ -711,6 +711,15 @@ Democrats — read through `filer_detail`, selecting only the
 instead of forty, and the four lists build in seconds against the live
 database with no new tables, views or indexes.
 
+Merges saved at `/admin/donors` are applied to those tables as they are read
+(`ID.rekeyDonorYears`). The whole-blob path re-queries merged totals one filer
+at a time, which a chamber of 230 committees cannot afford, so the by-year
+tables are merged in memory from the one identity map instead. Without it an
+organization filed under two mailing addresses ranked, and was asked for
+money, twice: Oregon Beverage Recycling Cooperative appeared at 58 asking
+$1,500 and again at 96 asking $1,000, and Union Pacific took four places under
+two spellings. Merged, OBRC is one row at 20.
+
 Ranking comes first and contributor categories second. Reading the category
 for all 11,000 donors to a chamber is seventy-odd round trips for a list of
 125, so every donor is scored, then categories are resolved down the ranking,
