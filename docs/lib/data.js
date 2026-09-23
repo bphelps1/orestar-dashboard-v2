@@ -62,6 +62,12 @@ const DL = (() => {
    */
   async function getFilerDonorYears(slugs, { chunk = 20, concurrency = 6 } = {}) {
     const sb = await getSupabase();
+    // Merges an admin saved at /admin/donors apply here too: without them an
+    // organization filed under two addresses ranks, and is asked for money,
+    // twice. The map is read once and applied in memory, because a chamber is
+    // hundreds of blobs and the per-filer re-query the detail page uses would
+    // be hundreds of round trips.
+    const merged = typeof ID !== "undefined" && await ID.hasMerges();
     const pending = [];
     for (let i = 0; i < slugs.length; i += chunk) pending.push(slugs.slice(i, i + chunk));
     const out = new Map();
@@ -73,7 +79,10 @@ const DL = (() => {
           .select("slug,detail->top_donors_by_year")
           .in("slug", part);
         if (error) throw new Error(`Failed to load donor history: ${error.message}`);
-        for (const row of data || []) out.set(row.slug, row.top_donors_by_year || {});
+        for (const row of data || []) {
+          const byYear = row.top_donors_by_year || {};
+          out.set(row.slug, merged ? await ID.rekeyDonorYears(byYear) : byYear);
+        }
       }
     }));
     return out;

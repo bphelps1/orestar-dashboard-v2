@@ -44,6 +44,26 @@ const ID = (() => {
     const canonical = map.get(id)?.canonical_id || id;
     return [...new Set([canonical, ...[...map.values()].filter(r => r.canonical_id === canonical).map(r => r.donor_id)])];
   }
+  function loadLabels() {
+    if (!labels) labels = readAll('donor_identity_labels').then(rows => new Map(rows.map(r => [r.label, r])))
+      .catch(error => { labels = null; throw error; });
+    return labels;
+  }
+
+  /** One donor table, with merged identities collapsed onto the canonical one. */
+  function mergeRows(items, map, names) {
+    const out = new Map();
+    for (const item of items) {
+      const identity = item.donor_id || item.donor_key;
+      const match = identity ? map.get(identity) : names.get(labelKey(item.name));
+      const key = match?.canonical_id || identity || `name:${labelKey(item.name)}`;
+      const row = match ? { ...item, name: match.canonical_name, donor_id: key, donor_key: key } : { ...item };
+      if (out.has(key)) out.get(key).total += Number(row.total || 0);
+      else out.set(key, { ...row, total: Number(row.total || 0) });
+    }
+    return [...out.values()].sort((a,b) => b.total-a.total);
+  }
+
   async function rekeyBlob(blob) {
     const map = await loadMap();
     if (!map.size) return blob;
@@ -54,30 +74,36 @@ const ID = (() => {
       return value && typeof value === 'object'
         ? Object.entries(value).some(([k,v]) => needsLabels(v,k)) : false;
     }
-    let names = new Map();
-    if (needsLabels(blob)) {
-      if (!labels) labels = readAll('donor_identity_labels').then(rows => new Map(rows.map(r => [r.label, r])))
-        .catch(error => { labels = null; throw error; });
-      names = await labels;
-    }
-    function rows(items) {
-      const out = new Map();
-      for (const item of items) {
-        const identity = item.donor_id || item.donor_key;
-        const match = identity ? map.get(identity) : names.get(labelKey(item.name));
-        const key = match?.canonical_id || identity || `name:${labelKey(item.name)}`;
-        const row = match ? { ...item, name: match.canonical_name, donor_id: key, donor_key: key } : { ...item };
-        if (out.has(key)) out.get(key).total += Number(row.total || 0);
-        else out.set(key, { ...row, total: Number(row.total || 0) });
-      }
-      return [...out.values()].sort((a,b) => b.total-a.total);
-    }
+    const names = needsLabels(blob) ? await loadLabels() : new Map();
     function walk(value, key) {
-      if (Array.isArray(value)) return key === 'top_donors' ? rows(value) : value.map(v => walk(v));
+      if (Array.isArray(value)) return key === 'top_donors' ? mergeRows(value, map, names) : value.map(v => walk(v));
       if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k,v]) => [k,walk(v,k)]));
       return value;
     }
     return walk(blob);
   }
-  return { loadMap, hasMerges, affectsFilers, members, rekeyBlob };
+
+  /**
+   * A filer's per-year donor tables, with saved merges applied.
+   *
+   * rekeyBlob only collapses the all-time `top_donors` array: in a by-year
+   * blob the rows sit under "2024", "2026", … and that walk passes them
+   * through untouched, because the whole-blob path re-queries the merged
+   * totals per filer instead. The chamber list reads hundreds of these blobs
+   * at once and cannot afford a query each, so it merges them here — which is
+   * why an organization an admin has already merged, such as Oregon Beverage
+   * Recycling Cooperative under its two mailing addresses, was still ranking
+   * as two donors.
+   */
+  async function rekeyDonorYears(byYear) {
+    const map = await loadMap();
+    if (!map.size || !byYear) return byYear;
+    const years = Object.entries(byYear);
+    const names = years.some(([, items]) => (items || []).some(i => !i.donor_id && !i.donor_key))
+      ? await loadLabels() : new Map();
+    return Object.fromEntries(years.map(([year, items]) =>
+      [year, Array.isArray(items) ? mergeRows(items, map, names) : items]));
+  }
+
+  return { loadMap, hasMerges, affectsFilers, members, rekeyBlob, rekeyDonorYears };
 })();
