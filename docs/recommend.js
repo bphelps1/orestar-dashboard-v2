@@ -2671,7 +2671,9 @@ function planGroups() {
     const entry = { ...row, attribution: list[0] || null,
                     contacts: window._donorContacts?.get(row.donor_key) || [],
                     also: list.slice(1).filter(a => !atFirm.has(a.lobbyist.lobbyist_id)) };
-    if (!list.length) { if (!row.history_only) none.rows.push(entry); continue; }
+    // Donors with no lobbyist are listed, asks or not: a gift with no ask
+    // attached still has to count toward what the committee has been given.
+    if (!list.length) { none.rows.push(entry); continue; }
     const id = groupLobbyist.lobbyist_id;
     if (!groups.has(id)) groups.set(id, { lobbyist: groupLobbyist, rows: [] });
     groups.get(id).rows.push(entry);
@@ -2920,6 +2922,7 @@ function donorContact(r) {
 // filer name. No committee can be named this.
 const PLAN_SELF = "__plan_self__";
 const REMAINING = "Remaining";
+const COMMITTED = "Committed";
 
 /** What this donor gave `filer` in `cy`, from the all-years comparable index. */
 function givenInCycle(key, filerName, cy, row) {
@@ -3207,19 +3210,22 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
   const self = window._targetProfile?.name || "This committee";
   const { cycles, comps } = planCycleColumns(groups, cycle);
 
-  const fixed = ["Lobbyist", "Lobbyist or firm", "Donor", "Tier", "Who to call", "Email", "Phone",
-                 "Why them"];
+  // The layout the fundraising team settled on (their "Bowman 2026 Lobby
+  // List"): who to call on the left, then a spacer, this cycle, and the
+  // evidence for the ask. Headers start on row 1; the cover explains the rest.
+  const fixed = ["Lobbyist", "Lobbyist or firm", "Tier", "Donor", "Email", "Phone"];
   const bands = [];
   let width = fixed.length + 1;                       // +1 spacer
-  // Remaining is what is still to come, never below $0: the same figure as
-  // the on-screen plan's Remaining column.
+  // Committed is typed in by hand: a pledge ORESTAR has not recorded yet.
+  // Remaining is what is still to come after Given and Committed, never
+  // below $0 (the on-screen plan's Remaining, until anything is committed).
   bands.push({ cycle: cycles[0], start: width, current: true,
                cols: [{ filer: PLAN_SELF, kind: "Ask" }, { filer: PLAN_SELF, kind: "Given" },
-                      { filer: PLAN_SELF, kind: REMAINING }] });
-  width += 3;
+                      { filer: PLAN_SELF, kind: COMMITTED }, { filer: PLAN_SELF, kind: REMAINING }] });
+  width += 4;
   // What the comparables have received this cycle, a spacer apart from the
-  // candidate's own Ask, Given and Remaining: the candidate's giving this
-  // cycle is already Given, so this band holds the comparables only.
+  // candidate's own columns: the candidate's giving this cycle is Given, so
+  // this band holds the comparables only.
   if (comps.length) {
     width += 1;                                       // spacer
     bands.push({ cycle: cycles[0], start: width, compsOnly: true,
@@ -3236,25 +3242,9 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
   const blank = () => new Array(width).fill("");
   const label = f => (f === PLAN_SELF ? self : f);
   const remainingAt = bands[0].start + bands[0].cols.findIndex(c => c.kind === REMAINING);
+  const givenAt = bands[0].start + bands[0].cols.findIndex(c => c.kind === "Given");
   const rows = [], roles = [];
   const push = (row, role) => { rows.push(row); roles.push(role); };
-
-  const seat = window._targetSeat, ctx = window._seatContext;
-  const title = blank();
-  title[0] = `${self} — who to ask, and for how much (${cycle - 1}–${cycle})`;
-  push(title, "title");
-  const sub = blank();
-  sub[0] = seat
-    ? `This seat was ${seat.label.replace(/ \(.*\)/, "")} in ${seat.year}`
-      + (seat.band !== "unopposed" && seat.margin_pts != null ? ` — decided by ${seat.margin_pts.toFixed(1)} points` : "")
-      + (ctx ? `. Comparable committees raised a median of ${fmt$(ctx.median)} this cycle.` : ".")
-    : "No general-election margin on record for this seat.";
-  push(sub, "note");
-  const method = blank();
-  method[0] = "For candidates with fewer than two completed incumbent cycles, prior-donor asks use median recent peer giving and cannot exceed that benchmark before rounding. Peer evidence uses each recipient's latest funded eligible cycle in the preceding two cycles. First-time asks use initial giving, capped at half the established benchmark before rounding. All donor targets round to the nearest $250, and anyone who gave last cycle is asked for more than that (eligible giving + 5%, rounded up to $250); lobbyist targets cannot fall below eligible last-cycle client giving after primary exclusions. "
-    + "The columns on the right show that giving.";
-  push(method, "note");
-  push(blank(), "blank");
 
   const rCycle = blank(), rName = blank(), rKind = blank();
   for (const b of bands) {
@@ -3278,21 +3268,20 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     const contact = planContact(l);
     const lead = blank();
     lead[1] = name;
-    lead[3] = l ? g.tier.label : "";
-    lead[4] = contact.name; lead[5] = contact.email; lead[6] = contact.phone;
-    lead[7] = [l ? g.tier.why : "", g.target_reason].filter(Boolean).join(" · ");
+    lead[2] = l ? g.tier.label : "";
+    lead[4] = contact.email; lead[5] = contact.phone;
     body.push(lead); bodyRoles.push("lobbyist");
     const groupSums = new Array(width).fill(0);
     for (const r of planExportRows(g)) {
       const row = blank();
       row[0] = name;
-      row[2] = r.donor;
-      row[3] = r.type === "Donor Target" ? "Gave before" : r.type === "New Prospect" ? "New prospect" : r.type;
+      row[2] = r.type === "Donor Target" ? "Gave before" : r.type === "New Prospect" ? "New prospect" : r.type;
+      row[3] = r.donor;
       const dc = donorContact(r);
-      row[4] = dc.name; row[5] = dc.email; row[6] = dc.phone;
-      row[7] = [plainAttribution(r.attribution), ...(r.factors || []).filter(f => /First-time ask|first observed|earliest observed|Lobbyist target/.test(f))].filter(Boolean).join(" · ");
+      row[4] = dc.email; row[5] = dc.phone;
       for (const b of bands) {
         b.cols.forEach((c, i) => {
+          if (c.kind === COMMITTED) return;           // for the team to fill in
           const at = b.start + i;
           const v = c.kind === "Ask" ? r.target
             : c.kind === REMAINING ? rowRemaining(r)
@@ -3315,15 +3304,12 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     if (g.nonTarget?.clients.length) {
       // One summary row, or (the plan's "List non-target donors" box) each
       // client on its own row. The lobbyist's totals are the same either way.
-      const n = g.nonTarget.clients.length;
       const entries = listNonTargets
-        ? g.nonTarget.clients.map(cl => ({ donor: cl.name, type: "Non-target", byCell: cl.byCell,
-            why: "Client of this lobbyist, not in this plan: no ask" }))
-        : [{ donor: NON_TARGET, type: "Not asked here", byCell: g.nonTarget.byCell,
-             why: `${n} other client${n === 1 ? "" : "s"} of this lobbyist, not in this plan: who they are is on the ${NON_TARGET} sheet` }];
+        ? g.nonTarget.clients.map(cl => ({ donor: cl.name, type: "Non-target", byCell: cl.byCell }))
+        : [{ donor: NON_TARGET, type: "Not asked here", byCell: g.nonTarget.byCell }];
       for (const e of entries) {
         const row = blank();
-        row[0] = name; row[2] = e.donor; row[3] = e.type; row[7] = e.why;
+        row[0] = name; row[2] = e.type; row[3] = e.donor;
         for (const b of bands) b.cols.forEach((c, i) => {
           if (c.filer === PLAN_SELF) return;            // what they gave the comparables, nothing else
           const v = e.byCell.get(`${c.filer}|${b.cycle}`) || 0;
@@ -3344,17 +3330,57 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     if (groupRemaining || groupSums[bands[0].start] > 0) lead[remainingAt] = Math.round(groupRemaining);
     totals[remainingAt] += groupRemaining;
   }
+
+  // The cash the call list leaves off by rule, so Everyone's Given is all of it.
+  const other = otherCycleContributions(cycle);
+  if (other.length) {
+    const lead = blank();
+    lead[1] = "Other contributions this cycle (not on the call list)";
+    body.push(lead); bodyRoles.push("subtotal");
+    for (const o of other) {
+      const row = blank();
+      row[0] = lead[1]; row[2] = "Not on the call list"; row[3] = o.label;
+      row[givenAt] = Math.round(o.given);
+      lead[givenAt] = Math.round((lead[givenAt] || 0) + o.given);
+      totals[givenAt] += o.given;
+      body.push(row); bodyRoles.push("other");
+    }
+  }
   for (let i = 0; i < width; i++) if (totals[i]) totalsRow[i] = Math.round(totals[i]);
   if (totals[bands[0].start] > 0) totalsRow[remainingAt] = Math.round(totals[remainingAt]);
   push(totalsRow, "total");
   body.forEach((row, i) => push(row, bodyRoles[i]));
 
   const merges = bands.filter(b => b.cols.length > 1).map(b => ({
-    s: { r: 4, c: b.start }, e: { r: 4, c: b.start + b.cols.length - 1 },
+    s: { r: 0, c: b.start }, e: { r: 0, c: b.start + b.cols.length - 1 },
   }));
   const cols = new Array(width).fill(null).map((_, i) =>
-    ({ wch: i === 0 ? 24 : i === 1 ? 30 : i === 2 ? 38 : i === 3 ? 13 : i === 7 ? 46 : i < 7 ? 26 : 13 }));
-  return { rows, roles, merges, cols, moneyFrom: fixed.length, headerRows: 7 };
+    ({ wch: i === 0 ? 24 : i === 1 ? 30 : i === 2 ? 14.7 : i === 3 ? 38 : i === 4 ? 26 : 13 }));
+  return { rows, roles, merges, cols, moneyFrom: fixed.length, headerRows: 3 };
+}
+
+/**
+ * This cycle's cash from contributors the call list leaves off by rule —
+ * people (the Individuals sheet), Oregon candidate committees and the pooled
+ * small-gift line — so the call list's Everyone Given adds up to all the cash
+ * the committee has raised. In-kind stays out, as it does everywhere here.
+ */
+function otherCycleContributions(cycle) {
+  const byYear = window._targetProfile?.top_donors_by_year;
+  if (!byYear) return [];
+  const planRows = planDonorRows();
+  const inPlan = new Set(planRows.map(r => r.donor_key));
+  const people = planRows.filter(r => r.type !== "New Prospect" && !isOrganization(r))
+    .reduce((sum, r) => sum + (r.given || 0), 0);
+  let pooled = 0, committees = 0;
+  for (const d of mergeDonorsByYear(byYear, [cycle - 1, cycle])) {
+    if (inPlan.has(d.donor_key)) continue;
+    if (isDonorExcluded(d.name)) pooled += d.total || 0;
+    else committees += d.total || 0;                  // the one other rule: Oregon candidate committees
+  }
+  return [["Individuals (see the Individuals sheet)", people], ["Oregon candidate committees", committees],
+          ["Small gifts of $100 and under", pooled]]
+    .filter(([, given]) => given > 0).map(([label, given]) => ({ label, given }));
 }
 
 // The same evidence the review page shows, in words a first-time reader can
@@ -3589,7 +3615,7 @@ const INK = {
   tier1: "FFDCFCE7",
   tier2: "FFFEF3C7",
   tier3: "FFDBEAFE",
-  lobbyist: "FFEFF3FA",
+  lobbyist: "FFEFEFEF",     // one grey for every lobbyist row; the Tier column says the tier
   total: "FFD9E2F3",
   rule: "FFBFBFBF",
   contact: "FF7D9A78",     // the lobby list's sage header for who-to-call columns
@@ -3615,30 +3641,92 @@ function tierFill(label) {
 }
 
 /** Sheet 1 of the workbook: the call list, styled. */
+/** Excel's name for a 1-based column number: 1 → A, 27 → AA. */
+function colLetter(n) {
+  let name = "";
+  for (; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + (n - 1) % 26) + name;
+  return name;
+}
+
+// Zero reads as blank in the summed columns, as it did when they held values.
+const MONEY_BLANK_ZERO = '"$"#,##0;-"$"#,##0;';
+
+/**
+ * Makes the call list's totals formulas, so a figure typed in by hand (a
+ * cheque ORESTAR has not recorded yet, a revised ask) flows up:
+ *   donor Remaining     IF(Ask>0, MAX(0, Ask − Given), "")
+ *   lobbyist row        SUM of its rows in every column; Remaining is
+ *                       MAX(0, Ask − Given), as on screen (SUM for the
+ *                       no-lobbyist group, which has no target of its own)
+ *   Everyone            the lobbyist rows added up
+ * planSheetAoa's numbers stay as each formula's cached result, so a viewer
+ * that does not recalculate shows the same figures. Google Sheets keeps the
+ * formulas on import. Returns the rows the other sheets link to.
+ */
+function liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups) {
+  const kinds = rows[headerRows - 1];
+  const moneyCols = [];
+  for (let c = moneyFrom + 1; c <= kinds.length; c++) if (kinds[c - 1]) moneyCols.push(c);
+  const askCol = kinds.indexOf("Ask") + 1, givenCol = kinds.indexOf("Given") + 1;
+  const remCol = kinds.indexOf(REMAINING) + 1, committedCol = kinds.indexOf(COMMITTED) + 1;
+  const ask = colLetter(askCol), given = colLetter(givenCol), committed = colLetter(committedCol);
+  const cell = (r, c) => ws.getRow(r).getCell(c);
+  const cached = (r, c) => (typeof cell(r, c).value === "number" ? cell(r, c).value : 0);
+  const set = (r, c, formula, result) => { cell(r, c).value = { formula, result }; };
+  const leads = [];
+  let totalRow = null, group = -1;
+  for (let i = 0; i < roles.length; i++) {
+    if (roles[i] === "total") totalRow = i + 1;
+    if (roles[i] !== "lobbyist" && roles[i] !== "subtotal") continue;
+    const subtotal = roles[i] === "subtotal";
+    if (!subtotal) group++;
+    let end = i + 1;
+    while (end < roles.length && ["donor", "nontarget", "other"].includes(roles[end])) end++;
+    const lead = i + 1, first = i + 2, last = end;        // Excel rows: the lobbyist, then its donors
+    leads.push(lead);
+    if (last < first) continue;
+    for (let r = first; r <= last; r++) {
+      if (roles[r - 1] !== "donor") continue;              // non-target rows have no ask
+      const v = cell(r, remCol).value;
+      set(r, remCol, `IF(N(${ask}${r})>0,MAX(0,${ask}${r}-N(${given}${r})-N(${committed}${r})),"")`, typeof v === "number" ? v : "");
+    }
+    for (const c of moneyCols) {
+      const L = colLetter(c);
+      if (subtotal && c === remCol) continue;            // nothing was asked of these
+      set(lead, c, c === remCol && groups[group]?.lobbyist
+        ? `MAX(0,${ask}${lead}-${given}${lead}-${committed}${lead})` : `SUM(${L}${first}:${L}${last})`, cached(lead, c));
+      if (c !== remCol) cell(lead, c).numFmt = MONEY_BLANK_ZERO;
+    }
+  }
+  if (totalRow && leads.length) {
+    for (const c of moneyCols) {
+      const sumOf = c === remCol ? leads.filter(r => roles[r - 1] === "lobbyist") : leads;
+      set(totalRow, c, sumOf.map(r => colLetter(c) + r).join("+") || "0", cached(totalRow, c));
+      if (c !== remCol) cell(totalRow, c).numFmt = MONEY_BLANK_ZERO;
+    }
+  }
+  return { leads, totalRow, askCol, givenCol, remCol, committedCol };
+}
+
 async function writeCallList(wb, groups, cycle, options = {}) {
   const { rows, roles, headerRows, cols, moneyFrom, merges } = planSheetAoa(groups, cycle, options);
   const ws = wb.addWorksheet("Call list", {
-    views: [{ state: "frozen", xSplit: 3, ySplit: headerRows }],
+    // The headers and the Everyone row stay in view.
+    views: [{ state: "frozen", xSplit: 1, ySplit: headerRows + 1 }],
     properties: { defaultRowHeight: 16, outlineLevelRow: 1, outlineProperties: { summaryBelow: false } },
   });
   rows.forEach(r => ws.addRow(r));
   cols.forEach((col, i) => { ws.getColumn(i+1).width = col?.wch || 12; });
   for (const m of merges) ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1);
-  // Excel columns for the planSheetAoa layout: B lobbyist, C donor, D tier, H why.
-  const TIER_COL = 4, DONOR_COL = 3, WHY_COL = 8;
+  // Excel columns for the planSheetAoa layout: B lobbyist, C tier, D donor.
+  const LOBBYIST_COL = 2, DONOR_COL = 4;
   const remainingCol = rows[headerRows - 1].indexOf(REMAINING) + 1;
 
-  let group = -1;                      // planSheetAoa writes one lobbyist row per group, in order
   rows.forEach((_, i) => {
     const row = ws.getRow(i + 1);
     const role = roles[i];
-    if (role === "title") {
-      row.font = { bold: true, size: 14 };
-      row.height = 22;
-    } else if (role === "note") {
-      row.font = { italic: true, size: 10, color: { argb: INK.muted } };
-    } else if (role.startsWith("head")) {
-      row.height = role === "head-name" ? 28 : 18;
+    if (role.startsWith("head")) {
+      row.height = role === "head-band" ? 18 : 16;
       row.eachCell({ includeEmpty: true }, (cell, c) => styleHeaderCell(cell, { center: c > moneyFrom }));
       // The band title is one merged cell; only the rows under it change colour.
       if (remainingCol && role !== "head-band") {
@@ -3649,36 +3737,38 @@ async function writeCallList(wb, groups, cycle, options = {}) {
       row.eachCell({ includeEmpty: true }, cell => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.total } };
       });
-    } else if (role === "lobbyist") {
-      group++;
+    } else if (role === "lobbyist" || role === "subtotal") {
       row.font = { bold: true };
-      const tier = String(row.getCell(TIER_COL).value || "");
-      const fill = tierFill(tier) || INK.lobbyist;
+      row.getCell(LOBBYIST_COL).alignment = { wrapText: true, vertical: "top" };
       row.eachCell({ includeEmpty: true }, cell => {
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.lobbyist } };
         cell.border = { top: { style: "thin", color: { argb: INK.rule } } };
       });
-    } else if (role === "donor" || role === "nontarget") {
-      if (role === "nontarget") row.font = { italic: true, color: { argb: INK.muted } };
+    } else if (role === "donor" || role === "nontarget" || role === "other") {
+      if (role !== "donor") row.font = { italic: true, color: { argb: INK.muted } };
+      // Grouped under the lobbyist but open: the team works the list expanded.
       row.outlineLevel = 1;
-      // Donors with no lobbyist are listed as they are, at the bottom: there is
-      // nobody to collapse them under, and a plan without attribution should
-      // never open looking empty.
-      row.hidden = Boolean(groups[group]?.lobbyist);
       row.getCell(DONOR_COL).alignment = { indent: 1 };
     }
-    if (role === "donor" || role === "nontarget" || role === "lobbyist" || role === "total") {
+    if (role !== "head-band" && role !== "head-name" && role !== "head-kind") {
       for (let c = moneyFrom + 1; c <= rows[0].length; c++) row.getCell(c).numFmt = MONEY;
-      row.getCell(WHY_COL).alignment = { wrapText: true, vertical: "top" };
       if (remainingCol) {
-        const cell = row.getCell(remainingCol), value = cell.value;
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.remaining } };
-        if (typeof value === "number") {
-          cell.font = { bold: role !== "donor" || value > 0, color: { argb: value > 0 ? INK.owed : INK.met } };
-        }
+        // Red and green come from conditional formatting below, so they follow edits.
+        row.getCell(remainingCol).fill = { type: "pattern", pattern: "solid", fgColor: { argb: INK.remaining } };
       }
     }
   });
+  ws.planLinks = liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups);
+  if (remainingCol) {
+    const L = colLetter(remainingCol);
+    ws.addConditionalFormatting({
+      ref: `${L}${headerRows + 1}:${L}${rows.length}`,
+      rules: [
+        { type: "cellIs", operator: "greaterThan", priority: 1, formulae: ["0"], style: { font: { color: { argb: INK.owed } } } },
+        { type: "cellIs", operator: "equal", priority: 2, formulae: ["0"], style: { font: { color: { argb: INK.met } } } },
+      ],
+    });
+  }
   // The "Lobbyist" repeat in column A is there for filtering and sorting, not
   // for reading; it would otherwise be the first thing the eye lands on.
   ws.getColumn(1).hidden = true;
@@ -3691,6 +3781,33 @@ async function writeCallList(wb, groups, cycle, options = {}) {
 }
 
 /** A plain table sheet: bold frozen header, filter, currency where asked. */
+/** The Lobbyists sheet's ask, given and remaining read the call list's lobbyist rows. */
+function linkLobbyistsToCallList(ws, links, groups, named, cycle) {
+  const header = ws.getRow(3), col = {};
+  header.eachCell((c, n) => { col[c.value] = n; });
+  const pairs = [["Suggested ask", links.askCol], [`Given ${cycle - 1}–${cycle}`, links.givenCol], ["Remaining", links.remCol]];
+  named.forEach((g, i) => {
+    const lead = links.leads[groups.indexOf(g)];
+    if (!lead) return;
+    for (const [name, from] of pairs) {
+      if (!col[name] || !from) continue;
+      const target = ws.getRow(i + 4).getCell(col[name]);
+      target.value = { formula: `'Call list'!${colLetter(from)}${lead}`, result: typeof target.value === "number" ? target.value : 0 };
+    }
+  });
+}
+
+/** The cover's "Still to ask" is the call list's Everyone Remaining. */
+function linkCoverToCallList(ws, links) {
+  if (!ws || !links.totalRow || !links.remCol) return;
+  ws.eachRow(row => {
+    if (row.getCell(1).value !== "Still to ask") return;
+    const target = row.getCell(2);
+    target.value = { formula: `'Call list'!${colLetter(links.remCol)}${links.totalRow}`,
+                     result: typeof target.value === "number" ? target.value : 0 };
+  });
+}
+
 function writeTable(wb, name, rows, { money = [], widths = {}, note = "" } = {}) {
   const ws = wb.addWorksheet(name, { views: [{ state: "frozen", ySplit: note ? 3 : 1 }] });
   const headers = Object.keys(rows[0] || {});
@@ -3778,8 +3895,9 @@ function writeCover(wb, groups, cycle, { listNonTargets = false } = {}) {
 
   heading("How to read the call list");
   para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
-  para(`Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Remaining” is what is still to come, never below $0; for a lobbyist it is their target less what their donors have given. Next come what those same donors have given the comparable candidates this cycle, then what they gave this candidate and the comparables in the two cycles before — that is the case for the ask. A lobbyist's comparable columns count their whole book: ${listNonTargets ? "clients not in this plan are listed one by one under them, marked “Non-target”, with no ask." : "clients not in this plan are summed in a “Non-target donors” row under them."}`);
+  para(`Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Committed” is for pledges ORESTAR has not recorded yet: type them in; “Remaining” is what is still to come after Given and Committed, never below $0 — for a lobbyist, their target less what their donors have given and committed. Next come what those same donors have given the comparable candidates this cycle, then what they gave this candidate and the comparables in the two cycles before — that is the case for the ask. A lobbyist's comparable columns count their whole book: ${listNonTargets ? "clients not in this plan are listed one by one under them, marked “Non-target”, with no ask." : "clients not in this plan are summed in a “Non-target donors” row under them."}`);
   para("The call list is organizations, PACs and businesses only, using ORESTAR's own category for each contributor. Donors with no lobbyist on file are at the bottom of it. People who have given to this candidate are on the Individuals sheet instead.");
+  para("The totals are live: type a pledge into Committed, a gift ORESTAR has not recorded yet into Given, or a new Ask, and that donor's Remaining, the lobbyist's row, Everyone, the Lobbyists sheet and “Still to ask” all follow. Opened in Google Sheets, the formulas carry over. The last block, “Other contributions this cycle”, holds the cash the call list leaves off by rule (people, Oregon candidate committees, gifts of $100 and under), so Everyone's Given is all the cash raised this cycle.");
   para("Anyone who gave last cycle is asked for more than that. The fundraising target is never less than last cycle's contributions plus 5%, leaving out giving in exceptionally high-spend primary contests; anything the asks do not cover is shown as still to find.");
 
   ws.getColumn(1).width = 34;
@@ -3833,7 +3951,8 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
   // Decided per export, with the box beside the Excel button.
   const listNonTargets = document.getElementById("plan-list-non-targets")?.checked === true;
   writeCover(wb, groups, cycle, { listNonTargets });
-  await writeCallList(wb, groups, cycle, { listNonTargets });
+  const callList = await writeCallList(wb, groups, cycle, { listNonTargets });
+  linkCoverToCallList(wb.getWorksheet("Start here"), callList.planLinks);
 
   const lobRows = lobbyistSheetRows(groups, cycle);
   if (lobRows.length) {
@@ -3846,6 +3965,7 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
     });
     const named = groups.filter(g => g.lobbyist);
     for (let i = 0; i < named.length; i++) writeFirmName(lobbyistSheet, named[i].lobbyist, i + 4, 2);
+    linkLobbyistsToCallList(lobbyistSheet, callList.planLinks, groups, named, cycle);
   }
   const nonTargets = nonTargetSheetRows(groups, cycle);
   if (nonTargets.length) {

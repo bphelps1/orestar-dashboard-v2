@@ -25,7 +25,7 @@ test('same-name organizations combine before asks/history; same-name people stay
  assert.equal(result.targets[0].last_cycle_amt,3000);
  c.window._repeatTargets=result.targets;c.window._recommendations=[];c.window._lobbyAttr=new Map();c.window._cycle=2026;c.window._targetProfile={name:'Jason for Bend'};
  const sheet=c.planSheetAoa(c.planGroups(),2026);
- assert.equal(sheet.rows.filter((r,i)=>sheet.roles[i]==='donor'&&r[2]==='State Farm Federal PAC').length,1);
+ assert.equal(sheet.rows.filter((r,i)=>sheet.roles[i]==='donor'&&r[3]==='State Farm Federal PAC').length,1);
 });
 test('firm member donor rolls under firm lead and Last Cycle sums include explicit zero',()=>{
  const {c,get}=harness();
@@ -79,10 +79,10 @@ test('lobbyist target keeps last-cycle client floor, including omitted clients, 
  assert.equal(g.last_cycle,5000);assert.equal(g.target,5000);assert.equal(g.additional_ask,3000);assert.equal(g.given,1200);assert.equal(g.remaining,3800);
  assert.equal(c.window._repeatTargets[0].target,2000);assert.equal(g.rows.find(r=>r.donor_key==='b').target,0);
  c.renderLobbyistPlan();assert.match(get('plan-tbody').innerHTML,/client allocation remains open/);
- const sheet=c.planSheetAoa(groups,2026),askColumn=sheet.rows[6].indexOf('Ask');
+ const sheet=c.planSheetAoa(groups,2026),askColumn=sheet.rows[2].indexOf('Ask');
  assert.equal(sheet.rows.find(r=>r[1]==='Everyone')[askColumn],5000);
  assert.equal(sheet.rows.find(r=>r[1]==='Lobbyist')[askColumn],5000);
- assert.equal(sheet.rows.find(r=>String(r[2]).startsWith('Additional lobbyist ask'))[askColumn],3000);
+ assert.equal(sheet.rows.find(r=>String(r[3]).startsWith('Additional lobbyist ask'))[askColumn],3000);
  const flat=c.lobbyistPlanExportRows();assert.equal(flat.reduce((s,r)=>s+r.Target,0),5000);assert.equal(flat[0]['Lobbyist Remaining'],3800);
  assert.equal(c.lobbyistSheetRows(groups,2026)[0]['Suggested ask'],5000);
  get('plan-search').value='Client A';assert.equal(c.planGroups()[0].target,5000);assert.equal(c.planGroups()[0].rows.length,3);
@@ -150,12 +150,12 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
  const pat=groups.find(g=>g.lobbyist?.name==='Pat');
  assert.equal(pat.nonTarget.clients[0].name,'N One Industries');assert.equal(pat.nonTarget.clients[0].total,2500);
  const {rows,roles}=c.planSheetAoa(groups,2026);
- const [band,names,kinds]=[rows[4],rows[5],rows[6]];
+ const [band,names,kinds]=[rows[0],rows[1],rows[2]];
  const thisCycle=band.indexOf('This cycle (2025–2026): comparables'),prior=band.indexOf('2023–2024');
  const col=(start,filer)=>start+names.slice(start).indexOf(filer);
- const ntIndex=rows.findIndex(r=>r[2]==='Non-target donors');
+ const ntIndex=rows.findIndex(r=>r[3]==='Non-target donors');
  const nt=rows[ntIndex],lead=rows.find(r=>r[1]==='Pat');
- assert.equal(roles[ntIndex],'nontarget');assert.equal(rows[ntIndex-1][2],'Acme','right under the lobbyist\'s own donors');
+ assert.equal(roles[ntIndex],'nontarget');assert.equal(rows[ntIndex-1][3],'Acme','right under the lobbyist\'s own donors');
  assert.equal(nt[col(thisCycle,'Fahey')],500);assert.equal(nt[col(prior,'Wagner')],2000);
  assert.equal(nt[kinds.indexOf('Ask')],'');assert.equal(nt[kinds.indexOf('Remaining')],'');
  assert.equal(nt[prior],'','nothing in the candidate\'s own column');
@@ -164,10 +164,10 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
  assert.equal(lead[kinds.indexOf('Ask')],2000,'asks are the plan\'s alone');
  // Ticked, the same clients are listed one by one, and the lobbyist's totals do not move.
  const listed=c.planSheetAoa(groups,2026,{listNonTargets:true});
- const listedRow=listed.rows.find(r=>r[2]==='N One Industries');
- assert.ok(listedRow,'the client has its own row');assert.equal(listedRow[3],'Non-target');
+ const listedRow=listed.rows.find(r=>r[3]==='N One Industries');
+ assert.ok(listedRow,'the client has its own row');assert.equal(listedRow[2],'Non-target');
  assert.equal(listed.roles[listed.rows.indexOf(listedRow)],'nontarget');
- assert.ok(!listed.rows.some(r=>r[2]==='Non-target donors'),'no summary row when listed');
+ assert.ok(!listed.rows.some(r=>r[3]==='Non-target donors'),'no summary row when listed');
  assert.equal(listedRow[col(prior,'Wagner')],2000);
  const listedLead=listed.rows.find(r=>r[1]==='Pat');
  assert.deepEqual(Array.from(listedLead),Array.from(lead),'same lobbyist row either way');
@@ -175,4 +175,71 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
  assert.equal(sheet.length,1);
  assert.equal(sheet[0].Lobbyist,'Pat');assert.equal(sheet[0]['Non-target donor'],'N One Industries');
  assert.equal(sheet[0]['Total to comparables'],2500);assert.equal(sheet[0]['Fahey 2025–2026'],500);assert.equal(sheet[0]['Wagner 2023–2024'],2000);
+});
+
+// A stand-in worksheet and a small evaluator for the formulas the call list
+// writes (SUM, MAX, IF, N, +, -, comparison), so the tests can recalculate.
+function fakeSheet(rows){
+ const cells=new Map();const key=(r,c)=>r+':'+c;
+ rows.forEach((row,i)=>row.forEach((v,j)=>{if(v!=='')cells.set(key(i+1,j+1),{value:v});}));
+ const cell=(r,c)=>{if(!cells.has(key(r,c)))cells.set(key(r,c),{value:null});return cells.get(key(r,c));};
+ return {getRow:r=>({getCell:c=>cell(r,c)}),cell};
+}
+function colNum(letters){return [...letters].reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0);}
+function evaluate(ws,r,c,seen=new Set()){
+ const v=ws.cell(r,c).value;
+ if(v&&typeof v==='object'&&'formula' in v){
+  const id=r+':'+c;if(seen.has(id))throw Error('cycle at '+id);seen.add(id);
+  const ref=a=>{const m=/^([A-Z]+)(\d+)$/.exec(a);return evaluate(ws,+m[2],colNum(m[1]),seen);};
+  const num=x=>typeof x==='number'?x:0;
+  let f=v.formula;
+  f=f.replace(/SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)/g,(_,c1,r1,c2,r2)=>{let s=0;for(let rr=+r1;rr<=+r2;rr++)s+=num(evaluate(ws,rr,colNum(c1),seen));return String(s);});
+  f=f.replace(/N\(([A-Z]+\d+)\)/g,(_,a)=>String(num(ref(a))));
+  f=f.replace(/\b([A-Z]+\d+)\b/g,(_,a)=>{const x=ref(a);return typeof x==='number'?String(x):'0';});
+  f=f.replace(/MAX\(/g,'Math.max(').replace(/IF\(([^,]+),/g,'(($1)?').replace(/\?(.*),""\)$/,'?$1:"")');
+  return Function('return '+f)();
+ }
+ return v===null||v===undefined?'':v;
+}
+
+test('call list totals are live formulas that reproduce today and follow hand-typed Committed and Given',()=>{
+ const {c}=harness();
+ vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Pat',kind:'person'}],[2,{lobbyist_id:2,name:'Quinn',kind:'person'}]]);
+ window._lobbyAttr=new Map([['a',[{lobbyist:lobbyistsById.get(1),status:'confirmed',is_primary:true,methods:[],client_names:[]}]],
+   ['b',[{lobbyist:lobbyistsById.get(1),status:'confirmed',is_primary:true,methods:[],client_names:[]}]],
+   ['q',[{lobbyist:lobbyistsById.get(2),status:'confirmed',is_primary:true,methods:[],client_names:[]}]]]);`,c);
+ c.window._cycle=2026;c.window._recommendations=[];
+ c.window._targetProfile={name:'Friends of Test',top_donors_by_year:{
+  2025:[{name:'Jane Doe',donor_id:'p',donor_key:'p',total:300},{name:'Miscellaneous Contributions $100 and under',donor_key:'m',total:90}],
+  2026:[{name:'Ghost PAC',donor_id:'h',donor_key:'h',total:4000}]}};
+ const t=(donor,key,target,given)=>({donor,donor_key:key,donor_id:key,target,current_cycle_amt:given,remaining:Math.max(0,target-given),cycles:{2026:given},last_cycle_amt:0,comp_max:0,comp_max_filers:[],comp_gifts:[],factors:[]});
+ c.window._repeatTargets=[t('Acme','a',2000,500),t('Bolt','b',1000,1500),t('Quill','q',3000,0),t('Jane Doe','p',500,300)];
+ c.window._donorTypes=new Map([['p','Individual']]);
+ const groups=c.planGroups();
+ const aoa=c.planSheetAoa(groups,2026);
+ // Ghost PAC gave this cycle, has no ask and no lobbyist: it is on the call list anyway.
+ assert.ok(aoa.rows.some(r=>r[3]==='Ghost PAC'),'no-lobbyist donors without an ask still count');
+ const ws=fakeSheet(aoa.rows);
+ const links=c.liveCallListFormulas(ws,aoa.rows,aoa.roles,aoa.headerRows,aoa.moneyFrom,groups);
+ const kinds=aoa.rows[aoa.headerRows-1];
+ const [ask,given,committed,rem]=['Ask','Given','Committed','Remaining'].map(k=>kinds.indexOf(k)+1);
+ const at=(label,col)=>{const r=aoa.rows.findIndex(x=>x[1]===label||x[3]===label)+1;return evaluate(ws,r,col);};
+ // Every formula recalculates to the number the site computed.
+ for(let r=1;r<=aoa.rows.length;r++)for(let col=aoa.moneyFrom+1;col<=kinds.length;col++){
+  const v=ws.cell(r,col).value;
+  if(v&&typeof v==='object'&&'formula' in v)assert.equal(evaluate(ws,r,col),v.result,`R${r}C${col} ${v.formula}`);
+ }
+ assert.equal(at('Everyone',given),500+1500+0+4000+300+90,'all the cash: call list, individuals, small gifts');
+ assert.equal(at('Other contributions this cycle (not on the call list)',given),390);
+ assert.equal(at('Pat',rem),1000,'3,000 asked − 2,000 given, Bolt\'s extra offsetting Acme');
+ // Hand edits: a $1,000 pledge to Acme and a new $2,000 gift from Quill.
+ const row=label=>aoa.rows.findIndex(x=>x[3]===label)+1;
+ ws.cell(row('Acme'),committed).value=1000;
+ ws.cell(row('Quill'),given).value=2000;
+ assert.equal(at('Acme',rem),500,'2,000 − 500 − 1,000');
+ assert.equal(at('Pat',committed),1000);assert.equal(at('Pat',rem),0,'3,000 − 2,000 − 1,000');
+ assert.equal(at('Quinn',given),2000);assert.equal(at('Quill',rem),1000);assert.equal(at('Quinn',rem),1000);
+ assert.equal(at('Everyone',given),500+1500+2000+4000+300+90);
+ assert.equal(at('Everyone',rem),0+1000+0,'lobbyist Remainings added up; no-lobbyist Ghost PAC has none');
+ assert.equal(links.totalRow,aoa.headerRows+1);
 });
