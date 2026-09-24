@@ -23,19 +23,21 @@ test('history weights count complete eligible cycles, not primary or current cyc
  p._askDonorsByYear[2028]=[gift(10)];assert.equal(c.limitedHistoryWeight(p,2030),null);
  assert.equal(c.limitedHistoryWeight({...p,_recommendationOffice:'governor'},2026),null);
 });
-test('limited-history repeat targets move toward peer giving in either direction and preserve actual history',()=>{
+test('limited-history repeat targets move toward peer giving, never below last cycle, and preserve actual history',()=>{
  const c=harness(),comps=[filer('Peer')],profiles=[{top_donors_by_year:{2024:[gift(10000)]}}];
  function calculate(amount,entry){const p={top_donors_by_year:{2024:[gift(amount)]},...(entry?{_entryBaseline:{year:2024,primaryDate:'2024-05-21'},_askDonorsByYear:{2024:[gift(amount)]}}:{})};return c.buildRepeatDonorTargets(p,comps,profiles,[],2026,null).targets[0];}
  const zero=calculate(1000,true);assert.equal(zero.target,7750);assert.equal(zero.comparable_weight,0.75);assert.equal(zero.last_cycle_amt,1000);
  const one=calculate(1000,false);assert.equal(one.target,6500);assert.equal(one.comparable_weight,0.60);
- const high=calculate(20000,true);assert.equal(high.target,10000);assert.equal(high.last_cycle_amt,20000);
+ // The peer median ($10,000) would ask less than the $20,000 given last cycle; the floor wins.
+ const high=calculate(20000,true);assert.equal(high.target,21000);assert.equal(high.evidence_target,10000);assert.equal(high.last_cycle_amt,20000);
+ assert.match(high.factors.join(' '),/More than last cycle: \$20,000 eligible giving in 2023–2024/);
 });
 test('two completed cycles retain history-led weighting; absence of a peer does not invent an ask',()=>{
  const c=harness(),p={top_donors_by_year:{2022:[gift(1000)],2024:[gift(1000)]}};
  const row=c.buildRepeatDonorTargets(p,[filer('Peer')],[{top_donors_by_year:{2024:[gift(10000)]}}],[],2026,null).targets[0];
  assert.equal(row.history_cycles,2);assert.equal(row.comparable_weight,0.10);assert.equal(row.target,2000);
  const limited={top_donors_by_year:{2024:[gift(1000)],2026:[gift(100)]}};
- const own=c.buildRepeatDonorTargets(limited,[],[],[],2026,null).targets[0];assert.equal(own.target,1000);assert.equal(own.comparable_weight,0);
+ const own=c.buildRepeatDonorTargets(limited,[],[],[],2026,null).targets[0];assert.equal(own.target,1250);assert.equal(own.comparable_weight,0);
 });
 test('limited-history reference uses the median of latest funded prior cycles, excluding lifetime and current peaks',()=>{
  const c=harness(),p={top_donors_by_year:{2024:[gift(1000)]},_entryBaseline:{year:2024}};
@@ -52,7 +54,7 @@ test('limited-history reference uses the median of latest funded prior cycles, e
 test('no recent peer evidence does not substitute current-cycle giving or erase own eligible history',()=>{
  const c=harness(),p={top_donors_by_year:{2024:[gift(1000)]}};
  const row=c.buildRepeatDonorTargets(p,[filer('Peer')],[{top_donors_by_year:{2020:[gift(100000)],2026:[gift(100000)]}}],[],2026,null).targets[0];
- assert.equal(row.target,1000);assert.equal(row.peer_benchmark,0);assert.equal(row.comparable_weight,0);
+ assert.equal(row.target,1250);assert.equal(row.peer_benchmark,0);assert.equal(row.comparable_weight,0);
 });
 test('Excel donor asks match the reduced calculation and preserve actual contribution history',()=>{
  const c=harness();c.document.getElementById=()=>({value:'',checked:true});
@@ -67,4 +69,28 @@ test('Excel donor asks match the reduced calculation and preserve actual contrib
  const sheet=c.planSheetAoa(groups,2026),row=sheet.rows[sheet.roles.indexOf('donor')];
  assert.equal(row[9],1750);assert.equal(row[12],20000); // Ask and prior-cycle actual.
  assert.equal(sheet.rows[sheet.roles.indexOf('total')][9],1750);
+});
+test("Ben Bowman's comparison committees are the six the user chose, each a primary reference",async()=>{
+ const c=harness();
+ const f=(slug,name,extra={})=>({...filer(name,extra),slug});
+ c.filers=[f('friends_of_ben_bowman','Friends of Ben Bowman',{leadership_role:'House Majority Leader'}),
+  f('friends_of_julie_fahey','Friends of Julie Fahey',{leadership_role:'Speaker of the House'}),
+  f('friends_of_rob_wagner','Friends of Rob Wagner',{office:'State Senator',leadership_role:'Senate President'}),
+  f('kayse_jama_for_oregon','Kayse Jama for Oregon',{office:'State Senator',leadership_role:'Senate Majority Leader'}),
+  f('kate_lieber_for_state_senate','Kate Lieber for State Senate',{office:'State Senator'}),
+  f('tawna_sanchez_for_oregon','Tawna Sanchez for Oregon'),
+  f('friends_of_rob_nosse','Friends of Rob Nosse'),
+  f('friends_of_mark_meek','Friends of Mark Meek',{office:'State Senator'})];
+ vm.runInContext('filerIndex=filers',c);
+ const peers=await c.findComparables({},c.filers[0],2026);
+ assert.deepEqual(Array.from(peers,p=>p.slug),['friends_of_julie_fahey','friends_of_rob_wagner','kayse_jama_for_oregon',
+  'kate_lieber_for_state_senate','tawna_sanchez_for_oregon','friends_of_rob_nosse'],'in the order chosen; the outlier is gone');
+ assert.ok(peers.every(p=>p.chosen&&p.comparisonKind==='leadership-primary'),'Nosse counts the same as the leaders');
+ assert.equal(peers[0].benchmarkFactor,0.9,'Speaker giving is still discounted for a House Majority Leader');
+ assert.ok(peers.slice(1).every(p=>p.benchmarkFactor===1));
+ const ref=c.leadershipReference([{filer:'Friends of Rob Nosse',amount:5000}],peers);
+ assert.equal(ref.gifts.length,1);assert.match(ref.label,/chosen for this candidate/);
+ // Anyone else still gets the rules.
+ const other=await c.findComparables({},c.filers[6],2026);
+ assert.ok(other.every(p=>!p.chosen));
 });

@@ -337,8 +337,16 @@ const EXCLUDED_DONORS = new Set([
   "misc cash contributions $100 and under",
   "aggregate contributions $100 or less",
 ]);
+// ORESTAR's pooled line for unitemized small gifts, however a filer words it:
+// "Miscellaneous Contributions $100 and under", "Misc. Contributions Under
+// $100", "MISCELLANEOUS-NOT OVER $100". It is not a donor anyone can ask, and
+// the one spelling the set above missed sat at #1 on the House Democratic list.
+// "Aggregate Resource Industries" and its like are real companies, hence
+// "contribut" on that branch.
+const POOLED_SMALL_GIFTS = /^misc(?:ellaneous)?\b|^aggregate\s.*contribut/i;
 function isDonorExcluded(name) {
-  return EXCLUDED_DONORS.has(name.toLowerCase().trim());
+  const label = String(name || "").toLowerCase().trim();
+  return EXCLUDED_DONORS.has(label) || POOLED_SMALL_GIFTS.test(label);
 }
 
 async function runRecommendations() {
@@ -654,8 +662,10 @@ function leadershipReference(gifts, comparables) {
   if (!leadershipPool(comparables)) return null;
   const primaryNames = new Set(comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => c.name));
   const primary = gifts.filter(g => primaryNames.has(g.filer));
+  const chosen = comparables.some(c => c.chosen);
   return { gifts: primary.length ? primary : gifts,
-    label: primary.length ? "primary leadership references" : "secondary fundraising-outlier references (no giving to primary leaders)" };
+    label: chosen ? "the comparison committees chosen for this candidate"
+      : primary.length ? "primary leadership references" : "secondary fundraising-outlier references (no giving to primary leaders)" };
 }
 function leadershipFactors(factors, reference) {
   if (!reference) return;
@@ -977,8 +987,34 @@ function seatCompetitiveness(filer) {
   return raceMarginIndex.get(`${od.slice(0, i).trim()}|${od.slice(i + 1).trim()}`) || null;
 }
 
+// ── Comparison committees chosen by hand ──────────────────────────────────
+// For a few candidates the user names the comparison committees outright, and
+// that list replaces the rules in findComparables. Every chosen committee is a
+// primary reference: Rob Nosse holds no senior leadership role, but he is on
+// Ben Bowman's list and counts the same as the leaders on it. The House
+// Majority Leader's 10% Speaker discount still applies.
+const CHOSEN_COMPARABLES = new Map([
+  ["friends_of_ben_bowman", ["friends_of_julie_fahey", "friends_of_rob_wagner", "kayse_jama_for_oregon",
+                             "kate_lieber_for_state_senate", "tawna_sanchez_for_oregon", "friends_of_rob_nosse"]],
+]);
+
+function chosenComparables(targetFiler, slugs) {
+  const targetRole = primaryLeadershipRole(targetFiler);
+  const found = slugs.map(slug => (filerIndex || []).find(f => f.slug === slug));
+  slugs.forEach((slug, i) => { if (!found[i]) console.warn(`[recommend] chosen comparable not on file: ${slug}`); });
+  return found.filter(Boolean).map(f => ({
+    ...f, similarity: 100, officeType: getOffice(f), party: getParty(f), chamber: getChamber(f),
+    seat: seatCompetitiveness(f), comparisonKind: targetRole ? "leadership-primary" : "seat", chosen: true,
+    leadership_tier: effectiveLeadershipTier(f), outlierEvidence: null,
+    benchmarkFactor: targetRole === "house-majority-leader" && primaryLeadershipRole(f) === "speaker"
+      ? HOUSE_MAJORITY_BENCHMARK_FACTOR : 1,
+  }));
+}
+
 async function findComparables(targetProfile, targetFiler, cycle) {
   await Promise.all([loadRaceMargins(), loadCurrentLegislators(), loadCommitteeChairs()]);
+  const chosen = CHOSEN_COMPARABLES.get(targetFiler.slug);
+  if (chosen) return chosenComparables(targetFiler, chosen);
   const targetSeat = seatCompetitiveness(targetFiler);
   if (targetSeat) {
     console.log(`[recommend] target seat: ${targetSeat.label} (${targetSeat.year})`);
@@ -1263,6 +1299,18 @@ function roundTarget(amount) {
   return Math.round(amount / 250) * 250;
 }
 
+/**
+ * The least a plan may ask of anyone who gave last cycle: that giving plus 5%,
+ * rounded UP to $250, so the ask is always more than last time. Nearest-$250
+ * rounding alone handed a $1,000 donor a $1,000 ask. The plan's total target
+ * uses the same floor against last cycle's total. Worked in cents first so a
+ * product that lands on a $250 step is not pushed to the next one.
+ */
+const LAST_CYCLE_GROWTH = 1.05;
+function aboveLastCycle(amount) {
+  return amount > 0 ? Math.ceil(Math.round(amount * LAST_CYCLE_GROWTH * 100) / 25000) * 250 : 0;
+}
+
 function donorDisplayName(name) {
   const label = planDonorFamily(name) || String(name || "");
   return typeof DN !== "undefined" ? DN.display(label) : label.trim().replace(/\s+/g, " ")
@@ -1444,9 +1492,13 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     if (candidateFilerNames.has(key) || candidateFilerNames.has(nameNoId)) continue;
 
     const cycleNums = Object.keys(donor.cycles).map(Number).sort((a, b) => a - b);
+    // Eligible giving last cycle: exceptional primary windows left out.
+    const lastEligible = baselineByDonorCycle.get(`${key}|${cycle - 2}`) || 0;
 
-    // Single-cycle donors must also have given to comparable candidates
-    if (cycleNums.length < 2 && !observedComparableDonors.has(key)) continue;
+    // A one-cycle donor needs to have given to comparable candidates too,
+    // unless that one cycle was the last one: everyone who gave last cycle is
+    // asked to give again, for more.
+    if (cycleNums.length < 2 && !observedComparableDonors.has(key) && !(lastEligible > 0)) continue;
 
     const currentCycleAmt = donor.cycles[cycle] || 0;
     const prevCycles = cycleNums.filter(c => c < cycle);
@@ -1542,6 +1594,14 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     }
 
     target = roundTarget(target);
+    // Whatever the comparables say, a donor who gave last cycle is asked for
+    // more: the peer cap for newer incumbents could otherwise land below what
+    // the donor already gives this candidate. Eligible giving, as for the rest
+    // of the ask, so exceptional primary windows do not set the floor.
+    const evidenceTarget = target;
+    const askFloor = aboveLastCycle(lastEligible);
+    const floored = askFloor > target;
+    if (floored) target = askFloor;
     const remaining = Math.max(0, Math.round((target - currentCycleAmt) * 100) / 100);
 
     if (!gaveInPrevCycle && prevCycles.length > 0) {
@@ -1565,10 +1625,10 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     const factors = [];
     if (prevCycles.length) {
       factors.push(`${prevCycles.length} previous cycle${prevCycles.length > 1 ? "s" : ""}: ${historyParts.join(", ")}`);
-      factors.push(`Ask baseline (${baselineCycle - 1}–${baselineCycle}): ${fmt$(baselineAmt)} → target: ${fmt$(target)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
+      factors.push(`Ask baseline (${baselineCycle - 1}–${baselineCycle}): ${fmt$(baselineAmt)} → target: ${fmt$(evidenceTarget)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     } else {
       factors.push(`Current cycle donor: ${fmt$(currentCycleAmt)} given so far`);
-      factors.push(`Base target: ${fmt$(target)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
+      factors.push(`Base target: ${fmt$(evidenceTarget)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     }
 
     if (primaryExclusionNote(targetProfile)) factors.push(primaryExclusionNote(targetProfile));
@@ -1588,9 +1648,11 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
         .filter(Boolean).join(", ");
       factors.push(`Ask = ${Math.round((1 - compWeight) * 100)}% × ${fmt$(ownShare)} (own giving here, +5%)`
         + ` + ${Math.round(compWeight * 100)}% × ${fmt$(compRef)}${source ? ` (${source})` : ""}`
-        + ` = ${fmt$(blended)} → ${fmt$(target)}`
-        + (roundTarget(blended) === target ? " rounded" : " after capping and rounding"));
+        + ` = ${fmt$(blended)} → ${fmt$(evidenceTarget)}`
+        + (roundTarget(blended) === evidenceTarget ? " rounded" : " after capping and rounding"));
     }
+    // Last, because it overrides the arithmetic above it.
+    if (floored) factors.push(`More than last cycle: ${fmt$(lastEligible)} eligible giving in ${cycleName(prevCycle)} + 5%, rounded up to $250 → ${fmt$(target)}`);
     // How recent the giving behind the benchmark is, before quoting it.
     if (compGifts.length) factors.push(recencyNote(staleEvidence, cycle));
     // Say which giving the benchmark came from before quoting a number from it.
@@ -1641,7 +1703,8 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       comp_max: refGift?.amount || 0,
       comp_max_filers: refGifts.filter(g => benchmarkAmount(g) === compRef).map(g => g.filer),
       peer_benchmark: compRef,
-      target,
+      target, evidence_target: evidenceTarget,
+      last_cycle_eligible: lastEligible, ask_floor: askFloor,
       current_cycle_amt: currentCycleAmt,
       remaining,
       consistency,
@@ -1653,8 +1716,10 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
     });
   }
 
-  // Filter out donors with target below $500
-  const filtered = results.filter(r => r.target >= 500).sort((a, b) => b.target - a.target);
+  // Asks under $500 are left out unless the donor gave last cycle: everyone
+  // who did is asked to give more, however small the gift.
+  const filtered = results.filter(r => r.evidence_target >= 500 || r.last_cycle_eligible > 0)
+    .sort((a, b) => b.target - a.target);
   return { targets: filtered, notRecommended };
 }
 
@@ -1978,17 +2043,26 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     .filter(t => t.month >= start && t.month <= end)
     .reduce((s, t) => s + (t.contributions || 0), 0);
 
-  // Summary cards
+  // Summary cards. The targets are for the whole cycle, so the total can be
+  // set against last cycle's; what is still to come sits under each.
+  const repeatAsks = repeatTargets.reduce((s, r) => s + r.target, 0);
+  const newAsks = recommendations.reduce((s, r) => s + r.target_ask, 0);
   const repeatRemaining = repeatTargets.reduce((s, r) => s + r.remaining, 0);
   const newRemaining = recommendations.reduce((s, r) => s + r.remaining_ask, 0);
+  const goal = fundraisingTarget(repeatAsks + newAsks, lastCycleContributions(targetProfile, cycle));
+  window._fundraisingTarget = goal;
+  const last = goal.lastCycle;
   const summaryEl = document.getElementById("results-summary");
   summaryEl.innerHTML = `
     <div class="summary-card sc-muted"><span class="sc-label">Cycle Contributions <span class="sc-help" title="Total cash contributions received by this committee during the selected election cycle.">?</span></span><br><span class="sc-value">${fmt$(cycleContributions)}</span></div>
-    <div class="summary-card"><span class="sc-label">Donor Target Total <span class="sc-help" title="Sum of recommended ask amounts for all existing donors who gave in the most recent previous cycle.">?</span></span><br><span class="sc-value">${fmt$(repeatRemaining)}</span></div>
-    <div class="summary-card"><span class="sc-label">New Prospect Target <span class="sc-help" title="Sum of recommended ask amounts for new donors identified from comparable filer giving patterns.">?</span></span><br><span class="sc-value">${fmt$(newRemaining)}</span></div>
+    <div class="summary-card"><span class="sc-label">Donor Target Total <span class="sc-help" title="Sum of this cycle's asks for existing donors who gave in the most recent previous cycle. Each ask is more than the donor's eligible giving last cycle.">?</span></span><br><span class="sc-value">${fmt$(repeatAsks)}</span><div class="sc-sub">${fmt$(repeatRemaining)} still to come</div></div>
+    <div class="summary-card"><span class="sc-label">New Prospect Target <span class="sc-help" title="Sum of this cycle's asks for new donors identified from comparable filer giving patterns.">?</span></span><br><span class="sc-value">${fmt$(newAsks)}</span><div class="sc-sub">${fmt$(newRemaining)} still to come</div></div>
     <div class="summary-card"><span class="sc-label">Comparable Filers <span class="sc-help" title="Number of similar candidates used as benchmarks for donor targeting and prospect identification.">?</span></span><br><span class="sc-value">${fmtNum(comparables.length)}</span></div>
-    <div class="summary-card"><span class="sc-label">Total Fundraising Target <span class="sc-help" title="Combined target from existing donor asks plus new prospect asks. Represents the total recommended fundraising goal.">?</span></span><br><span class="sc-value">${fmt$(repeatRemaining + newRemaining)}</span></div>
-    ${leadershipPool(comparables) ? `<div class="summary-card"><span class="sc-label">Leadership references</span><p>Primary: ${comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => esc(c.name)).join(", ") || "None available"}</p><p>Secondary: ${comparables.filter(c => c.comparisonKind === "leadership-secondary").map(c => `${esc(c.name)} (${fmt$(c.outlierEvidence?.amount)} in best prior completed cycle)`).join(", ") || "None detected"}</p></div>` : ""}
+    <div class="summary-card"><span class="sc-label">Total Fundraising Target <span class="sc-help" title="This cycle's goal: every donor and prospect ask, and never less than last cycle's eligible contributions plus 5%, rounded up to $250. Giving in exceptionally high-spend primary contests is left out of last cycle, as it is from every ask. Any shortfall is shown as still to find.">?</span></span><br><span class="sc-value">${fmt$(goal.target)}</span>
+      <div class="sc-sub">Last cycle (${cycleName(last.cycle)}): ${fmt$(last.eligible)}${last.excluded ? ` — ${fmt$(last.raised)} raised, ${fmt$(last.excluded)} in exceptional primary windows left out` : ""}</div>
+      <div class="sc-sub">Donor &amp; prospect asks: ${fmt$(goal.asks)}${goal.gap ? ` · <strong>Still to find: ${fmt$(goal.gap)}</strong> (small-dollar, events, new donors)` : ""}</div></div>
+    ${comparables.some(c => c.chosen) ? `<div class="summary-card"><span class="sc-label">Comparison committees</span><p>Chosen for this candidate: ${comparables.map(c => esc(c.name)).join(", ")}</p></div>`
+      : leadershipPool(comparables) ? `<div class="summary-card"><span class="sc-label">Leadership references</span><p>Primary: ${comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => esc(c.name)).join(", ") || "None available"}</p><p>Secondary: ${comparables.filter(c => c.comparisonKind === "leadership-secondary").map(c => `${esc(c.name)} (${fmt$(c.outlierEvidence?.amount)} in best prior completed cycle)`).join(", ") || "None detected"}</p></div>` : ""}
     ${comparables.some(c => c.comparisonKind === "leadership-chair") ? `<div class="summary-card"><span class="sc-label">Leadership and committee-chair peers</span><p>${comparables.map(c => esc(c.name)).join(", ")}</p><p>Same chamber and compatible seat margins.</p></div>` : ""}
     ${primaryExclusionNote(targetProfile) ? `<div class="summary-card"><span class="sc-label">Primary-campaign exclusions</span><p>${esc(primaryExclusionNote(targetProfile))}. Actual history remains visible; current-cycle giving still counts toward the target.</p></div>` : ""}
     ${targetProfile._entryBaseline ? `<div class="summary-card"><span class="sc-label">Incumbent ask baseline</span><p>Giving from ${esc(targetProfile._entryBaseline.start)} onward. First-primary fundraising is excluded from asks and lobbyist minimums; historical giving remains visible.</p></div>` : ""}
@@ -2165,6 +2239,39 @@ function allDonorTargets() {
     ...r, target: r.target_ask, current_cycle_amt: r.already_given, remaining: r.remaining_ask,
     last_cycle_amt: 0, prev_cycles: 0, consistency: "new", history: ["First-time prospect"], cycles: {},
   }))];
+}
+
+/**
+ * What this committee raised last cycle, and how much of it counts toward the
+ * floor. The raised figure is the monthly total the Cycle Contributions card
+ * reads. Giving inside a reviewed exceptional primary campaign (or before the
+ * first legislative primary) is left out, as it is from every ask baseline:
+ * it is measured as the gap between the full per-donor history and the
+ * adjusted one, year by year.
+ */
+function lastCycleContributions(profile, cycle) {
+  const last = cycle - 2, years = [last - 1, last];
+  const raised = (profile?.timeline || [])
+    .filter(t => t.month >= `${years[0]}-01` && t.month <= `${years[1]}-12`)
+    .reduce((s, t) => s + Number(t.contributions || 0), 0);
+  const sum = rows => (rows || []).reduce((s, d) => s + Number(d.total || 0), 0);
+  const excluded = profile?._askDonorsByYear
+    ? years.reduce((s, y) => s + Math.max(0, sum(profile.top_donors_by_year?.[y]) - sum(profile._askDonorsByYear[y])), 0)
+    : 0;
+  const cents = n => Math.round(n * 100) / 100;
+  return { cycle: last, raised: cents(raised), excluded: cents(excluded), eligible: cents(Math.max(0, raised - excluded)) };
+}
+
+/**
+ * The cycle's fundraising target: every ask, and never less than last cycle's
+ * eligible total plus 5% (rounded up to $250). A shortfall is shown as its own
+ * line rather than spread across asks the donor evidence does not support; it
+ * is what small-dollar giving, events and new donors have to cover.
+ */
+function fundraisingTarget(asks, lastCycle) {
+  const floor = aboveLastCycle(lastCycle.eligible);
+  const target = Math.max(asks, floor);
+  return { asks, floor, target, gap: target - asks, lastCycle };
 }
 
 function renderRepeatDonors(repeatTargets) {
@@ -2487,10 +2594,11 @@ function attributionText(a) {
   return `${a.status === "confirmed" ? "Confirmed" : "Unreviewed"}: ${[...new Set(how)].join("; ")}${client}`;
 }
 
-// ORESTAR files every contributor under a category. A lobbyist plan is a call
-// list for organizations, so the people — including a candidate's own family —
-// are dropped from it rather than filtered by name. They are still in Donor
-// Targets and New Donor Prospects, which is where an individual belongs.
+// ORESTAR files every contributor under a category. The lobbyist call list is
+// for organizations, so the people — including a candidate's own family — are
+// kept off it by that category rather than by name. The ones who have given
+// to this candidate are listed apart, under the call list (planIndividuals):
+// they are asked directly, not through a lobbyist.
 const PERSON_BOOK_TYPES = new Set([
   "Individual", "Candidate & Immediate Family", "Candidate's Immediate Family",
 ]);
@@ -2596,6 +2704,22 @@ function planGroups() {
   return out;
 }
 
+/**
+ * Individuals who have given to this candidate, for their own part of the
+ * plan. New prospects who are people stay in New Donor Prospects: they have
+ * not given here. Unknown categories count as organizations (isOrganization),
+ * so nobody is moved here on a guess.
+ */
+function planIndividuals() {
+  if (!window._donorTypes) return [];
+  const q = (document.getElementById("plan-search")?.value || "").trim().toLowerCase();
+  return planDonorRows()
+    .filter(r => r.type !== "New Prospect" && !isOrganization(r))
+    .filter(r => !q || r.donor.toLowerCase().includes(q))
+    .map(r => ({ ...r, category: window._donorTypes.get(r.donor_key) }))
+    .sort((a, b) => b.target - a.target || b.last_cycle - a.last_cycle || b.given - a.given);
+}
+
 function lobbyistContact(l) {
   return [l.affiliation || l.firm, l.email, l.phone].filter(Boolean).join(" · ");
 }
@@ -2681,9 +2805,10 @@ function renderLobbyistPlan() {
     return;
   }
   const groups = planGroups();
+  const people = planIndividuals();
   const withLobbyist = groups.filter(g => g.lobbyist).length;
   document.querySelectorAll(".tab-btn[data-tab='tab-lobbyist-plan'] .tab-badge").forEach(el => el.textContent = withLobbyist);
-  if (!groups.length) {
+  if (!groups.length && !people.length) {
     tbody.innerHTML = '<tr><td colspan="9" class="plan-empty">No donors match.</td></tr>';
     return;
   }
@@ -2717,13 +2842,44 @@ function renderLobbyistPlan() {
         : ""}</td>
     </tr>`).join("");
     return header + rows;
-  }).join("");
+  }).join("") + individualsSection(people);
   tbody.querySelectorAll(".plan-group-toggle").forEach(button => button.addEventListener("click", () => {
     const open = button.getAttribute("aria-expanded") !== "true";
     button.setAttribute("aria-expanded", String(open));
     button.textContent = (open ? "▾" : "▸") + button.textContent.slice(1);
     tbody.querySelectorAll(`.plan-donor[data-group="${button.dataset.group}"]`).forEach(row => { row.hidden = !open; });
   }));
+}
+
+/** The people who have given here, under the call list and collapsed: a long
+ *  list of small individual gifts should not push the lobbyists off screen. */
+const PLAN_INDIVIDUALS = "individuals";
+function individualsSection(people) {
+  if (!people.length) return "";
+  const sum = key => people.reduce((s, r) => s + Number(r[key] || 0), 0);
+  const header = `<tr class="plan-group plan-individuals">
+      <td class="plan-tier-cell"></td>
+      <td><div class="plan-lobbyist">Individual donors</div>
+        <div class="plan-contact">People who have given to this candidate. Ask them directly, not through a lobbyist.</div></td>
+      <td class="plan-count"><button type="button" class="plan-group-toggle" data-group="${PLAN_INDIVIDUALS}" aria-expanded="false">▸ ${people.length} ${people.length === 1 ? "person" : "people"}</button></td>
+      <td class="num">${fmt$(sum("target"))}</td>
+      <td class="num">${fmt$(sum("given"))}</td>
+      <td class="num">${fmt$(sum("remaining"))}</td>
+      <td class="num">${fmt$(sum("last_cycle"))}</td><td></td>
+      <td class="plan-why">ORESTAR files these contributors as individuals or as the candidate's family. Each ask is more than their eligible giving last cycle; no ask means no eligible giving last cycle (none, or only inside an exceptional primary window).</td>
+    </tr>`;
+  const rows = people.map(r => `<tr class="plan-donor" data-group="${PLAN_INDIVIDUALS}" hidden>
+      <td></td>
+      <td>${esc(r.donor)}${r.category && r.category !== "Individual" ? `<div class="plan-also">${esc(r.category)}</div>` : ""}</td>
+      <td><span class="plan-type ${r.target ? "is-target" : "is-prospect"}">${r.target ? "Target" : "History"}</span></td>
+      <td class="num"><strong>${r.target ? fmt$(r.target) : "—"}</strong></td>
+      <td class="num">${fmt$(r.given)}</td>
+      <td class="num">${fmt$(r.remaining)}</td>
+      <td class="num">${fmt$(r.last_cycle)}</td>
+      <td class="num">${r.comp_max ? fmt$(r.comp_max) : "—"}</td>
+      <td class="plan-attr"></td>
+    </tr>`).join("");
+  return header + rows;
 }
 
 // ── Lobbyist plan export ───────────────────────────────────────────────────
@@ -2984,7 +3140,7 @@ function planSheetAoa(groups, cycle) {
     : "No general-election margin on record for this seat.";
   push(sub, "note");
   const method = blank();
-  method[0] = "For candidates with fewer than two completed incumbent cycles, prior-donor asks use median recent peer giving and cannot exceed that benchmark before rounding. Peer evidence uses each recipient's latest funded eligible cycle in the preceding two cycles. First-time asks use initial giving, capped at half the established benchmark before rounding. All donor targets round to the nearest $250; lobbyist targets cannot fall below eligible last-cycle client giving after primary exclusions. "
+  method[0] = "For candidates with fewer than two completed incumbent cycles, prior-donor asks use median recent peer giving and cannot exceed that benchmark before rounding. Peer evidence uses each recipient's latest funded eligible cycle in the preceding two cycles. First-time asks use initial giving, capped at half the established benchmark before rounding. All donor targets round to the nearest $250, and anyone who gave last cycle is asked for more than that (eligible giving + 5%, rounded up to $250); lobbyist targets cannot fall below eligible last-cycle client giving after primary exclusions. "
     + "The columns on the right show that giving.";
   push(method, "note");
   push(blank(), "blank");
@@ -3143,7 +3299,33 @@ function lobbyistPlanExportRows() {
       });
     }
   }
+  for (const r of planIndividuals()) {
+    out.push({
+      "Tier": "", "Lobbyist": "(individual — ask directly)", "Lobbyist Target": "", "Lobbyist Remaining": "",
+      "Contact": "", "Email": "", "Phone": "", "Other Firm Contacts": "",
+      "Donor": r.donor, "Donor Contact": "", "Donor Contact Email": "", "Donor Contact Phone": "",
+      "Type": `Individual — ${r.type === "Donor Target" ? "Donor Target" : "Client history"}`,
+      "Target": Math.round(r.target), "Given This Cycle": Math.round(r.given), "Remaining": Math.round(r.remaining),
+      "Last Cycle": r.last_cycle ?? "", "Comparable Max": r.comp_max || "",
+      "Benchmark": r.benchmark ? `${r.benchmark.n} gifts to ${peerDescription(r.benchmark)}` : "",
+      "Ask calculation": (r.factors || []).join("; "), "Attribution": "", "Also Lobbied By": "",
+    });
+  }
   return out;
+}
+
+/** The Individuals sheet: the people who have given here, one line each. */
+function individualSheetRows(cycle) {
+  return planIndividuals().map(r => ({
+    "Donor": r.donor,
+    "ORESTAR category": r.category || "",
+    "Ask": r.target ? Math.round(r.target) : "",
+    [`Given ${cycle - 1}–${cycle}`]: Math.round(r.given),
+    "Remaining": Math.round(r.remaining),
+    [`Given ${cycle - 3}–${cycle - 2}`]: Math.round(r.last_cycle || 0),
+    "How the ask was set": (r.factors || []).filter(f => /^(Ask baseline|Base target|Ask = |More than last cycle)|unusually large contested primary|first legislative primary/.test(f)).join(" · ")
+      || (r.target ? "" : "No ask: no eligible giving last cycle (none, or only inside an exceptional primary window)"),
+  }));
 }
 
 /** Sheet 4: how every number on the other sheets was arrived at. */
@@ -3169,6 +3351,9 @@ function methodSheetRows(groups, cycle) {
     Detail: "A named primary opponent has at least 20%; cash through the primary is at least $25,000, 1.5 times the median of the previous two funded primary periods, and $10,000 above that median. Exclude January 1 of the preceding year through primary day for the candidate and all comparison references. Normal earlier cycles and post-primary giving remain eligible. Actual history and current giving credits are unchanged. Detected periods refresh through reviewed data PRs." });
   for (const p of window._primaryExclusionNotes || []) rows.push({ Item: `Excluded primary: ${p.name}`, Value: `${p.start}–${p.through}`,
     Detail: `${fmt$(p.primary_cash)} cash vs ${fmt$(p.historical_median)} historical median; strongest named opponent ${p.opposition_pct}%.` });
+  const chosenComps = (window._comparables || []).filter(c => c.chosen);
+  if (chosenComps.length) rows.push({ Item: "Comparison committees", Value: "chosen for this candidate",
+    Detail: `${chosenComps.map(c => c.name).join(", ")}. Named by hand; they replace the selection rules below and each counts as a primary reference.` });
   rows.push({ Item: "Limited incumbent history", Value: "75% / 60% comparable weight",
     Detail: "Repeat-donor asks use 75% comparable giving with no completed eligible incumbent cycle, or 60% with one. The remainder is own post-primary giving plus 5%, capped at the median peer benchmark before $250 rounding. Each peer contributes their latest funded eligible cycle from the preceding two cycles; current, future, and older cycles do not set this benchmark. Two or more completed cycles retain history-led weighting. No peer gift means no invented benchmark. New-donor first-gift limits are unchanged." });
   rows.push({ Item: "Leadership and committee chairs", Value: "same-chamber role peers",
@@ -3177,6 +3362,14 @@ function methodSheetRows(groups, cycle) {
     Detail: `A donor's ask is the upper-median of what they gave candidates in seats within ${PEER_WINDOWS[0]}–`
       + `${PEER_WINDOWS[PEER_WINDOWS.length - 1]} pts of this one, never above their own largest gift. `
       + `Legislative comparisons use current members verified against the official roster. Ordinary candidates use the same chamber; senior leaders use a cross-chamber primary leadership pool, with automatically identified fundraising outliers as secondary references only when the donor has no primary leadership giving. Unopposed seats are matched only to other unopposed seats, never numeric margins. Outliers exceed Q3 + 1.5 × IQR among at least eight current same-party non-primary members, using each member’s best two-year total in the preceding two completed cycles. Primary leaders are the House Speaker, Senate President, both Majority Leaders, and Ways and Means Co-Chairs. Speaker giving is discounted 10% for a House Majority Leader target. Other comparisons exclude mismatched unopposed seats, unknown peer margins when the target margin is known, and seats more than 20 points apart. Under ${MIN_PEER_GIFTS} such gifts, only eligible comparable giving is used and the donor row says so.` });
+  const goal = window._fundraisingTarget;
+  if (goal) rows.push({ Item: "Fundraising target", Value: fmt$(goal.target),
+    Detail: `The greater of every donor and prospect ask (${fmt$(goal.asks)}) or last cycle's eligible contributions `
+      + `(${fmt$(goal.lastCycle.eligible)} in ${cycleName(goal.lastCycle.cycle)}) plus 5%, rounded up to $250 (${fmt$(goal.floor)}). `
+      + (goal.lastCycle.excluded ? `${fmt$(goal.lastCycle.excluded)} raised inside exceptional primary windows is left out of last cycle. ` : "")
+      + (goal.gap ? `The asks leave ${fmt$(goal.gap)} still to find from small-dollar giving, events and new donors.` : "The asks cover it.") });
+  rows.push({ Item: "More than last cycle", Value: "+5%, rounded up to $250",
+    Detail: "Every donor with eligible giving last cycle gets an ask of at least that giving plus 5%, rounded up to the next $250, so the ask is always more than last time — including one-cycle donors and gifts too small for an ask of their own. It applies after the benchmark blend and any peer cap. Giving in exceptional primary windows does not count toward the floor. ORESTAR's pooled line for unitemized gifts of $100 and under is never a donor." });
   rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
     Detail: "The greater of summed client asks or eligible last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. First-entry and flagged unusually large primary fundraising are excluded from this floor, while Last Cycle shows actual giving. The floor rounds up to $250 to avoid falling below eligible baseline giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
   rows.push({ Item: "How recent the evidence is", Value: RECENT_BENCHMARK_CYCLES.map(b => cycleName(cycle - b)).reverse().join(" and "),
@@ -3366,6 +3559,7 @@ function writeCover(wb, groups, cycle) {
     { year: "numeric", month: "long", day: "numeric" })}`]).font = { size: 11, color: { argb: INK.muted } };
   ws.addRow([]);
 
+  const goal = window._fundraisingTarget;
   const facts = [
     ["Lobbyists to call", withLob.length],
     ["Donors covered", donors],
@@ -3374,10 +3568,19 @@ function writeCover(wb, groups, cycle) {
       ? `, decided by ${seat.margin_pts.toFixed(1)} points in ${seat.year}` : ""}` : "no margin on record"],
   ];
   if (ctx) facts.push([ctx.kind === "unopposed" ? "What unopposed-seat peers raise" : "What seats this close raise", ctx.median]);
+  const money = new Set(["Still to ask"]);
+  if (goal) {
+    const lastLabel = `Last cycle (${cycleName(goal.lastCycle.cycle)}), eligible`;
+    facts.push(["Fundraising target this cycle", goal.target], [lastLabel, goal.lastCycle.eligible],
+               ["Donor and prospect asks", goal.asks]);
+    if (goal.gap) facts.push(["Still to find (small-dollar, events, new donors)", goal.gap]);
+    for (const k of ["Fundraising target this cycle", lastLabel, "Donor and prospect asks",
+                     "Still to find (small-dollar, events, new donors)"]) money.add(k);
+  }
   for (const [k, v] of facts) {
     const row = ws.addRow([k, v]);
     row.getCell(1).font = { bold: true };
-    if (typeof v === "number" && (k === "Still to ask" || k.startsWith("What seats"))) {
+    if (typeof v === "number" && (money.has(k) || k.startsWith("What seats"))) {
       row.getCell(2).numFmt = MONEY;
     }
   }
@@ -3390,6 +3593,7 @@ function writeCover(wb, groups, cycle) {
   for (const [sheet, what] of [
     ["Call list", "Every lobbyist to call, in the order to call them, with their donors underneath and what to ask each one for."],
     ["Lobbyists", "The same lobbyists, one line each, with the designated lead's portrait for firms."],
+    ["Individuals", "People who have given to this candidate, with their asks. Call them directly; they are not on the call list."],
     ["Contact photos", "Public portraits and source links for the named contacts, including other members of each firm."],
     ["Donors", "One line per donor, for anyone who wants to pivot the numbers."],
     ["How these numbers were set", "Where each figure came from."],
@@ -3404,7 +3608,8 @@ function writeCover(wb, groups, cycle) {
   heading("How to read the call list");
   para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
   para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in. The columns further right show what those same donors gave this candidate and a few comparable candidates in past cycles — that is the case for the ask.");
-  para("Individual people are not in this plan. It lists organizations, PACs and businesses only, using ORESTAR's own category for each contributor.");
+  para("The call list is organizations, PACs and businesses only, using ORESTAR's own category for each contributor. Donors with no lobbyist on file are at the bottom of it. People who have given to this candidate are on the Individuals sheet instead.");
+  para("Anyone who gave last cycle is asked for more than that. The fundraising target is never less than last cycle's contributions plus 5%, leaving out giving in exceptionally high-spend primary contests; anything the asks do not cover is shown as still to find.");
 
   ws.getColumn(1).width = 34;
   ws.getColumn(2).width = 96;
@@ -3491,6 +3696,14 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
       writeFirmName(lobbyistSheet,named[i].lobbyist,i+4,3);
       await addPortrait(wb,lobbyistSheet,portraitPerson(named[i].lobbyist),i+4,1,imageCache);
     }
+  }
+  const people = individualSheetRows(cycle);
+  if (people.length) {
+    writeTable(wb, "Individuals", people, {
+      money: ["Ask", `Given ${cycle - 1}–${cycle}`, "Remaining", `Given ${cycle - 3}–${cycle - 2}`],
+      widths: { Donor: 34, "ORESTAR category": 26, "How the ask was set": 90 },
+      note: "People who have given to this candidate. They are not on the call list: ask them directly, not through a lobbyist.",
+    });
   }
   const flat = lobbyistPlanExportRows();
   if (flat.length) {

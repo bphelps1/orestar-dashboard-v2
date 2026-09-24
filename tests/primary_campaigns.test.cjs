@@ -12,7 +12,9 @@ test('recurring contested primary removes only its window and preserves ordinary
  assert.equal(c.askDonorsByYear(p)[2022][0].total,500);assert.equal(c.askDonorsByYear(p)[2023],undefined);assert.equal(c.askDonorsByYear(p)[2024][0].total,1000);
  assert.equal(c.completedHistoryCycles(p,2026),1);
  const row=c.buildRepeatDonorTargets(p,[],[],[],2026,null).targets[0];
- assert.equal(row.last_cycle_amt,50000);assert.equal(row.baseline_cycle_amt,1000);assert.equal(row.target,1000);assert.equal(row.remaining,250);
+ assert.equal(row.last_cycle_amt,50000);assert.equal(row.baseline_cycle_amt,1000);assert.equal(row.target,1250);assert.equal(row.remaining,500);
+ // Giving inside the flagged primary window does not set the floor either.
+ assert.equal(row.last_cycle_eligible,1000);
  assert.match(row.factors.join(' '),/unusually large contested primary/);
  await c.loadIncumbentBaselines([p],[filer],2022);assert.equal(p._askDonorsByYear,undefined);
 });
