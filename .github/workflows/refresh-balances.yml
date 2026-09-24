@@ -102,6 +102,7 @@ jobs:
 
       - name: Re-key donor aggregates onto resolved entities
         # Keep the Donors tab consistent with the normal daily projection.
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
 
       - name: Verify published balance projection

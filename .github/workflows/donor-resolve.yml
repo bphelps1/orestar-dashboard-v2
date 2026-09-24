@@ -49,12 +49,19 @@ jobs:
       - name: Apply migrations (idempotent)
         run: python scraper/db_admin.py apply
 
+      # Step timeouts: SUPABASE_DB_URL goes through the Supavisor pooler, which
+      # kept the client socket open when Postgres crashed on 2026-09-23, so the
+      # re-key sat silent for 1h44m until cancelled by hand. Keepalives and
+      # statement_timeout cannot see that (see supabase_sync._connect).
       - name: Run full donor resolution
+        # 8.8, 12.0 and 17.0 minutes on the last three Sundays: it is growing.
+        timeout-minutes: 60
         run: python scraper/resolve_donors.py --full
 
       - name: Rebuild donor aggregates by resolved entity
         # Must follow the resolve: the Donors tab blobs are keyed by donor_id,
-        # so they are stale until the entities are rebuilt.
+        # so they are stale until the entities are rebuilt. ~2.2 minutes.
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
 
       # No pipeline-state publication here on purpose. resolve_donors.py upserts the

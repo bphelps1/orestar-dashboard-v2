@@ -492,6 +492,9 @@ jobs:
         # A breaker exits the scrape nonzero while preserving partial cache
         # writes. Never let its control signal masquerade as sweep completion.
         if: always() && steps.orestar_wait.outcome == 'success' && steps.scrape.outcome == 'success' && steps.remaining.outputs.remaining == '0' && steps.aggregation_state.outcome == 'success'
+        # 16-28 minutes over 11 runs. The pooler hides a dead backend
+        # (2026-09-23), so a hang has to be ended here.
+        timeout-minutes: 60
         run: |
           echo "All selected account summaries scraped — running full aggregation..."
           python scraper/process.py
@@ -509,6 +512,7 @@ jobs:
         # as two donors. Every other workflow that calls process.py pairs it
         # with this one.
         if: always() && steps.final_aggregation.outcome == 'success'
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}

@@ -57,3 +57,30 @@ test('selected donor CSV resolves saved merge members before reading transaction
  c.getSupabase=async()=>({rpc:async(name,params)=>{assert.equal(name,'donor_group_ids');assert.equal(params.p_donor_id,'a');return {data:['a','b']};},from:()=>query});
  await c.downloadFiltered();assert.equal(used.key,'donor_id');assert.deepEqual(Array.from(used.ids),['a','b']);
 });
+test('type menu splits into a type code and an ORESTAR sub-type for both browse and CSV',()=>{
+ const {c,elements,document}=harness();const calls=[];const q={eq(k,v){calls.push([k,v]);return this;}};
+ document.getElementById('f-type').value='C|In-Kind Contribution';
+ let f=c.readFilters();assert.equal(f.type,'C');assert.equal(f.subType,'In-Kind Contribution');
+ c.applyFilters(q,{...f,amtMin:'',amtMax:''});
+ assert.deepEqual(calls,[['tran_type','C'],['sub_type','In-Kind Contribution']]);
+ elements.get('f-type').value='E';f=c.readFilters();assert.equal(f.type,'E');assert.equal(f.subType,'');
+ elements.get('f-type').value='';f=c.readFilters();assert.equal(f.type,'');assert.equal(f.subType,'');
+});
+test('browse asks explore_transactions for the chosen sub-type',async()=>{
+ const {c,elements}=harness();let call;
+ c.DN={load:async()=>{},display:s=>s};
+ c.getSupabase=async()=>({rpc:async(name,params)=>{call={name,params};return {data:[]};}});
+ elements.set('f-type',{value:'OR|Lost or Returned Check',textContent:'',innerHTML:'',hidden:false,querySelectorAll:()=>[]});
+ await c.runSearch();
+ assert.equal(call.name,'explore_transactions');
+ assert.equal(call.params.p_tran_type,'OR');assert.equal(call.params.p_sub_type,'Lost or Returned Check');
+ assert.equal(elements.get('xp-status').textContent,'No matching transactions');
+});
+test('rows are labelled by sub-type, falling back to the type code when none is recorded',()=>{
+ const {c,document}=harness();c.DN={display:s=>s};
+ c.renderTable([{tran_type:'C',sub_type:'In-Kind Contribution',amount:500},{tran_type:'OR',sub_type:null,amount:5}]);
+ const body=document.getElementById('xp-tbody').innerHTML;
+ assert.match(body,/<td class="">In-Kind Contribution<\/td>/);assert.match(body,/<td class="">OR<\/td>/);
+ assert.doesNotMatch(body,/<td class="">C<\/td>/);
+ assert.match(document.getElementById('xp-thead').innerHTML,/data-col="sub_type">Type/);
+});

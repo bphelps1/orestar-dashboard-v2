@@ -157,6 +157,16 @@ def _connect(attempts: int = 6):
     _load_dotenv()
     params = _parse_dsn(os.environ["SUPABASE_DB_URL"])
     # TLS + TCP keepalives keep long bulk-load connections from being dropped.
+    # They cannot detect a Postgres backend that dies behind the Supavisor
+    # pooler: the pooler keeps this socket open and answers the probes, and
+    # statement_timeout dies with the server. libpq's tcp_user_timeout does not
+    # cover it either, so it is deliberately not set. On a CI runner
+    # (2026-09-23), a 75 s query through the pooler outlived a 15 s
+    # tcp_user_timeout. Against a simulated dead backend the option fired only
+    # when the pooler stopped reading in the middle of a send, never while the
+    # client waited for a result. The donor re-key that hung for 1h44m that day
+    # was waiting on a one-line CREATE TABLE AS. The workflows' step-level
+    # timeout-minutes are what end such a hang.
     params.update(sslmode="require", keepalives=1, keepalives_idle=30,
                   keepalives_interval=10, keepalives_count=5)
     # Give up on a connection attempt that never answers; the retry loop below
