@@ -117,3 +117,50 @@ test('lobbyist exports wait for attribution, and say so when it failed',async()=
  c.confirm=()=>true;c.exportData('xlsx','lobbyist');await null;
  assert.ok(built,'exported after confirming');
 });
+test("a lobbyist's comparable columns count their whole book, with non-target clients in one row and on their own sheet",async()=>{
+ const {c}=harness();
+ vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Pat',kind:'person'}],[2,{lobbyist_id:2,name:'Quinn',kind:'person'}]]);
+ window._lobbyAttr=new Map([['a',[{lobbyist:lobbyistsById.get(1),status:'confirmed',is_primary:true,methods:[],client_names:[]}]]]);`,c);
+ c.window._cycle=2026;c.window._recommendations=[];c.window._targetProfile={name:'Friends of Test',top_donors_by_year:{}};
+ c.window._repeatTargets=[{donor:'Acme',donor_key:'a',donor_id:'a',target:2000,current_cycle_amt:500,remaining:1500,cycles:{2024:1500},last_cycle_amt:1500,comp_max:0,comp_max_filers:[],comp_gifts:[],factors:[]}];
+ c.window._comparables=[{name:'Fahey',chosen:true},{name:'Wagner',chosen:true}];
+ c.window._compCycles=new Map([
+  ['a',new Map([['Fahey',{2024:1000}]])],                              // in the plan: never a non-target
+  ['n1',new Map([['Fahey',{2026:500}],['Wagner',{2024:2000}]])],      // Pat's client, not in the plan
+  ['n2',new Map([['Fahey',{2024:9000}]])],                            // strongest link is Quinn, who has no group
+  ['n4',new Map()],                                                     // Pat's, but gave the comparables nothing
+ ]);
+ const links=[
+  {donor_id:'a',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
+  {donor_id:'n1',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
+  {donor_id:'n2',lobbyist_id:1,status:'confirmed',is_primary:false,score:5},
+  {donor_id:'n2',lobbyist_id:2,status:'confirmed',is_primary:true,score:1},
+  {donor_id:'n4',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
+ ];
+ c.__links=links;
+ vm.runInContext(`LOB.fetchIn=async(table,select,col,values)=>table==='donors'
+   ?values.map(id=>({donor_id:id,display_name:{n1:'N One Industries'}[id]||id}))
+   :__links.filter(l=>values.includes(l[col]));`,c);
+ const groups=c.planGroups();
+ const found=await c.loadNonTargetClients(groups,2026);
+ assert.deepEqual(Array.from(found,x=>x.donor_id),['n1']);
+ const pat=groups.find(g=>g.lobbyist?.name==='Pat');
+ assert.equal(pat.nonTarget.clients[0].name,'N One Industries');assert.equal(pat.nonTarget.clients[0].total,2500);
+ const {rows,roles}=c.planSheetAoa(groups,2026);
+ const [band,names,kinds]=[rows[4],rows[5],rows[6]];
+ const thisCycle=band.indexOf('This cycle (2025–2026): comparables'),prior=band.indexOf('2023–2024');
+ const col=(start,filer)=>start+names.slice(start).indexOf(filer);
+ const ntIndex=rows.findIndex(r=>r[2]==='Non-target donors');
+ const nt=rows[ntIndex],lead=rows.find(r=>r[1]==='Pat');
+ assert.equal(roles[ntIndex],'nontarget');assert.equal(rows[ntIndex-1][2],'Acme','right under the lobbyist\'s own donors');
+ assert.equal(nt[col(thisCycle,'Fahey')],500);assert.equal(nt[col(prior,'Wagner')],2000);
+ assert.equal(nt[kinds.indexOf('Ask')],'');assert.equal(nt[kinds.indexOf('Remaining')],'');
+ assert.equal(nt[prior],'','nothing in the candidate\'s own column');
+ assert.equal(lead[col(prior,'Fahey')],1000,'Acme');assert.equal(lead[col(prior,'Wagner')],2000,'the whole book');
+ assert.equal(lead[col(thisCycle,'Fahey')],500);
+ assert.equal(lead[kinds.indexOf('Ask')],2000,'asks are the plan\'s alone');
+ const sheet=c.nonTargetSheetRows(groups,2026);
+ assert.equal(sheet.length,1);
+ assert.equal(sheet[0].Lobbyist,'Pat');assert.equal(sheet[0]['Non-target donor'],'N One Industries');
+ assert.equal(sheet[0]['Total to comparables'],2500);assert.equal(sheet[0]['Fahey 2025–2026'],500);assert.equal(sheet[0]['Wagner 2023–2024'],2000);
+});

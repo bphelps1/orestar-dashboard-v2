@@ -348,5 +348,5 @@ function owningFirm(lobbyist, lobbyistsById) {
 
   return { owningFirm, fetchAll, fetchIn, normOrg, labelKey, pgArray, loadLobbyists, loadClients,
            loadDonorContacts, loadBookTypes, loadBookTypesByName,
-           planAttribution, attributionForLabels, describeMethod, poolIdsForLabels };
+           planAttribution, attributionForLabels, describeMethod, poolIdsForLabels, sortAttribution };
 })();

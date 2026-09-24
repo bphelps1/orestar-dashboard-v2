@@ -2930,6 +2930,83 @@ function givenInCycle(key, filerName, cy, row) {
  * recent cycles, and the comparables this plan's donors actually gave the most
  * to in the earlier ones — the tracker names five, so do we.
  */
+// ── Non-target donors ─────────────────────────────────────────────────────
+// A lobbyist's comparable columns count their whole book: every client filed
+// under them, not only the donors asked for money here. Clients not in this
+// plan go into one "Non-target donors" row under the lobbyist, and are listed
+// one by one on their own sheet.
+const NON_TARGET = "Non-target donors";
+
+/**
+ * Attaches g.nonTarget = { clients, byCell } to each lobbyist group, where
+ * byCell maps "comparable|cycle" to dollars. A client is filed under the
+ * lobbyist the plan itself would choose: its strongest link as
+ * planAttribution ranks them, rolled up to the owning firm. Anyone already in
+ * this plan, under any lobbyist or none, is not a non-target donor.
+ */
+async function loadNonTargetClients(groups, cycle) {
+  const named = new Map(groups.filter(g => g.lobbyist).map(g => [g.lobbyist.lobbyist_id, g]));
+  for (const g of named.values()) delete g.nonTarget;
+  if (!named.size || !lobbyistsById || typeof LOB === "undefined") return [];
+  const groupOf = l => (owningFirm(l) || l).lobbyist_id;
+  const planLobbyists = [...lobbyistsById.values()].filter(l => named.has(groupOf(l))).map(l => l.lobbyist_id);
+  const seeds = await LOB.fetchIn("donor_lobbyists", "donor_id", "lobbyist_id", planLobbyists);
+  const links = await LOB.fetchIn("donor_lobbyists", "donor_id,lobbyist_id,status,is_primary,score",
+                                  "donor_id", seeds.map(s => s.donor_id));
+  const includeSuggested = document.getElementById("plan-include-suggested")?.checked ?? true;
+  const byDonor = new Map();
+  for (const a of links) {
+    const lobbyist = lobbyistsById.get(a.lobbyist_id);
+    if (!lobbyist || (!includeSuggested && a.status !== "confirmed")) continue;
+    if (!byDonor.has(a.donor_id)) byDonor.set(a.donor_id, []);
+    byDonor.get(a.donor_id).push({ lobbyist, status: a.status, is_primary: !!a.is_primary, score: Number(a.score || 0) });
+  }
+  const inPlanIds = new Set(), inPlanKeys = new Set();
+  for (const r of planDonorRows()) {
+    inPlanKeys.add(r.donor_key);
+    for (const id of window._planIdentityIds?.get(r.donor_key) || [r.donor_id]) inPlanIds.add(id);
+  }
+  const { cycles, comps } = planCycleColumns(groups, cycle);
+  const found = new Map();                         // "group|key" → client, so a merged donor counts once
+  for (const [donorId, list] of byDonor) {
+    LOB.sortAttribution(list);
+    const g = named.get(groupOf(list[0].lobbyist));
+    const key = donorKey({ donor_id: donorId });
+    if (!g || inPlanIds.has(donorId) || inPlanKeys.has(key) || found.has(`${g.lobbyist.lobbyist_id}|${key}`)) continue;
+    const given = window._compCycles?.get(key);
+    const byCell = new Map();
+    let total = 0;
+    for (const c of comps) for (const cy of cycles) {
+      const v = given?.get(c.filer)?.[cy] || 0;
+      if (v) { byCell.set(`${c.filer}|${cy}`, v); total += v; }
+    }
+    if (total > 0) found.set(`${g.lobbyist.lobbyist_id}|${key}`, { group: g, donor_id: donorId, key, byCell, total });
+  }
+  const clients = [...found.values()];
+  const names = new Map((await LOB.fetchIn("donors", "donor_id,display_name", "donor_id", clients.map(c => c.donor_id)))
+    .map(d => [d.donor_id, d.display_name]));
+  for (const c of clients) {
+    c.name = donorDisplayName(names.get(c.donor_id) || c.donor_id);
+    const nt = (c.group.nonTarget ||= { clients: [], byCell: new Map() });
+    nt.clients.push(c);
+    for (const [cell, v] of c.byCell) nt.byCell.set(cell, (nt.byCell.get(cell) || 0) + v);
+  }
+  for (const g of named.values()) g.nonTarget?.clients.sort((a, b) => b.total - a.total);
+  return clients;
+}
+
+/** The Non-target donors sheet: who is in each lobbyist's Non-target row. */
+function nonTargetSheetRows(groups, cycle) {
+  const { cycles, comps } = planCycleColumns(groups, cycle);
+  return groups.filter(g => g.nonTarget?.clients.length).flatMap(g => g.nonTarget.clients.map(c => {
+    const row = { "Lobbyist": g.lobbyist.name, "Non-target donor": c.name, "Total to comparables": Math.round(c.total) };
+    for (const cy of cycles) for (const comp of comps) {
+      row[`${comp.filer} ${cycleName(cy)}`] = Math.round(c.byCell.get(`${comp.filer}|${cy}`) || 0);
+    }
+    return row;
+  }));
+}
+
 /** What is still to come from one row, never below $0. */
 function rowRemaining(r) {
   return Math.max(0, r.remaining ?? ((r.target || 0) - (r.given || 0)));
@@ -3133,6 +3210,15 @@ function planSheetAoa(groups, cycle) {
                cols: [{ filer: PLAN_SELF, kind: "Ask" }, { filer: PLAN_SELF, kind: "Given" },
                       { filer: PLAN_SELF, kind: REMAINING }] });
   width += 3;
+  // What the comparables have received this cycle, a spacer apart from the
+  // candidate's own Ask, Given and Remaining: the candidate's giving this
+  // cycle is already Given, so this band holds the comparables only.
+  if (comps.length) {
+    width += 1;                                       // spacer
+    bands.push({ cycle: cycles[0], start: width, compsOnly: true,
+                 cols: comps.map(c => ({ filer: c.filer, kind: c.rung })) });
+    width += comps.length;
+  }
   for (const c of cycles.slice(1)) {
     width += 1;                                       // spacer
     const cols = [{ filer: PLAN_SELF, kind: "This candidate" },
@@ -3165,7 +3251,8 @@ function planSheetAoa(groups, cycle) {
 
   const rCycle = blank(), rName = blank(), rKind = blank();
   for (const b of bands) {
-    rCycle[b.start] = b.current ? `This cycle (${b.cycle - 1}–${b.cycle})` : `${b.cycle - 1}–${b.cycle}`;
+    rCycle[b.start] = b.current ? `This cycle (${b.cycle - 1}–${b.cycle})`
+      : b.compsOnly ? `This cycle (${b.cycle - 1}–${b.cycle}): comparables` : `${b.cycle - 1}–${b.cycle}`;
     b.cols.forEach((c, i) => { rName[b.start + i] = label(c.filer); rKind[b.start + i] = c.kind; });
   }
   fixed.slice(1).forEach((h, i) => { rCycle[i + 1] = h; });
@@ -3218,8 +3305,25 @@ function planSheetAoa(groups, cycle) {
       }
       body.push(row); bodyRoles.push("donor");
     }
+    if (g.nonTarget?.clients.length) {
+      const n = g.nonTarget.clients.length, row = blank();
+      row[0] = name;
+      row[2] = NON_TARGET;
+      row[3] = "Not asked here";
+      row[7] = `${n} other client${n === 1 ? "" : "s"} of this lobbyist, not in this plan: who they are is on the ${NON_TARGET} sheet`;
+      for (const b of bands) b.cols.forEach((c, i) => {
+        if (c.filer === PLAN_SELF) return;              // what they gave the comparables, nothing else
+        const v = g.nonTarget.byCell.get(`${c.filer}|${b.cycle}`) || 0;
+        if (!v) return;
+        const at = b.start + i;
+        row[at] = Math.round(v);
+        groupSums[at] += v;
+        totals[at] += v;
+      });
+      body.push(row); bodyRoles.push("nontarget");
+    }
     for (let i = 0; i < width; i++) if (groupSums[i]) lead[i] = Math.round(groupSums[i]);
-    for (const b of bands.filter(b => !b.current)) lead[b.start] = Math.round(groupSums[b.start]);
+    for (const b of bands.filter(b => !b.current && !b.compsOnly)) lead[b.start] = Math.round(groupSums[b.start]);
     // A lobbyist's Remaining is their target less what their donors have
     // given, as on screen: one client giving past its ask offsets another.
     const groupRemaining = g.remaining ?? planExportRows(g).reduce((sum, r) => sum + rowRemaining(r), 0);
@@ -3401,6 +3505,8 @@ function methodSheetRows(groups, cycle) {
       + (goal.gap ? `The asks leave ${fmt$(goal.gap)} still to find from small-dollar giving, events and new donors.` : "The asks cover it.") });
   rows.push({ Item: "More than last cycle", Value: "+5%, rounded up to $250",
     Detail: "Every donor with eligible giving last cycle gets an ask of at least that giving plus 5%, rounded up to the next $250, so the ask is always more than last time — including one-cycle donors and gifts too small for an ask of their own. It applies after the benchmark blend and any peer cap. Giving in exceptional primary windows does not count toward the floor. ORESTAR's pooled line for unitemized gifts of $100 and under is never a donor." });
+  rows.push({ Item: NON_TARGET, Value: "whole book, comparables only",
+    Detail: "A lobbyist's comparable columns include every client filed under them (their strongest attribution, rolled up to the firm) who is not in this plan. Those clients have no ask; their giving to the comparison candidates is one row under the lobbyist, and each is listed on the Non-target donors sheet." });
   rows.push({ Item: "Lobbyist target", Value: "last-cycle floor",
     Detail: "The greater of summed client asks or eligible last-cycle giving from currently attributed clients, including clients omitted from individual recommendations. First-entry and flagged unusually large primary fundraising are excluded from this floor, while Last Cycle shows actual giving. The floor rounds up to $250 to avoid falling below eligible baseline giving. Additional asks remain allocated to the lobbyist, not a specific client. Current client giving reduces the group remaining ask. Attribution describes the current client book, not proven historical representation." });
   rows.push({ Item: "How recent the evidence is", Value: RECENT_BENCHMARK_CYCLES.map(b => cycleName(cycle - b)).reverse().join(" and "),
@@ -3538,7 +3644,8 @@ async function writeCallList(wb, groups, cycle) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fill } };
         cell.border = { top: { style: "thin", color: { argb: INK.rule } } };
       });
-    } else if (role === "donor") {
+    } else if (role === "donor" || role === "nontarget") {
+      if (role === "nontarget") row.font = { italic: true, color: { argb: INK.muted } };
       row.outlineLevel = 1;
       // Donors with no lobbyist are listed as they are, at the bottom: there is
       // nobody to collapse them under, and a plan without attribution should
@@ -3546,7 +3653,7 @@ async function writeCallList(wb, groups, cycle) {
       row.hidden = Boolean(groups[group]?.lobbyist);
       row.getCell(DONOR_COL).alignment = { indent: 1 };
     }
-    if (role === "donor" || role === "lobbyist" || role === "total") {
+    if (role === "donor" || role === "nontarget" || role === "lobbyist" || role === "total") {
       for (let c = moneyFrom + 1; c <= rows[0].length; c++) row.getCell(c).numFmt = MONEY;
       row.getCell(WHY_COL).alignment = { wrapText: true, vertical: "top" };
       if (remainingCol) {
@@ -3643,6 +3750,7 @@ function writeCover(wb, groups, cycle) {
   for (const [sheet, what] of [
     ["Call list", "Every lobbyist to call, in the order to call them, with their donors underneath and what to ask each one for."],
     ["Lobbyists", "The same lobbyists, one line each, with the designated lead named for firms."],
+    ["Non-target donors", "Clients of the lobbyists on the call list who are not in this plan, and what each gave the comparison candidates."],
     ["Individuals", "People who have given to this candidate, with their asks. Call them directly; they are not on the call list."],
     ["Donors", "One line per donor, for anyone who wants to pivot the numbers."],
     ["How these numbers were set", "Where each figure came from."],
@@ -3656,7 +3764,7 @@ function writeCover(wb, groups, cycle) {
 
   heading("How to read the call list");
   para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
-  para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Remaining” is what is still to come, never below $0; for a lobbyist it is their target less what their donors have given. The columns further right show what those same donors gave this candidate and a few comparable candidates in past cycles — that is the case for the ask.");
+  para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Remaining” is what is still to come, never below $0; for a lobbyist it is their target less what their donors have given. Next come what those same donors have given the comparable candidates this cycle, then what they gave this candidate and the comparables in the two cycles before — that is the case for the ask. A lobbyist's comparable columns count their whole book: clients not in this plan are summed in a “Non-target donors” row under them.");
   para("The call list is organizations, PACs and businesses only, using ORESTAR's own category for each contributor. Donors with no lobbyist on file are at the bottom of it. People who have given to this candidate are on the Individuals sheet instead.");
   para("Anyone who gave last cycle is asked for more than that. The fundraising target is never less than last cycle's contributions plus 5%, leaving out giving in exceptionally high-spend primary contests; anything the asks do not cover is shown as still to find.");
 
@@ -3703,6 +3811,11 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
   wb.creator = "Oregon Campaign Finance";
   wb.created = new Date();
 
+  try {
+    await loadNonTargetClients(groups, cycle);
+  } catch (e) {
+    console.warn("Non-target clients unavailable:", e);   // the call list is still right without them
+  }
   writeCover(wb, groups, cycle);
   await writeCallList(wb, groups, cycle);
 
@@ -3717,6 +3830,14 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
     });
     const named = groups.filter(g => g.lobbyist);
     for (let i = 0; i < named.length; i++) writeFirmName(lobbyistSheet, named[i].lobbyist, i + 4, 2);
+  }
+  const nonTargets = nonTargetSheetRows(groups, cycle);
+  if (nonTargets.length) {
+    writeTable(wb, NON_TARGET, nonTargets, {
+      money: Object.keys(nonTargets[0]).filter(k => k !== "Lobbyist" && k !== "Non-target donor"),
+      widths: { Lobbyist: 30, "Non-target donor": 40 },
+      note: "Clients filed under a lobbyist in this plan who are not in the plan themselves. Their giving to the comparison candidates is each lobbyist's “Non-target donors” row on the call list.",
+    });
   }
   const people = individualSheetRows(cycle);
   if (people.length) {
