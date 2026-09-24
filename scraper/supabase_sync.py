@@ -145,7 +145,7 @@ def _parse_dsn(dsn: str) -> dict:
     }
 
 
-def _connect(attempts: int = 6, *, maintenance: bool = False):
+def _connect(attempts: int = 6):
     """Connect, retrying transient pool-checkout failures with backoff.
 
     Supabase's session pooler has a finite slot count; a cancelled job or a
@@ -158,8 +158,10 @@ def _connect(attempts: int = 6, *, maintenance: bool = False):
     params = _parse_dsn(os.environ["SUPABASE_DB_URL"])
     # TLS + TCP keepalives keep long bulk-load connections from being dropped.
     params.update(sslmode="require", keepalives=1, keepalives_idle=30,
-                  keepalives_interval=10, keepalives_count=5,
-                  connect_timeout=15, tcp_user_timeout=60000)
+                  keepalives_interval=10, keepalives_count=5)
+    # Give up on a connection attempt that never answers; the retry loop below
+    # treats "timeout expired" as transient and backs off.
+    params["connect_timeout"] = 15
     last = None
     for attempt in range(1, attempts + 1):
         try:
@@ -183,12 +185,15 @@ def _connect(attempts: int = 6, *, maintenance: bool = False):
             time.sleep(wait)
     else:  # pragma: no cover — loop always breaks or raises
         raise last
-    # Ordinary reads/publication must fail promptly. Only explicit index
-    # maintenance gets a longer (still bounded) statement allowance.
+    # Supabase enforces a 2-min statement_timeout by default, which cancels
+    # building a GIN trigram index over 3M rows. This is a trusted maintenance
+    # connection (service role), so disable the per-statement timeout. Single
+    # long statements are routine for its callers: the weekly resolve's donor
+    # aggregate UPDATE has run 75-121 s, and concurrent index builds longer.
+    # Dashboard publication bounds its own transaction with SET LOCAL instead.
     try:
         with conn.cursor() as cur:
-            cur.execute("SET statement_timeout = %s", (1800000 if maintenance else 120000,))
-            cur.execute("SET lock_timeout = 30000")
+            cur.execute("SET statement_timeout = 0")
         conn.commit()
     except BaseException:
         conn.close()
@@ -332,7 +337,7 @@ def full_reload_transactions(shard_dir: Path) -> None:
     # indexes per-row during a 3M-row COPY is the dominant cost (it slows to a
     # crawl as the table fills). We capture their definitions, drop them, load
     # into a PK-only table, then rebuild each once — far faster overall.
-    with _connect(maintenance=True) as conn:
+    with _connect() as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(
@@ -355,7 +360,7 @@ def full_reload_transactions(shard_dir: Path) -> None:
         log.info("Supabase: loaded %s (%d rows, %d total)", shard.name, len(frame), total)
 
     log.info("Supabase: rebuilding %d indexes + analyzing…", len(saved_indexes))
-    with _connect(maintenance=True) as conn:
+    with _connect() as conn:
         conn.autocommit = True
         with conn.cursor() as cur:
             for name, indexdef in saved_indexes:
@@ -490,6 +495,8 @@ def _publish_dashboard(staged):
     with closing(_connect()) as conn, conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL idle_in_transaction_session_timeout = 120000")
+            # A blocked publication should fail and be retried, not queue.
+            cur.execute("SET LOCAL lock_timeout = 30000")
             def check_deadline():
                 remaining_ms = int((900 - (time.monotonic() - started)) * 1000)
                 if remaining_ms <= 0:

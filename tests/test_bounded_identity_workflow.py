@@ -92,8 +92,8 @@ def test_both_modes_use_actual_existing_effort_admission(shell, mode, passes, id
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout)
     assert receipt['admitted'] is True and receipt['attempts_used'] == 1
-    assert receipt['effort_id'] == 'balance-recovery-20260914'
-    assert receipt['max_attempts'] == 12 and receipt['max_searches'] == 45
+    assert receipt['effort_id'] == 'balance-recovery-20260922'
+    assert receipt['max_attempts'] == 8 and receipt['max_searches'] == 45
     assert receipt['excluded_filer_ids'] == ['33', '191']
     calls = [json.loads(line) for line in shell['calls'].read_text().splitlines()]
     assert all(row[:3] == ['api', '--method', 'GET'] for row in calls)

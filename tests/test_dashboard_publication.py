@@ -19,6 +19,7 @@ class Database:
         self.commits = 0
         self.closed = False
         self.batch_sizes = []
+        self.settings = []
 
     def __enter__(self):
         self.pending = copy.deepcopy(self.visible)
@@ -39,7 +40,9 @@ class Database:
             def __enter__(self): return self
             def __exit__(self, *_): pass
             def execute(self, sql, values=None):
-                if sql.startswith('SET'): return
+                if sql.startswith('SET'):
+                    db.settings.append((sql, values))
+                    return
                 db.write(values[0], json.loads(values[1]))
         return Cursor()
 
@@ -82,6 +85,8 @@ def test_all_outputs_and_receipt_commit_once(publisher, tmp_path):
         assert db.writes == 0
     assert db.batch_sizes == [50, 50, 1]
     assert db.commits == 1 and db.closed
+    assert ('SET LOCAL lock_timeout = 30000', None) in db.settings
+    assert any(sql == 'SET LOCAL statement_timeout = %s' for sql, _ in db.settings)
     assert db.visible['balance_publication']['detail_count'] == 101
     assert json.loads((tmp_path / 'receipt.json').read_text()) == db.visible['balance_publication']
     assert sync._PUBLICATION.get() is None
@@ -123,7 +128,12 @@ def test_deadline_rolls_back(publisher, monkeypatch):
     assert db.visible == {'old': 'generation'} and db.closed
 
 
-def test_connection_has_finite_network_and_sql_waits(monkeypatch):
+def test_connection_bounds_connecting_but_not_long_statements(monkeypatch):
+    # Publication sets its own SET LOCAL limits. Other callers run single
+    # statements longer than two minutes (the resolve's donor aggregate
+    # UPDATE, concurrent index builds), so the session default stays off.
+    # tcp_user_timeout is not set: through the pooler it never fires while a
+    # query waits on a dead backend (see #69).
     calls = []
     class Cursor:
         def __enter__(self): return self
@@ -135,13 +145,12 @@ def test_connection_has_finite_network_and_sql_waits(monkeypatch):
         def close(self): pass
     def connect(**kwargs):
         assert kwargs['connect_timeout'] == 15
-        assert kwargs['tcp_user_timeout'] == 60000
+        assert 'tcp_user_timeout' not in kwargs
         return Connection()
     monkeypatch.setenv('SUPABASE_DB_URL', 'postgresql://user:password@localhost/database')
     monkeypatch.setattr('psycopg2.connect', connect)
     sync._connect(attempts=1)
-    assert ('SET statement_timeout = %s', (120000,)) in calls
-    assert ('SET lock_timeout = 30000', None) in calls
+    assert calls == [('SET statement_timeout = 0', None)]
 
 
 def test_workflow_publication_can_be_cancelled_and_is_bounded():
