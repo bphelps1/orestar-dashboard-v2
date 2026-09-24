@@ -172,7 +172,7 @@ test("the sheet is banded by cycle, with the candidate and its comparables", () 
   assert.equal(nameRow.filter(Boolean)[0], "Friends of A");
   assert.ok(nameRow.includes("Fahey"));
   assert.deepEqual([...new Set(kindRow.filter(Boolean))],
-                   ["Ask", "Given", "This candidate", "Comparable"]);
+                   ["Ask", "Given", "Ask − Given", "This candidate", "Comparable"]);
   assert.equal(merges.length, 3);          // one per cycle band
   // Roles drive the formatting, so every row must carry one.
   assert.equal(roles.length, rows.length);
@@ -193,6 +193,24 @@ test("the lobbyist row totals its donors and the totals row totals everything", 
   assert.equal(total[askCol], 2100);
   assert.equal(lead[3], "Tier 1");
   assert.equal(roles[rows.indexOf(donor)], "donor");
+});
+
+test("the current cycle carries Ask − Given, signed, summed the same way as the ask", () => {
+  const { ctx, groups } = planFixture();
+  // A donor already past its ask reads as ahead, not as nothing left.
+  groups[0].rows.push({ donor: "Early PAC", donor_key: "early pac", type: "Donor Target", target: 1000, given: 1500,
+                        cycles: { 2026: 1500 }, contacts: [], attribution: null, also: [] });
+  const { rows } = ctx.planSheetAoa(groups, 2026);
+  const kinds = rows[6];
+  const askCol = kinds.indexOf("Ask"), givenCol = kinds.indexOf("Given"), deltaCol = kinds.indexOf("Ask − Given");
+  assert.deepEqual([givenCol, deltaCol], [askCol + 1, askCol + 2], "right after Given, inside the current band");
+  const row = name => rows.find(r => r[2] === name);
+  assert.equal(row("Grocery PAC")[deltaCol], 600);      // 1,100 asked − 500 given
+  assert.equal(row("Foresight")[deltaCol], 1000);
+  assert.equal(row("Early PAC")[deltaCol], -500);
+  const lead = rows.find(r => r[1] === "Amanda Dalton"), total = rows.find(r => r[1] === "Everyone");
+  assert.equal(lead[deltaCol], 1100);                    // 3,100 asked − 2,000 given
+  assert.equal(total[deltaCol], lead[askCol] - lead[givenCol]);
 });
 
 test("a donor's row says in words why that lobbyist has it", () => {

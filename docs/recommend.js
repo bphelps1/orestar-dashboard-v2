@@ -2914,6 +2914,7 @@ function donorContact(r) {
 // Sentinel for "the candidate this plan is for", used where a column holds a
 // filer name. No committee can be named this.
 const PLAN_SELF = "__plan_self__";
+const ASK_LESS_GIVEN = "Ask − Given";
 
 /** What this donor gave `filer` in `cy`, from the all-years comparable index. */
 function givenInCycle(key, filerName, cy, row) {
@@ -3113,9 +3114,12 @@ function planSheetAoa(groups, cycle) {
                  "Why them"];
   const bands = [];
   let width = fixed.length + 1;                       // +1 spacer
+  // Ask − Given is what is still to come: negative when a donor has already
+  // given more than the ask, so an over-giver reads as ahead, not as zero.
   bands.push({ cycle: cycles[0], start: width, current: true,
-               cols: [{ filer: PLAN_SELF, kind: "Ask" }, { filer: PLAN_SELF, kind: "Given" }] });
-  width += 2;
+               cols: [{ filer: PLAN_SELF, kind: "Ask" }, { filer: PLAN_SELF, kind: "Given" },
+                      { filer: PLAN_SELF, kind: ASK_LESS_GIVEN }] });
+  width += 3;
   for (const c of cycles.slice(1)) {
     width += 1;                                       // spacer
     const cols = [{ filer: PLAN_SELF, kind: "This candidate" },
@@ -3183,6 +3187,7 @@ function planSheetAoa(groups, cycle) {
         b.cols.forEach((c, i) => {
           const at = b.start + i;
           const v = c.kind === "Ask" ? r.target
+            : c.kind === ASK_LESS_GIVEN ? (r.target || 0) - (r.given || 0)
             : b.current && c.filer === PLAN_SELF ? r.given
             : givenInCycle(r.donor_key, c.filer, b.cycle, r);
           if (!v) return;
@@ -3607,7 +3612,7 @@ function writeCover(wb, groups, cycle) {
 
   heading("How to read the call list");
   para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
-  para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in. The columns further right show what those same donors gave this candidate and a few comparable candidates in past cycles — that is the case for the ask.");
+  para("Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Ask − Given” is what is still to come, negative when a donor has already given more than the ask. The columns further right show what those same donors gave this candidate and a few comparable candidates in past cycles — that is the case for the ask.");
   para("The call list is organizations, PACs and businesses only, using ORESTAR's own category for each contributor. Donors with no lobbyist on file are at the bottom of it. People who have given to this candidate are on the Individuals sheet instead.");
   para("Anyone who gave last cycle is asked for more than that. The fundraising target is never less than last cycle's contributions plus 5%, leaving out giving in exceptionally high-spend primary contests; anything the asks do not cover is shown as still to find.");
 

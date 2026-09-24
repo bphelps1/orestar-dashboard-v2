@@ -67,8 +67,9 @@ test('Excel donor asks match the reduced calculation and preserve actual contrib
  vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Contact',kind:'person'}]]);window._lobbyAttr=new Map([['a',[{lobbyist:lobbyistsById.get(1),is_primary:true}]]]);`,c);
  const groups=c.planGroups();assert.equal(groups[0].target,1750);assert.equal(groups[0].last_cycle,20000);
  const sheet=c.planSheetAoa(groups,2026),row=sheet.rows[sheet.roles.indexOf('donor')];
- assert.equal(row[9],1750);assert.equal(row[12],20000); // Ask and prior-cycle actual.
- assert.equal(sheet.rows[sheet.roles.indexOf('total')][9],1750);
+ const kinds=sheet.rows[6],ask=kinds.indexOf('Ask'),prior=kinds.indexOf('This candidate');
+ assert.equal(row[ask],1750);assert.equal(row[prior],20000); // Ask and prior-cycle actual.
+ assert.equal(sheet.rows[sheet.roles.indexOf('total')][ask],1750);
 });
 test("Ben Bowman's comparison committees are the six the user chose, each a primary reference",async()=>{
  const c=harness();
