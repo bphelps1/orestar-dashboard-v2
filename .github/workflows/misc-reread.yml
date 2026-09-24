@@ -122,6 +122,9 @@ jobs:
 
       - name: Merge re-read rows (records re-priced amounts)
         id: merge
+        # 1.6-2.8 minutes over 24 runs. The merge writes Postgres, and the
+        # pooler hides a dead backend (2026-09-23), so a hang ends here.
+        timeout-minutes: 20
         run: python scraper/process.py --merge-only
 
       - name: Publish re-read state

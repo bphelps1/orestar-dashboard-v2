@@ -94,10 +94,15 @@ jobs:
           PY
 
       - name: Re-aggregate from published evidence
+        # 19 minutes on its one run; the same aggregation takes up to 28
+        # elsewhere. The pooler hides a dead backend (2026-09-23), so a hang
+        # has to be ended here.
+        timeout-minutes: 60
         run: python scraper/process.py
 
       - name: Re-key donor aggregates onto resolved entities
         # Keep the Donors tab consistent with the normal daily projection.
+        timeout-minutes: 15
         run: python scraper/refresh_donor_aggregates.py
 
       - name: Verify published balance projection

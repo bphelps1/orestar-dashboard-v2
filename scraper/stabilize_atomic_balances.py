@@ -20,6 +20,10 @@ from search_budget import SearchBudget, SearchBudgetError, estimate_scope_search
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_TOTAL_PASSES = 3
+# Seconds. The same budget the workflow steps give a bare process.py run: this
+# step can legitimately run for hours, so its own timeout cannot catch a
+# process.py hung on a Postgres backend the pooler has hidden (2026-09-23).
+COMMAND_TIMEOUTS = {"scraper/process.py": 60 * 60}
 
 
 def _scope_map(plan: dict) -> dict[tuple[str, ...], dict]:
@@ -109,7 +113,11 @@ def run_stabilization(
         try:
             if command_runner is not None:
                 return command_runner(argv)
-            return subprocess.run(argv, cwd=root, check=False).returncode
+            return subprocess.run(argv, cwd=root, check=False,
+                                  timeout=COMMAND_TIMEOUTS.get(args[0])).returncode
+        except subprocess.TimeoutExpired as exc:
+            print(f"ERROR: {' '.join(argv)}: no result after {exc.timeout:.0f}s", file=sys.stderr)
+            return 1
         except (OSError, subprocess.CalledProcessError) as exc:
             print(f"ERROR: {' '.join(argv)}: {exc}", file=sys.stderr)
             return 1
