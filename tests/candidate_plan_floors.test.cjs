@@ -149,14 +149,13 @@ test('with a search, the people section filters too, and no match anywhere says 
  c.renderLobbyistPlan();assert.match(get('plan-tbody').innerHTML,/No donors match/);
 });
 
-test("another state's candidate committee is never a donor, however it is spaced",()=>{
+test("another state's candidate committee stays a donor; only Oregon's are left out",()=>{
  const {c}=harness();
- assert.equal(c.isDonorExcluded('Friends of Reggie Harris'),true);
- assert.equal(c.isDonorExcluded('  FRIENDS OF  REGGIE HARRIS '),true);
- // Real Oregon PACs that a name pattern would have caught stay in.
+ assert.equal(c.isDonorExcluded('Friends of Reggie Harris'),false);
  assert.equal(c.isDonorExcluded('Friends of Naturopathic Medicine'),false);
- assert.equal(c.isDonorExcluded('Clean Energy for Oregon PAC'),false);
+ assert.equal(c.isDonorExcluded('  Miscellaneous  Contributions $100 and under '),true,'pooled lines still go, however spaced');
  const profile={top_donors_by_year:{2024:[gift(1000,'Friends of Reggie Harris','d87b3ec55d6b4'),gift(1000)]}};
  const {targets}=c.buildRepeatDonorTargets(profile,[],[],['2025','2026'],2026,null);
- assert.deepEqual(Array.from(targets,t=>t.donor),['Acme PAC']);
+ assert.deepEqual(Array.from(targets,t=>t.donor).sort(),['Acme PAC','Friends of Reggie Harris']);
+ assert.equal(targets.find(t=>t.donor==='Friends of Reggie Harris').target,1250);
 });

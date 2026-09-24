@@ -344,16 +344,12 @@ const EXCLUDED_DONORS = new Set([
 // "Aggregate Resource Industries" and its like are real companies, hence
 // "contribut" on that branch.
 const POOLED_SMALL_GIFTS = /^misc(?:ellaneous)?\b|^aggregate\s.*contribut/i;
-// Other states' candidate committees. The candidate-committee checks look a
-// name up in Oregon's filer index, where these never appear, and a name
-// pattern cannot stand in: "Friends of Naturopathic Medicine" and "Clean
-// Energy for Oregon PAC" are real Oregon PACs. So they are listed, reviewed.
-const OTHER_STATE_CANDIDATE_COMMITTEES = new Set([
-  "friends of reggie harris",          // Columbus, OH: $1,000 to Ben Bowman, 2024-10-01
-]);
+// Other states' candidate committees stay donors: the user wants Friends of
+// Reggie Harris (Columbus, OH) and its like asked like anyone else. Only
+// Oregon candidate committees, which the filer index names, are left out.
 function isDonorExcluded(name) {
   const label = String(name || "").toLowerCase().trim().replace(/\s+/g, " ");
-  return EXCLUDED_DONORS.has(label) || POOLED_SMALL_GIFTS.test(label) || OTHER_STATE_CANDIDATE_COMMITTEES.has(label);
+  return EXCLUDED_DONORS.has(label) || POOLED_SMALL_GIFTS.test(label);
 }
 
 async function runRecommendations() {
