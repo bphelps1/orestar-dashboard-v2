@@ -321,7 +321,8 @@ jobs:
       - name: Project durable recovered facts into balance caches
         id: identity_aggregate
         if: always() && !cancelled() && steps.identity_projection_start.outcome == 'success'
-        timeout-minutes: 45
+        # Same aggregation as "Re-aggregate from durable evidence" below.
+        timeout-minutes: 60
         run: python scraper/process.py
 
       - name: Re-key donors after the recovered projection
@@ -491,7 +492,8 @@ jobs:
       - name: Re-aggregate from durable evidence
         id: aggregate
         if: inputs.recovery_mode != 'identity_backfill' && always() && !cancelled() && steps.publish.outcome == 'success'
-        timeout-minutes: 45
+        # 17-28 minutes over 26 runs (2026-09-12..23).
+        timeout-minutes: 60
         run: python scraper/process.py
 
       # process.py rebuilds every filer_detail donor blob from the raw
@@ -523,7 +525,7 @@ jobs:
         if: >-
           inputs.recovery_mode != 'identity_backfill' && steps.plan.outcome == 'success' &&
           steps.plan.outputs.filer_ids == ''
-        timeout-minutes: 45
+        timeout-minutes: 60
         run: python scraper/process.py
 
       - name: Re-key donors after the empty-plan recovery aggregation

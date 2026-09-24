@@ -159,4 +159,4 @@ def test_workflow_publication_can_be_cancelled_and_is_bounded():
     for line in workflow.splitlines():
         if 'always()' in line:
             assert '!cancelled()' in line
-    assert workflow.count('timeout-minutes: 45\n        run: python scraper/process.py') == 3
+    assert workflow.count('timeout-minutes: 60\n        run: python scraper/process.py') == 3
