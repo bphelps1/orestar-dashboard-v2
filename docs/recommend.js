@@ -1630,7 +1630,6 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
       factors.push(`Current cycle donor: ${fmt$(currentCycleAmt)} given so far`);
       factors.push(`Base target: ${fmt$(evidenceTarget)} (${historyBlend ? "history-weighted comparable benchmark" : `+5%${hasUplift ? " + comparable uplift" : ""}`}; rounded to nearest $250)`);
     }
-    if (floored) factors.push(`More than last cycle: ${fmt$(lastEligible)} eligible giving in ${cycleName(prevCycle)} + 5%, rounded up to $250 → ${fmt$(target)}`);
 
     if (primaryExclusionNote(targetProfile)) factors.push(primaryExclusionNote(targetProfile));
     if (targetProfile._entryBaseline) factors.push(`Incumbent baseline excludes giving through the first legislative primary (${targetProfile._entryBaseline.primaryDate}); full giving remains in history`);
@@ -1652,6 +1651,8 @@ function buildRepeatDonorTargets(targetProfile, comparables, compProfiles, years
         + ` = ${fmt$(blended)} → ${fmt$(evidenceTarget)}`
         + (roundTarget(blended) === evidenceTarget ? " rounded" : " after capping and rounding"));
     }
+    // Last, because it overrides the arithmetic above it.
+    if (floored) factors.push(`More than last cycle: ${fmt$(lastEligible)} eligible giving in ${cycleName(prevCycle)} + 5%, rounded up to $250 → ${fmt$(target)}`);
     // How recent the giving behind the benchmark is, before quoting it.
     if (compGifts.length) factors.push(recencyNote(staleEvidence, cycle));
     // Say which giving the benchmark came from before quoting a number from it.
@@ -2257,7 +2258,8 @@ function lastCycleContributions(profile, cycle) {
   const excluded = profile?._askDonorsByYear
     ? years.reduce((s, y) => s + Math.max(0, sum(profile.top_donors_by_year?.[y]) - sum(profile._askDonorsByYear[y])), 0)
     : 0;
-  return { cycle: last, raised, excluded, eligible: Math.max(0, raised - excluded) };
+  const cents = n => Math.round(n * 100) / 100;
+  return { cycle: last, raised: cents(raised), excluded: cents(excluded), eligible: cents(Math.max(0, raised - excluded)) };
 }
 
 /**
@@ -3321,7 +3323,7 @@ function individualSheetRows(cycle) {
     [`Given ${cycle - 1}–${cycle}`]: Math.round(r.given),
     "Remaining": Math.round(r.remaining),
     [`Given ${cycle - 3}–${cycle - 2}`]: Math.round(r.last_cycle || 0),
-    "How the ask was set": (r.factors || []).filter(f => /^(Ask baseline|Base target|More than last cycle|Ask = )/.test(f)).join(" · ")
+    "How the ask was set": (r.factors || []).filter(f => /^(Ask baseline|Base target|Ask = |More than last cycle)|unusually large contested primary|first legislative primary/.test(f)).join(" · ")
       || (r.target ? "" : "No ask: no eligible giving last cycle (none, or only inside an exceptional primary window)"),
   }));
 }

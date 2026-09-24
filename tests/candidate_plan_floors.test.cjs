@@ -37,6 +37,8 @@ test('a donor who gave last cycle is asked for more, and the row says why',()=>{
  assert.equal(row.target,1250);assert.equal(row.remaining,1250);
  assert.match(row.factors.join(' '),/More than last cycle: \$1,000 eligible giving in 2023–2024 \+ 5%, rounded up to \$250 → \$1,250/);
  assert.match(row.factors.join(' '),/→ target: \$1,000/,'the evidence line still quotes the evidence');
+ const blend=row.factors.findIndex(f=>f.startsWith('Ask = ')),floor=row.factors.findIndex(f=>f.startsWith('More than last cycle'));
+ assert.ok(blend===-1||blend<floor,'the floor line comes after the arithmetic it overrides');
 });
 
 test('an ask the evidence already puts above the floor is left alone',()=>{
@@ -90,6 +92,7 @@ test('last cycle is the monthly total less exceptional-primary giving, and the t
  const last=c.lastCycleContributions(profile,2026);
  assert.equal(last.cycle,2024);assert.equal(last.raised,100000);
  assert.equal(last.excluded,42000);assert.equal(last.eligible,58000);
+ assert.equal(c.lastCycleContributions({timeline:[{month:'2023-01',contributions:0.1},{month:'2023-02',contributions:0.2}]},2026).raised,0.3,'cents, not float noise');
  const short=c.fundraisingTarget(50000,last);
  assert.equal(short.floor,61000);assert.equal(short.target,61000);assert.equal(short.gap,11000);
  const covered=c.fundraisingTarget(75000,last);
