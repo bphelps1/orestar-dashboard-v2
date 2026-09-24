@@ -218,7 +218,7 @@
   margin-bottom: 16px;
 }
 .results-header h2 { font-size: 1.1rem; }
-.export-btns { display: flex; gap: 8px; }
+.export-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .results-summary {
   display: flex;
