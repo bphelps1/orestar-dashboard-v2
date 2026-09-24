@@ -89,8 +89,12 @@ test('the candidate call list carries no portraits, colours Remaining, and lists
  assert.ok(colours(saved).some(r=>r.operator==='greaterThan'&&r.style.font.color.argb===INK.owed),'colours survive a save');
  // An ask already met reads $0 (green by the conditional format), not a blank.
  const met={...g,rows:[{...g.rows[0],given:1200,remaining:0}],given:1200,remaining:0};
- const metSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[met],2026);
- assert.equal(res(metSheet.getCell('L6').value),0);assert.equal(res(metSheet.getCell('L5').value),0);
+ const metBook=new BrowserExcelJS.Workbook();const metSheet=await c.writeCallList(metBook,[met],2026);
+ // ExcelJS keeps no cached result of 0, so Excel is told to calculate on open.
+ const zeroOrUncached=v=>!('result' in v)||v.result===0;
+ assert.equal(metSheet.getCell('L6').value.formula,'IF(N(H6)>0,MAX(0,H6-N(I6)-N(J6)),"")');assert.ok(zeroOrUncached(metSheet.getCell('L6').value));
+ assert.equal(metSheet.getCell('L5').value.formula,'MAX(0,H5-I5-J5)');assert.ok(zeroOrUncached(metSheet.getCell('L5').value));
+ assert.equal(metBook.calcProperties.fullCalcOnLoad,true);
  // Donors with no lobbyist are listed as they are.
  const none={...g,lobbyist:null,tier:{label:'',why:'',tier:4}};
  const noneSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[none],2026);

@@ -3787,6 +3787,9 @@ async function writeCallList(wb, groups, cycle, options = {}) {
     }
   });
   ws.planLinks = liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups);
+  // ExcelJS drops a cached result of 0 or "" (a met ask, an empty column), so
+  // have Excel calculate every formula when the file opens. Sheets always does.
+  wb.calcProperties = { ...(wb.calcProperties || {}), fullCalcOnLoad: true };
   if (remainingCol) {
     const L = colLetter(remainingCol);
     ws.addConditionalFormatting({
