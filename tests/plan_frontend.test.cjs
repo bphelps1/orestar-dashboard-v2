@@ -172,7 +172,7 @@ test("the sheet is banded by cycle, with the candidate and its comparables", () 
   assert.equal(nameRow.filter(Boolean)[0], "Friends of A");
   assert.ok(nameRow.includes("Fahey"));
   assert.deepEqual([...new Set(kindRow.filter(Boolean))],
-                   ["Ask", "Given", "Committed", "Remaining", "Comparable", "This candidate"]);
+                   ["Ask", "Given", "Committed", "Δ vs 2023–2024", "Remaining", "Comparable", "This candidate"]);
   assert.equal(merges.length, 4);          // one per band: this cycle, its comparables, two earlier cycles
   // Roles drive the formatting, so every row must carry one.
   assert.equal(roles.length, rows.length);
@@ -226,12 +226,16 @@ test("the current cycle carries Remaining: never below $0, and a lobbyist's is t
   const { rows } = ctx.planSheetAoa(groups, 2026);
   const kinds = rows[2];
   const askCol = kinds.indexOf("Ask"), givenCol = kinds.indexOf("Given"), remCol = kinds.indexOf("Remaining");
-  assert.deepEqual([givenCol, kinds.indexOf("Committed"), remCol], [askCol + 1, askCol + 2, askCol + 3],
-                   "Ask, Given, Committed, Remaining, in that order");
+  const deltaCol = kinds.indexOf("Δ vs 2023–2024");
+  assert.deepEqual([givenCol, kinds.indexOf("Committed"), deltaCol, remCol], [askCol + 1, askCol + 2, askCol + 3, askCol + 4],
+                   "Ask, Given, Committed, the change on last cycle, Remaining, in that order");
   const row = name => rows.find(r => r[3] === name);
   assert.equal(row("Grocery PAC")[remCol], 600);      // 1,100 asked − 500 given
   assert.equal(row("Foresight")[remCol], 1000);
   assert.equal(row("Early PAC")[remCol], 0, "met, not negative");
+  // Grocery PAC gave 1,000 last cycle and 500 so far; Foresight nothing either time.
+  assert.equal(row("Grocery PAC")[deltaCol], -500);
+  assert.equal(row("Foresight")[deltaCol], "");
   const lead = rows.find(r => r[1] === "Amanda Dalton"), total = rows.find(r => r[1] === "Everyone");
   assert.equal(lead[remCol], 1100);
   assert.equal(total[remCol], 1100);

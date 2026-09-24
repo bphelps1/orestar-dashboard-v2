@@ -222,7 +222,8 @@ test('call list totals are live formulas that reproduce today and follow hand-ty
  const ws=fakeSheet(aoa.rows);
  const links=c.liveCallListFormulas(ws,aoa.rows,aoa.roles,aoa.headerRows,aoa.moneyFrom,groups);
  const kinds=aoa.rows[aoa.headerRows-1];
- const [ask,given,committed,rem]=['Ask','Given','Committed','Remaining'].map(k=>kinds.indexOf(k)+1);
+ const [ask,given,committed,rem,delta]=['Ask','Given','Committed','Remaining','Δ vs 2023–2024'].map(k=>kinds.indexOf(k)+1);
+ assert.equal(delta,rem-1,'the change on last cycle sits just left of Remaining');
  const at=(label,col)=>{const r=aoa.rows.findIndex(x=>x[1]===label||x[3]===label)+1;return evaluate(ws,r,col);};
  // Every formula recalculates to the number the site computed.
  for(let r=1;r<=aoa.rows.length;r++)for(let col=aoa.moneyFrom+1;col<=kinds.length;col++){
@@ -241,5 +242,9 @@ test('call list totals are live formulas that reproduce today and follow hand-ty
  assert.equal(at('Quinn',given),2000);assert.equal(at('Quill',rem),1000);assert.equal(at('Quinn',rem),1000);
  assert.equal(at('Everyone',given),500+1500+2000+4000+300+90);
  assert.equal(at('Everyone',rem),0+1000+0,'lobbyist Remainings added up; no-lobbyist Ghost PAC has none');
+ // The change on last cycle follows the edits too: Given + Committed − last cycle.
+ assert.equal(at('Acme',delta),500+1000);assert.equal(at('Quill',delta),2000);
+ assert.equal(at('Pat',delta),500+1500+1000);
+ assert.equal(at('Everyone',delta),at('Everyone',given)+at('Everyone',committed)-evaluate(ws,links.totalRow,kinds.indexOf('This candidate')+1));
  assert.equal(links.totalRow,aoa.headerRows+1);
 });

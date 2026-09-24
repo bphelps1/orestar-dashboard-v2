@@ -2923,6 +2923,9 @@ function donorContact(r) {
 const PLAN_SELF = "__plan_self__";
 const REMAINING = "Remaining";
 const COMMITTED = "Committed";
+// How this cycle compares with the last: Given + Committed less what the same
+// donor gave this candidate last cycle. Named for the cycle it measures from.
+const deltaKind = cycle => `Δ vs ${cycleName(cycle - 2)}`;
 
 /** What this donor gave `filer` in `cy`, from the all-years comparable index. */
 function givenInCycle(key, filerName, cy, row) {
@@ -3221,8 +3224,9 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
   // below $0 (the on-screen plan's Remaining, until anything is committed).
   bands.push({ cycle: cycles[0], start: width, current: true,
                cols: [{ filer: PLAN_SELF, kind: "Ask" }, { filer: PLAN_SELF, kind: "Given" },
-                      { filer: PLAN_SELF, kind: COMMITTED }, { filer: PLAN_SELF, kind: REMAINING }] });
-  width += 4;
+                      { filer: PLAN_SELF, kind: COMMITTED }, { filer: PLAN_SELF, kind: deltaKind(cycle) },
+                      { filer: PLAN_SELF, kind: REMAINING }] });
+  width += 5;
   // What the comparables have received this cycle, a spacer apart from the
   // candidate's own columns: the candidate's giving this cycle is Given, so
   // this band holds the comparables only.
@@ -3283,7 +3287,8 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
         b.cols.forEach((c, i) => {
           if (c.kind === COMMITTED) return;           // for the team to fill in
           const at = b.start + i;
-          const v = c.kind === "Ask" ? r.target
+          const v = c.kind === deltaKind(cycle) ? (r.given || 0) - ((r.cycles || {})[cycle - 2] || 0)
+            : c.kind === "Ask" ? r.target
             : c.kind === REMAINING ? rowRemaining(r)
             : b.current && c.filer === PLAN_SELF ? r.given
             : givenInCycle(r.donor_key, c.filer, b.cycle, r);
@@ -3337,12 +3342,18 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     const lead = blank();
     lead[1] = "Other contributions this cycle (not on the call list)";
     body.push(lead); bodyRoles.push("subtotal");
+    const lastAt = bands.find(b => b.cycle === cycle - 2 && !b.compsOnly)?.start;
+    const deltaAt = bands[0].start + bands[0].cols.findIndex(c => c.kind === deltaKind(cycle));
     for (const o of other) {
       const row = blank();
       row[0] = lead[1]; row[2] = "Not on the call list"; row[3] = o.label;
-      row[givenAt] = Math.round(o.given);
-      lead[givenAt] = Math.round((lead[givenAt] || 0) + o.given);
-      totals[givenAt] += o.given;
+      const cells = [[givenAt, o.given], [lastAt, o.last], [deltaAt, o.given - o.last]];
+      for (const [at, v] of cells) {
+        if (at == null || !v) continue;
+        row[at] = Math.round(v);
+        lead[at] = Math.round((lead[at] || 0) + v);
+        totals[at] += v;
+      }
       body.push(row); bodyRoles.push("other");
     }
   }
@@ -3370,17 +3381,19 @@ function otherCycleContributions(cycle) {
   if (!byYear) return [];
   const planRows = planDonorRows();
   const inPlan = new Set(planRows.map(r => r.donor_key));
-  const people = planRows.filter(r => r.type !== "New Prospect" && !isOrganization(r))
-    .reduce((sum, r) => sum + (r.given || 0), 0);
-  let pooled = 0, committees = 0;
-  for (const d of mergeDonorsByYear(byYear, [cycle - 1, cycle])) {
-    if (inPlan.has(d.donor_key)) continue;
-    if (isDonorExcluded(d.name)) pooled += d.total || 0;
-    else committees += d.total || 0;                  // the one other rule: Oregon candidate committees
+  const personRows = planRows.filter(r => r.type !== "New Prospect" && !isOrganization(r));
+  const people = { given: 0, last: 0 }, pooled = { given: 0, last: 0 }, committees = { given: 0, last: 0 };
+  for (const r of personRows) { people.given += r.given || 0; people.last += (r.cycles || {})[cycle - 2] || 0; }
+  for (const [key, years] of [["given", [cycle - 1, cycle]], ["last", [cycle - 3, cycle - 2]]]) {
+    for (const d of mergeDonorsByYear(byYear, years)) {
+      if (inPlan.has(d.donor_key)) continue;
+      // The one other rule is Oregon candidate committees.
+      (isDonorExcluded(d.name) ? pooled : committees)[key] += d.total || 0;
+    }
   }
   return [["Individuals (see the Individuals sheet)", people], ["Oregon candidate committees", committees],
           ["Small gifts of $100 and under", pooled]]
-    .filter(([, given]) => given > 0).map(([label, given]) => ({ label, given }));
+    .filter(([, v]) => v.given > 0 || v.last > 0).map(([label, v]) => ({ label, ...v }));
 }
 
 // The same evidence the review page shows, in words a first-time reader can
@@ -3650,6 +3663,8 @@ function colLetter(n) {
 
 // Zero reads as blank in the summed columns, as it did when they held values.
 const MONEY_BLANK_ZERO = '"$"#,##0;-"$"#,##0;';
+// The change on last cycle: signed, blank when there is none.
+const MONEY_DELTA = '+"$"#,##0;-"$"#,##0;';
 
 /**
  * Makes the call list's totals formulas, so a figure typed in by hand (a
@@ -3670,6 +3685,9 @@ function liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups) {
   const askCol = kinds.indexOf("Ask") + 1, givenCol = kinds.indexOf("Given") + 1;
   const remCol = kinds.indexOf(REMAINING) + 1, committedCol = kinds.indexOf(COMMITTED) + 1;
   const ask = colLetter(askCol), given = colLetter(givenCol), committed = colLetter(committedCol);
+  const deltaCol = kinds.findIndex(k => String(k).startsWith("Δ vs ")) + 1;
+  // Last cycle's "This candidate" column: the first one after this cycle's bands.
+  const lastCol = kinds.indexOf("This candidate") + 1;
   const cell = (r, c) => ws.getRow(r).getCell(c);
   const cached = (r, c) => (typeof cell(r, c).value === "number" ? cell(r, c).value : 0);
   const set = (r, c, formula, result) => { cell(r, c).value = { formula, result }; };
@@ -3692,7 +3710,7 @@ function liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups) {
     }
     for (const c of moneyCols) {
       const L = colLetter(c);
-      if (subtotal && c === remCol) continue;            // nothing was asked of these
+      if (c === deltaCol || (subtotal && c === remCol)) continue;   // delta: its own row's formula, below
       set(lead, c, c === remCol && groups[group]?.lobbyist
         ? `MAX(0,${ask}${lead}-${given}${lead}-${committed}${lead})` : `SUM(${L}${first}:${L}${last})`, cached(lead, c));
       if (c !== remCol) cell(lead, c).numFmt = MONEY_BLANK_ZERO;
@@ -3700,12 +3718,22 @@ function liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups) {
   }
   if (totalRow && leads.length) {
     for (const c of moneyCols) {
+      if (c === deltaCol) continue;
       const sumOf = c === remCol ? leads.filter(r => roles[r - 1] === "lobbyist") : leads;
       set(totalRow, c, sumOf.map(r => colLetter(c) + r).join("+") || "0", cached(totalRow, c));
       if (c !== remCol) cell(totalRow, c).numFmt = MONEY_BLANK_ZERO;
     }
   }
-  return { leads, totalRow, askCol, givenCol, remCol, committedCol };
+  if (deltaCol && lastCol) {
+    const d = r => `N(${given}${r})+N(${committed}${r})-N(${colLetter(lastCol)}${r})`;
+    for (let i = 0; i < roles.length; i++) {
+      if (!["total", "lobbyist", "subtotal", "donor", "other"].includes(roles[i])) continue;
+      const r = i + 1, v = cell(r, deltaCol).value;
+      set(r, deltaCol, d(r), typeof v === "number" ? v : 0);
+      cell(r, deltaCol).numFmt = MONEY_DELTA;
+    }
+  }
+  return { leads, totalRow, askCol, givenCol, remCol, committedCol, deltaCol };
 }
 
 async function writeCallList(wb, groups, cycle, options = {}) {
@@ -3766,6 +3794,17 @@ async function writeCallList(wb, groups, cycle, options = {}) {
       rules: [
         { type: "cellIs", operator: "greaterThan", priority: 1, formulae: ["0"], style: { font: { color: { argb: INK.owed } } } },
         { type: "cellIs", operator: "equal", priority: 2, formulae: ["0"], style: { font: { color: { argb: INK.met } } } },
+      ],
+    });
+  }
+  const deltaCol = ws.planLinks.deltaCol;
+  if (deltaCol) {
+    const L = colLetter(deltaCol);
+    ws.addConditionalFormatting({
+      ref: `${L}${headerRows + 1}:${L}${rows.length}`,
+      rules: [
+        { type: "cellIs", operator: "greaterThan", priority: 3, formulae: ["0"], style: { font: { color: { argb: INK.met } } } },
+        { type: "cellIs", operator: "lessThan", priority: 4, formulae: ["0"], style: { font: { color: { argb: INK.owed } } } },
       ],
     });
   }
@@ -3895,7 +3934,7 @@ function writeCover(wb, groups, cycle, { listNonTargets = false } = {}) {
 
   heading("How to read the call list");
   para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
-  para(`Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Committed” is for pledges ORESTAR has not recorded yet: type them in; “Remaining” is what is still to come after Given and Committed, never below $0 — for a lobbyist, their target less what their donors have given and committed. Next come what those same donors have given the comparable candidates this cycle, then what they gave this candidate and the comparables in the two cycles before — that is the case for the ask. A lobbyist's comparable columns count their whole book: ${listNonTargets ? "clients not in this plan are listed one by one under them, marked “Non-target”, with no ask." : "clients not in this plan are summed in a “Non-target donors” row under them."}`);
+  para(`Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Committed” is for pledges ORESTAR has not recorded yet: type them in; “Δ vs” last cycle is Given plus Committed less what the same donor gave this candidate last cycle (green ahead, red behind); “Remaining” is what is still to come after Given and Committed, never below $0 — for a lobbyist, their target less what their donors have given and committed. Next come what those same donors have given the comparable candidates this cycle, then what they gave this candidate and the comparables in the two cycles before — that is the case for the ask. A lobbyist's comparable columns count their whole book: ${listNonTargets ? "clients not in this plan are listed one by one under them, marked “Non-target”, with no ask." : "clients not in this plan are summed in a “Non-target donors” row under them."}`);
   para("The call list is organizations, PACs and businesses only, using ORESTAR's own category for each contributor. Donors with no lobbyist on file are at the bottom of it. People who have given to this candidate are on the Individuals sheet instead.");
   para("The totals are live: type a pledge into Committed, a gift ORESTAR has not recorded yet into Given, or a new Ask, and that donor's Remaining, the lobbyist's row, Everyone, the Lobbyists sheet and “Still to ask” all follow. Opened in Google Sheets, the formulas carry over. The last block, “Other contributions this cycle”, holds the cash the call list leaves off by rule (people, Oregon candidate committees, gifts of $100 and under), so Everyone's Given is all the cash raised this cycle.");
   para("Anyone who gave last cycle is asked for more than that. The fundraising target is never less than last cycle's contributions plus 5%, leaving out giving in exceptionally high-spend primary contests; anything the asks do not cover is shown as still to find.");
