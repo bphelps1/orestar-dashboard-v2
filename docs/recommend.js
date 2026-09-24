@@ -662,8 +662,10 @@ function leadershipReference(gifts, comparables) {
   if (!leadershipPool(comparables)) return null;
   const primaryNames = new Set(comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => c.name));
   const primary = gifts.filter(g => primaryNames.has(g.filer));
+  const chosen = comparables.some(c => c.chosen);
   return { gifts: primary.length ? primary : gifts,
-    label: primary.length ? "primary leadership references" : "secondary fundraising-outlier references (no giving to primary leaders)" };
+    label: chosen ? "the comparison committees chosen for this candidate"
+      : primary.length ? "primary leadership references" : "secondary fundraising-outlier references (no giving to primary leaders)" };
 }
 function leadershipFactors(factors, reference) {
   if (!reference) return;
@@ -985,8 +987,34 @@ function seatCompetitiveness(filer) {
   return raceMarginIndex.get(`${od.slice(0, i).trim()}|${od.slice(i + 1).trim()}`) || null;
 }
 
+// ── Comparison committees chosen by hand ──────────────────────────────────
+// For a few candidates the user names the comparison committees outright, and
+// that list replaces the rules in findComparables. Every chosen committee is a
+// primary reference: Rob Nosse holds no senior leadership role, but he is on
+// Ben Bowman's list and counts the same as the leaders on it. The House
+// Majority Leader's 10% Speaker discount still applies.
+const CHOSEN_COMPARABLES = new Map([
+  ["friends_of_ben_bowman", ["friends_of_julie_fahey", "friends_of_rob_wagner", "kayse_jama_for_oregon",
+                             "kate_lieber_for_state_senate", "tawna_sanchez_for_oregon", "friends_of_rob_nosse"]],
+]);
+
+function chosenComparables(targetFiler, slugs) {
+  const targetRole = primaryLeadershipRole(targetFiler);
+  const found = slugs.map(slug => (filerIndex || []).find(f => f.slug === slug));
+  slugs.forEach((slug, i) => { if (!found[i]) console.warn(`[recommend] chosen comparable not on file: ${slug}`); });
+  return found.filter(Boolean).map(f => ({
+    ...f, similarity: 100, officeType: getOffice(f), party: getParty(f), chamber: getChamber(f),
+    seat: seatCompetitiveness(f), comparisonKind: targetRole ? "leadership-primary" : "seat", chosen: true,
+    leadership_tier: effectiveLeadershipTier(f), outlierEvidence: null,
+    benchmarkFactor: targetRole === "house-majority-leader" && primaryLeadershipRole(f) === "speaker"
+      ? HOUSE_MAJORITY_BENCHMARK_FACTOR : 1,
+  }));
+}
+
 async function findComparables(targetProfile, targetFiler, cycle) {
   await Promise.all([loadRaceMargins(), loadCurrentLegislators(), loadCommitteeChairs()]);
+  const chosen = CHOSEN_COMPARABLES.get(targetFiler.slug);
+  if (chosen) return chosenComparables(targetFiler, chosen);
   const targetSeat = seatCompetitiveness(targetFiler);
   if (targetSeat) {
     console.log(`[recommend] target seat: ${targetSeat.label} (${targetSeat.year})`);
@@ -2032,7 +2060,8 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
     <div class="summary-card"><span class="sc-label">Total Fundraising Target <span class="sc-help" title="This cycle's goal: every donor and prospect ask, and never less than last cycle's eligible contributions plus 5%, rounded up to $250. Giving in exceptionally high-spend primary contests is left out of last cycle, as it is from every ask. Any shortfall is shown as still to find.">?</span></span><br><span class="sc-value">${fmt$(goal.target)}</span>
       <div class="sc-sub">Last cycle (${cycleName(last.cycle)}): ${fmt$(last.eligible)}${last.excluded ? ` — ${fmt$(last.raised)} raised, ${fmt$(last.excluded)} in exceptional primary windows left out` : ""}</div>
       <div class="sc-sub">Donor &amp; prospect asks: ${fmt$(goal.asks)}${goal.gap ? ` · <strong>Still to find: ${fmt$(goal.gap)}</strong> (small-dollar, events, new donors)` : ""}</div></div>
-    ${leadershipPool(comparables) ? `<div class="summary-card"><span class="sc-label">Leadership references</span><p>Primary: ${comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => esc(c.name)).join(", ") || "None available"}</p><p>Secondary: ${comparables.filter(c => c.comparisonKind === "leadership-secondary").map(c => `${esc(c.name)} (${fmt$(c.outlierEvidence?.amount)} in best prior completed cycle)`).join(", ") || "None detected"}</p></div>` : ""}
+    ${comparables.some(c => c.chosen) ? `<div class="summary-card"><span class="sc-label">Comparison committees</span><p>Chosen for this candidate: ${comparables.map(c => esc(c.name)).join(", ")}</p></div>`
+      : leadershipPool(comparables) ? `<div class="summary-card"><span class="sc-label">Leadership references</span><p>Primary: ${comparables.filter(c => c.comparisonKind === "leadership-primary").map(c => esc(c.name)).join(", ") || "None available"}</p><p>Secondary: ${comparables.filter(c => c.comparisonKind === "leadership-secondary").map(c => `${esc(c.name)} (${fmt$(c.outlierEvidence?.amount)} in best prior completed cycle)`).join(", ") || "None detected"}</p></div>` : ""}
     ${comparables.some(c => c.comparisonKind === "leadership-chair") ? `<div class="summary-card"><span class="sc-label">Leadership and committee-chair peers</span><p>${comparables.map(c => esc(c.name)).join(", ")}</p><p>Same chamber and compatible seat margins.</p></div>` : ""}
     ${primaryExclusionNote(targetProfile) ? `<div class="summary-card"><span class="sc-label">Primary-campaign exclusions</span><p>${esc(primaryExclusionNote(targetProfile))}. Actual history remains visible; current-cycle giving still counts toward the target.</p></div>` : ""}
     ${targetProfile._entryBaseline ? `<div class="summary-card"><span class="sc-label">Incumbent ask baseline</span><p>Giving from ${esc(targetProfile._entryBaseline.start)} onward. First-primary fundraising is excluded from asks and lobbyist minimums; historical giving remains visible.</p></div>` : ""}
@@ -3320,6 +3349,9 @@ function methodSheetRows(groups, cycle) {
     Detail: "A named primary opponent has at least 20%; cash through the primary is at least $25,000, 1.5 times the median of the previous two funded primary periods, and $10,000 above that median. Exclude January 1 of the preceding year through primary day for the candidate and all comparison references. Normal earlier cycles and post-primary giving remain eligible. Actual history and current giving credits are unchanged. Detected periods refresh through reviewed data PRs." });
   for (const p of window._primaryExclusionNotes || []) rows.push({ Item: `Excluded primary: ${p.name}`, Value: `${p.start}–${p.through}`,
     Detail: `${fmt$(p.primary_cash)} cash vs ${fmt$(p.historical_median)} historical median; strongest named opponent ${p.opposition_pct}%.` });
+  const chosenComps = (window._comparables || []).filter(c => c.chosen);
+  if (chosenComps.length) rows.push({ Item: "Comparison committees", Value: "chosen for this candidate",
+    Detail: `${chosenComps.map(c => c.name).join(", ")}. Named by hand; they replace the selection rules below and each counts as a primary reference.` });
   rows.push({ Item: "Limited incumbent history", Value: "75% / 60% comparable weight",
     Detail: "Repeat-donor asks use 75% comparable giving with no completed eligible incumbent cycle, or 60% with one. The remainder is own post-primary giving plus 5%, capped at the median peer benchmark before $250 rounding. Each peer contributes their latest funded eligible cycle from the preceding two cycles; current, future, and older cycles do not set this benchmark. Two or more completed cycles retain history-led weighting. No peer gift means no invented benchmark. New-donor first-gift limits are unchanged." });
   rows.push({ Item: "Leadership and committee chairs", Value: "same-chamber role peers",

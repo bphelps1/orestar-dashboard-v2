@@ -70,3 +70,27 @@ test('Excel donor asks match the reduced calculation and preserve actual contrib
  assert.equal(row[9],1750);assert.equal(row[12],20000); // Ask and prior-cycle actual.
  assert.equal(sheet.rows[sheet.roles.indexOf('total')][9],1750);
 });
+test("Ben Bowman's comparison committees are the six the user chose, each a primary reference",async()=>{
+ const c=harness();
+ const f=(slug,name,extra={})=>({...filer(name,extra),slug});
+ c.filers=[f('friends_of_ben_bowman','Friends of Ben Bowman',{leadership_role:'House Majority Leader'}),
+  f('friends_of_julie_fahey','Friends of Julie Fahey',{leadership_role:'Speaker of the House'}),
+  f('friends_of_rob_wagner','Friends of Rob Wagner',{office:'State Senator',leadership_role:'Senate President'}),
+  f('kayse_jama_for_oregon','Kayse Jama for Oregon',{office:'State Senator',leadership_role:'Senate Majority Leader'}),
+  f('kate_lieber_for_state_senate','Kate Lieber for State Senate',{office:'State Senator'}),
+  f('tawna_sanchez_for_oregon','Tawna Sanchez for Oregon'),
+  f('friends_of_rob_nosse','Friends of Rob Nosse'),
+  f('friends_of_mark_meek','Friends of Mark Meek',{office:'State Senator'})];
+ vm.runInContext('filerIndex=filers',c);
+ const peers=await c.findComparables({},c.filers[0],2026);
+ assert.deepEqual(Array.from(peers,p=>p.slug),['friends_of_julie_fahey','friends_of_rob_wagner','kayse_jama_for_oregon',
+  'kate_lieber_for_state_senate','tawna_sanchez_for_oregon','friends_of_rob_nosse'],'in the order chosen; the outlier is gone');
+ assert.ok(peers.every(p=>p.chosen&&p.comparisonKind==='leadership-primary'),'Nosse counts the same as the leaders');
+ assert.equal(peers[0].benchmarkFactor,0.9,'Speaker giving is still discounted for a House Majority Leader');
+ assert.ok(peers.slice(1).every(p=>p.benchmarkFactor===1));
+ const ref=c.leadershipReference([{filer:'Friends of Rob Nosse',amount:5000}],peers);
+ assert.equal(ref.gifts.length,1);assert.match(ref.label,/chosen for this candidate/);
+ // Anyone else still gets the rules.
+ const other=await c.findComparables({},c.filers[6],2026);
+ assert.ok(other.every(p=>!p.chosen));
+});
