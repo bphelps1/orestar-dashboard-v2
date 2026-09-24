@@ -96,3 +96,24 @@ test('lobbyist floor rounds upward, keeps higher asks, and credits excess curren
  c.window._repeatTargets[0].target=7500;g=c.planGroups()[0];assert.equal(g.target,7500);assert.equal(g.additional_ask,0);assert.equal(g.remaining,1500);
  c.window._lobbyAttr=new Map();g=c.planGroups()[0];assert.equal(g.target,7500);assert.equal(g.additional_ask,0);
 });
+test('lobbyist exports wait for attribution, and say so when it failed',async()=>{
+ const {c,get}=harness();let built=null,confirmed=0;
+ c.XLSX={utils:{book_new:()=>({})}};c.confirm=()=>{confirmed++;return false;};
+ c.exportLobbyistWorkbook=async groups=>{built=groups;};
+ vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Pat',kind:'person'}]]);`,c);
+ c.window._cycle=2026;c.window._recommendations=[];c.window._targetProfile={name:'Friends of Test',slug:'friends_of_test'};
+ c.window._repeatTargets=[{donor:'Acme',donor_key:'a',target:2000,current_cycle_amt:0,remaining:2000,cycles:{2024:1500},last_cycle_amt:1500,comp_max:0,comp_max_filers:[],comp_gifts:[],factors:[],history:[]}];
+ // Still loading: nothing is built yet, and the plan says why.
+ let finish;c.window._lobbyAttr=null;c.window._lobbyPlanLoad=new Promise(r=>{finish=r;});
+ c.exportData('xlsx','lobbyist');
+ assert.equal(built,null);assert.match(get('plan-status').textContent,/Waiting for lobbyist attribution/);
+ vm.runInContext(`window._lobbyAttr=new Map([['a',[{lobbyist:lobbyistsById.get(1),status:'confirmed',is_primary:true,methods:[],client_names:[]}]]]);`,c);
+ finish();await c.window._lobbyPlanLoad;await null;await null;
+ assert.ok(built,'built once attribution arrived');assert.equal(built[0].lobbyist.name,'Pat');
+ // Attribution failed: ask first, and export nothing if the answer is no.
+ built=null;c.window._lobbyAttrError='timeout';
+ c.exportData('xlsx','lobbyist');
+ assert.equal(confirmed,1);assert.equal(built,null);
+ c.confirm=()=>true;c.exportData('xlsx','lobbyist');await null;
+ assert.ok(built,'exported after confirming');
+});

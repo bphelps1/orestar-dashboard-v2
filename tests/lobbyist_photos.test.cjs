@@ -32,7 +32,7 @@ test('firm portrait uses only its designated lead and app escapes photo labels',
 
 });
 let ExcelJS;try{ExcelJS=require(process.env.EXCELJS_MODULE||'exceljs')}catch{}
-test('Excel embeds a portrait without moving totals incorrectly or expanding donor groups', {skip:!ExcelJS}, async()=>{
+test('the candidate call list carries no portraits, colours Remaining, and lists unassigned donors', {skip:!ExcelJS}, async()=>{
  const catalog=JSON.parse(fs.readFileSync(path.join(root,'docs/assets/lobbyist-photos.json')));const [cc_id,photo]=Object.entries(catalog.photos)[0];
  const c=harness(async url=>url.endsWith('.json')?{ok:true,json:async()=>catalog}:{ok:true,arrayBuffer:async()=>{const b=fs.readFileSync(path.join(root,'docs',url));return b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)}});
  vm.runInContext(fs.readFileSync(path.join(root,'docs/lib/lobbyists.js'),'utf8')+fs.readFileSync(path.join(root,'docs/recommend.js'),'utf8'),c);await c.photos.load();
@@ -44,24 +44,42 @@ test('Excel embeds a portrait without moving totals incorrectly or expanding don
  c.TextEncoder=TextEncoder;c.TextDecoder=TextDecoder;c.Blob=Blob;c.Buffer=Buffer;
  vm.runInContext(fs.readFileSync(process.env.EXCELJS_MODULE || require.resolve('exceljs/dist/exceljs.min.js'),'utf8'),c);
  const BrowserExcelJS=c.window.ExcelJS;
- const wb=new BrowserExcelJS.Workbook();const ws=await c.writeCallList(wb,[g],2026,new Map());
- assert.equal(ws.getCell('B5').value,'Photo');assert.equal(ws.getCell('K8').value,1000);assert.equal(ws.getCell('L8').value,250);
- assert.equal(ws.getRow(10).hidden,true);assert.equal(ws.getRow(10).outlineLevel,1);assert.equal(ws.getImages().length,1);
+ const INK=vm.runInContext('INK',c);   // a top-level const: not a sandbox property
+ const wb=new BrowserExcelJS.Workbook();const ws=await c.writeCallList(wb,[g],2026);
+ // No Photo column: B is the lobbyist, and this cycle's Ask, Given, Remaining sit in J, K, L.
+ assert.equal(ws.getCell('B5').value,'Lobbyist or firm');
+ assert.deepEqual([ws.getCell('J7').value,ws.getCell('K7').value,ws.getCell('L7').value],['Ask','Given','Remaining']);
+ assert.deepEqual([ws.getCell('J8').value,ws.getCell('K8').value,ws.getCell('L8').value],[1000,250,750]);
+ assert.equal(ws.getImages().length,0,'no portraits on the call list');
+ // Remaining stands apart: its own header colour, a tinted column, red while money is owed.
+ assert.equal(ws.getCell('L7').fill.fgColor.argb,INK.remainingHead);
+ assert.equal(ws.getCell('L10').fill.fgColor.argb,INK.remaining);
+ assert.equal(ws.getCell('L10').value,750);assert.equal(ws.getCell('L10').font.color.argb,INK.owed);
+ assert.equal(ws.getRow(10).hidden,true,'a lobbyist\'s donors still collapse under the lobbyist');assert.equal(ws.getRow(10).outlineLevel,1);
  const reread=new BrowserExcelJS.Workbook();await reread.xlsx.load(await wb.xlsx.writeBuffer());const saved=reread.getWorksheet('Call list');
- assert.equal(saved.getImages().length,1);assert.equal(saved.getRow(10).hidden,true);assert.equal(saved.getCell('K8').value,1000);
- assert.equal(saved.getRow(9).height,84);
- await c.writeContactPhotos(wb,[g],new Map());assert.equal(wb.getWorksheet('Contact photos').getImages().length,1);
+ assert.equal(saved.getImages().length,0);assert.equal(saved.getRow(10).hidden,true);assert.equal(saved.getCell('L8').value,750);
+ assert.equal(saved.getCell('L10').font.color.argb,INK.owed);
+ // An ask already met reads as a green $0, not a blank.
+ const met={...g,rows:[{...g.rows[0],given:1200,remaining:0}],given:1200,remaining:0};
+ const metSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[met],2026);
+ assert.equal(metSheet.getCell('L10').value,0);assert.equal(metSheet.getCell('L10').font.color.argb,INK.met);
+ // Donors with no lobbyist are listed as they are, not collapsed into a line
+ // that makes the sheet look empty.
+ const none={...g,lobbyist:null,tier:{label:'',why:'',tier:4}};
+ const noneSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[none],2026);
+ assert.equal(noneSheet.getRow(9).getCell(2).value,'(nobody on file — assign these at /admin/lobbyists)');
+ assert.equal(noneSheet.getRow(10).hidden,false);assert.equal(noneSheet.getRow(10).getCell(3).value,'Test organization');
  const firm={kind:'firm',name:'Example Firm',firm_primary_id:1,firm_member_ids:[1]};
  const firmBook=new BrowserExcelJS.Workbook();
- const firmSheet=await c.writeCallList(firmBook,[{...g,lobbyist:firm}],2026,new Map());
- assert.equal(firmSheet.getCell('C9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
- assert.equal(firmSheet.getImages().length,1);
+ const firmSheet=await c.writeCallList(firmBook,[{...g,lobbyist:firm}],2026);
+ assert.equal(firmSheet.getCell('B9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
+ assert.equal(firmSheet.getImages().length,0);
  const savedFirm=new BrowserExcelJS.Workbook();await savedFirm.xlsx.load(await firmBook.xlsx.writeBuffer());
- assert.equal(savedFirm.getWorksheet('Call list').getCell('C9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
- const flat=c.writeTable(firmBook,'Lobbyists',[{Photo:'',Tier:'Tier 1','Lobbyist / Firm':firm.name}],{note:'fixture'});
- c.writeFirmName(flat,firm,4,3);
- assert.equal(flat.getCell('C4').value.richText[0].text,person.name);
-
+ assert.equal(savedFirm.getWorksheet('Call list').getCell('B9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
+ const flat=c.writeTable(firmBook,'Lobbyists',[{Tier:'Tier 1','Lobbyist / Firm':firm.name}],{note:'fixture'});
+ c.writeFirmName(flat,firm,4,2);
+ assert.equal(flat.getCell('B4').value.richText[0].text,person.name);
+ assert.equal(typeof c.writeContactPhotos,'undefined','the Contact photos sheet is gone');
 });
 
 test('reviewed official-site portraits match stable contact IDs, including contacts with directory placeholders',async()=>{
