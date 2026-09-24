@@ -47,7 +47,7 @@ with pathlib.Path(os.environ["API_CALLS"]).open("a") as out:
     out.write(json.dumps(sys.argv[1:]) + "\\n")
 row = {"id": 7, "run_attempt": 1, "workflow_id": 55,
        "path": ".github/workflows/atomic-balance-evidence.yml",
-       "display_title": "Atomic balance evidence: balance-recovery-20260914",
+       "display_title": "Atomic balance evidence: balance-recovery-20260922",
        "status": "in_progress", "conclusion": None}
 assert sys.argv[1:4] == ["api", "--method", "GET"]
 endpoint = sys.argv[4]
@@ -61,7 +61,7 @@ else:
     env = {**os.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
            "GITHUB_OUTPUT": str(output), "API_CALLS": str(api_calls), "ARGV_LOG": str(argv_log),
            "GITHUB_REPOSITORY": "owner/repo", "GITHUB_RUN_ID": "7", "GITHUB_RUN_ATTEMPT": "1",
-           "EFFORT_ID": "balance-recovery-20260914"}
+           "EFFORT_ID": "balance-recovery-20260922"}
     return {"env": env, "bin": binaries, "output": output, "calls": api_calls,
             "argv": argv_log, "tmp": tmp_path}
 
@@ -75,7 +75,6 @@ def execute(shell, name, **updates):
 @pytest.mark.parametrize("passes,requested,excluded,authorized", [
     ("3", "", ["33", "191"], []),
     ("3", "19521", ["33", "191"], []),
-    ("1", "191", ["33"], ["191"]),
 ])
 def test_workflow_admits_with_actual_helper_and_mode_outputs(shell, passes, requested, excluded, authorized):
     result = execute(shell, "Admit this attempt against the persistent effort limit",
@@ -90,7 +89,7 @@ def test_workflow_admits_with_actual_helper_and_mode_outputs(shell, passes, requ
 
 
 @pytest.mark.parametrize("passes,requested", [
-    ("1", ""), ("1", "33"), ("1", "191 33"), ("1", "192"),
+    ("1", ""), ("1", "191"), ("1", "33"), ("1", "191 33"), ("1", "192"),
     ("1", "191\n33"), ("1", "191\r33"), ("1", "191 191"),
     ("1", "191 --max-passes 3"), ("3", "191 --policy other.json"),
     ("3", "191 --effort-id replacement"), ("1", "0191"), ("01", "191"),

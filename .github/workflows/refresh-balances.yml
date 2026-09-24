@@ -132,6 +132,11 @@ jobs:
               if (not path.is_file() or path.stat().st_size != expected['size']
                       or state._sha256_path(path) != expected['sha256']):
                   raise SystemExit('Projection unexpectedly changed an input checkpoint')
+          receipt = json.loads((root / 'data/aggregated/balance_publication.json').read_text())
+          if receipt != supabase_sync.require_dashboard_cache('balance_publication'):
+              raise SystemExit('Publication receipt differs from this committed projection')
+          if not receipt.get('generation') or not receipt.get('detail_count'):
+              raise SystemExit('Missing publication generation or committee details')
           source = json.loads((root / 'data/aggregated/balance_snapshot_source.json').read_text())
           report = json.loads((root / 'data/aggregated/balance_discrepancies.json').read_text())
           if (source != supabase_sync.require_dashboard_cache('balance_snapshot_source')
@@ -157,7 +162,8 @@ jobs:
                       or report[count] != len(report[rows])):
                   raise SystemExit('Balance report counts do not match its evidence rows')
           print('BALANCE_PROJECTION_RESULT ' + json.dumps({
-              'generation': frozen['generation'], 'transaction_snapshot_id': frozen['transaction_snapshot_id'],
+              'generation': frozen['generation'], 'publication_generation': receipt['generation'],
+              'transaction_snapshot_id': frozen['transaction_snapshot_id'],
               'source_created_at': source['created_at'], 'report_generated': report['generated'],
               'actionable': report['flagged'], 'refresh_needed': report['refresh_needed'],
               'unpaired': report['unpaired'], 'nonactionable': report['nonactionable'],

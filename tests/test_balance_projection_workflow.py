@@ -95,6 +95,9 @@ def publish_fixture(p):
     for key, value in (("balance_snapshot_source", source), ("balance_discrepancies", report)):
         (p["root"] / f"data/aggregated/{key}.json").write_text(json.dumps(value))
         p["caches"][key] = value
+    receipt = {"generation": "publication-one", "detail_count": 1}
+    (p["root"] / "data/aggregated/balance_publication.json").write_text(json.dumps(receipt))
+    p["caches"]["balance_publication"] = receipt
     return source, report
 
 
@@ -220,3 +223,10 @@ esac
                             capture_output=True, text=True, timeout=5)
     assert result.returncode == 1
     assert "refusing to overlap a state writer" in result.stdout
+
+
+def test_projection_rejects_different_committed_generation(projection):
+    publish_fixture(projection)
+    projection["caches"]["balance_publication"]["generation"] = "another-publication"
+    with pytest.raises(SystemExit, match="receipt differs"):
+        execute("Verify published balance projection")

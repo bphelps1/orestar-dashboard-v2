@@ -1717,6 +1717,7 @@ def _donor_grouping_labels(df: pd.DataFrame) -> pd.Series:
     return labels.map(donor_label_key).map(display)
 
 
+@supabase_sync.dashboard_publication()
 def aggregate(df: pd.DataFrame) -> None:
     log.info("Aggregating data for dashboard JSON files…")
 

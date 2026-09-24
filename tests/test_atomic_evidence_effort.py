@@ -287,7 +287,10 @@ def test_cli_api_failure_emits_no_success_or_sensitive_response(tmp_path, monkey
 
 
 def test_checked_in_policy_has_the_approved_operational_caps():
-    assert E.load_policy(E.DEFAULT_POLICY) == policy()
+    assert E.load_policy(E.DEFAULT_POLICY) == {
+        **policy(), "effort_id": "balance-recovery-20260922",
+        "max_attempts": 8, "single_pass_filer_ids": [],
+    }
 
 
 def test_duplicate_json_policy_fields_are_not_silently_overwritten(tmp_path):
