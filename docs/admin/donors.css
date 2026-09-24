@@ -378,3 +378,10 @@
 #em-results-b { position: static; margin-top: 6px; }
 #em-results-b .em-r-name { display: flex; align-items: center; gap: 8px; }
 #em-results-b input[type="checkbox"] { width: auto; margin: 0; flex: 0 0 auto; }
+
+/* How much of the decision log is on screen, above it. */
+.em-log-note {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
