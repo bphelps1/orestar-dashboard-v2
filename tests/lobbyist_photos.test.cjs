@@ -46,36 +46,68 @@ test('the candidate call list carries no portraits, colours Remaining, and lists
  const BrowserExcelJS=c.window.ExcelJS;
  const INK=vm.runInContext('INK',c);   // a top-level const: not a sandbox property
  const wb=new BrowserExcelJS.Workbook();const ws=await c.writeCallList(wb,[g],2026);
- // No Photo column: B is the lobbyist, and this cycle's Ask, Given, Remaining sit in J, K, L.
- assert.equal(ws.getCell('B5').value,'Lobbyist or firm');
- assert.deepEqual([ws.getCell('J7').value,ws.getCell('K7').value,ws.getCell('L7').value],['Ask','Given','Remaining']);
- assert.deepEqual([ws.getCell('J8').value,ws.getCell('K8').value,ws.getCell('L8').value],[1000,250,750]);
+ const res=v=>v&&typeof v==='object'&&'result' in v?v.result:v;
+ // The team's layout: headers from row 1, Everyone on row 4 and frozen with them;
+ // B lobbyist, C tier, D donor; this cycle's Ask, Given, Committed, change on last cycle, Remaining in H to L.
+ assert.deepEqual(['B1','C1','D1','E1','F1'].map(a=>ws.getCell(a).value),['Lobbyist or firm','Tier','Donor','Email','Phone']);
+ assert.deepEqual(['H3','I3','J3','K3','L3'].map(a=>ws.getCell(a).value),['Ask','Given','Committed','Δ vs 2023–2024','Remaining']);
+ assert.equal(ws.getCell('N3').value,'This candidate','last cycle, where the change is measured from');
+ assert.equal(ws.views[0].ySplit,4);assert.equal(ws.views[0].xSplit,1);
+ assert.equal(ws.getCell('B4').value,'Everyone');
+ assert.deepEqual(['H4','I4','L4'].map(a=>res(ws.getCell(a).value)),[1000,250,750]);
  assert.equal(ws.getImages().length,0,'no portraits on the call list');
- // Remaining stands apart: its own header colour, a tinted column, red while money is owed.
- assert.equal(ws.getCell('L7').fill.fgColor.argb,INK.remainingHead);
- assert.equal(ws.getCell('L10').fill.fgColor.argb,INK.remaining);
- assert.equal(ws.getCell('L10').value,750);assert.equal(ws.getCell('L10').font.color.argb,INK.owed);
- assert.equal(ws.getRow(10).hidden,true,'a lobbyist\'s donors still collapse under the lobbyist');assert.equal(ws.getRow(10).outlineLevel,1);
+ // Live totals: Everyone adds up the lobbyist rows, a lobbyist sums its donors,
+ // Remaining takes Given and Committed off the Ask.
+ assert.deepEqual(['H4','I4','J4','L4'].map(a=>ws.getCell(a).value.formula),['H5','I5','J5','L5']);
+ assert.equal(ws.getCell('H5').value.formula,'SUM(H6:H6)');assert.equal(ws.getCell('J5').value.formula,'SUM(J6:J6)');
+ assert.equal(ws.getCell('L5').value.formula,'MAX(0,H5-I5-J5)');assert.equal(res(ws.getCell('L5').value),750);
+ assert.equal(ws.getCell('L6').value.formula,'IF(N(H6)>0,MAX(0,H6-N(I6)-N(J6)),"")');assert.equal(res(ws.getCell('L6').value),750);
+ // The change on last cycle: Given + Committed − last cycle, on every row.
+ assert.equal(ws.getCell('K6').value.formula,'N(I6)+N(J6)-N(N6)');assert.equal(res(ws.getCell('K6').value),-250);
+ assert.equal(ws.getCell('K5').value.formula,'N(I5)+N(J5)-N(N5)');assert.equal(ws.getCell('K4').value.formula,'N(I4)+N(J4)-N(N4)');
+ assert.equal(ws.getCell('K6').numFmt,'+"$"#,##0;-"$"#,##0;');
+ assert.ok([null,''].includes(ws.getCell('J6').value),'Committed is left for the team to fill in');
+ // Remaining stands apart: its own header colour and a tinted column; red and green are conditional.
+ assert.equal(ws.getCell('L3').fill.fgColor.argb,INK.remainingHead);
+ assert.equal(ws.getCell('J3').fill.fgColor.argb,INK.head,'Committed keeps the ordinary header');
+ assert.equal(ws.getCell('L6').fill.fgColor.argb,INK.remaining);
+ const colours=sheet=>sheet.conditionalFormattings.find(f=>f.ref.startsWith('L')).rules;
+ const deltaColours=ws.conditionalFormattings.find(f=>f.ref.startsWith('K')).rules;
+ assert.ok(deltaColours.some(r=>r.operator==='lessThan'&&r.style.font.color.argb===INK.owed),'behind last cycle is red');
+ assert.ok(deltaColours.some(r=>r.operator==='greaterThan'&&r.style.font.color.argb===INK.met),'ahead is green');
+ assert.ok(colours(ws).some(r=>r.operator==='greaterThan'&&r.style.font.color.argb===INK.owed));
+ assert.ok(colours(ws).some(r=>r.operator==='equal'&&r.style.font.color.argb===INK.met));
+ // One grey for every lobbyist row; donors grouped under it but open.
+ assert.equal(ws.getCell('B5').fill.fgColor.argb,INK.lobbyist);assert.equal(INK.lobbyist,'FFEFEFEF');
+ assert.equal(ws.getCell('C5').value,'Tier 1');assert.equal(ws.getCell('D6').value,'Test organization');
+ assert.equal(ws.getRow(6).hidden,false);assert.equal(ws.getRow(6).outlineLevel,1);
  const reread=new BrowserExcelJS.Workbook();await reread.xlsx.load(await wb.xlsx.writeBuffer());const saved=reread.getWorksheet('Call list');
- assert.equal(saved.getImages().length,0);assert.equal(saved.getRow(10).hidden,true);assert.equal(saved.getCell('L8').value,750);
- assert.equal(saved.getCell('L10').font.color.argb,INK.owed);
- // An ask already met reads as a green $0, not a blank.
+ assert.equal(saved.getImages().length,0);assert.equal(saved.getRow(6).outlineLevel,1);
+ assert.equal(saved.getCell('L4').value.formula,'L5');assert.equal(res(saved.getCell('L4').value),750);
+ assert.equal(saved.getCell('L6').value.formula,'IF(N(H6)>0,MAX(0,H6-N(I6)-N(J6)),"")');
+ assert.equal(saved.getCell('K6').value.formula,'N(I6)+N(J6)-N(N6)');
+ assert.ok(colours(saved).some(r=>r.operator==='greaterThan'&&r.style.font.color.argb===INK.owed),'colours survive a save');
+ // An ask already met reads $0 (green by the conditional format), not a blank.
  const met={...g,rows:[{...g.rows[0],given:1200,remaining:0}],given:1200,remaining:0};
- const metSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[met],2026);
- assert.equal(metSheet.getCell('L10').value,0);assert.equal(metSheet.getCell('L10').font.color.argb,INK.met);
- // Donors with no lobbyist are listed as they are, not collapsed into a line
- // that makes the sheet look empty.
+ const metBook=new BrowserExcelJS.Workbook();const metSheet=await c.writeCallList(metBook,[met],2026);
+ // ExcelJS keeps no cached result of 0, so Excel is told to calculate on open.
+ const zeroOrUncached=v=>!('result' in v)||v.result===0;
+ assert.equal(metSheet.getCell('L6').value.formula,'IF(N(H6)>0,MAX(0,H6-N(I6)-N(J6)),"")');assert.ok(zeroOrUncached(metSheet.getCell('L6').value));
+ assert.equal(metSheet.getCell('L5').value.formula,'MAX(0,H5-I5-J5)');assert.ok(zeroOrUncached(metSheet.getCell('L5').value));
+ assert.equal(metBook.calcProperties.fullCalcOnLoad,true);
+ // Donors with no lobbyist are listed as they are.
  const none={...g,lobbyist:null,tier:{label:'',why:'',tier:4}};
  const noneSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[none],2026);
- assert.equal(noneSheet.getRow(9).getCell(2).value,'(nobody on file — assign these at /admin/lobbyists)');
- assert.equal(noneSheet.getRow(10).hidden,false);assert.equal(noneSheet.getRow(10).getCell(3).value,'Test organization');
+ assert.equal(noneSheet.getRow(5).getCell(2).value,'(nobody on file — assign these at /admin/lobbyists)');
+ assert.equal(noneSheet.getRow(6).hidden,false);assert.equal(noneSheet.getRow(6).getCell(4).value,'Test organization');
+ assert.equal(noneSheet.getCell('L5').value.formula,'SUM(L6:L6)','no target of its own: the rows\' Remaining, added up');
  const firm={kind:'firm',name:'Example Firm',firm_primary_id:1,firm_member_ids:[1]};
  const firmBook=new BrowserExcelJS.Workbook();
  const firmSheet=await c.writeCallList(firmBook,[{...g,lobbyist:firm}],2026);
- assert.equal(firmSheet.getCell('B9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
+ assert.equal(firmSheet.getCell('B5').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
  assert.equal(firmSheet.getImages().length,0);
  const savedFirm=new BrowserExcelJS.Workbook();await savedFirm.xlsx.load(await firmBook.xlsx.writeBuffer());
- assert.equal(savedFirm.getWorksheet('Call list').getCell('B9').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
+ assert.equal(savedFirm.getWorksheet('Call list').getCell('B5').value.richText.map(r=>r.text).join(''),person.name+'\nExample Firm');
  const flat=c.writeTable(firmBook,'Lobbyists',[{Tier:'Tier 1','Lobbyist / Firm':firm.name}],{note:'fixture'});
  c.writeFirmName(flat,firm,4,2);
  assert.equal(flat.getCell('B4').value.richText[0].text,person.name);
