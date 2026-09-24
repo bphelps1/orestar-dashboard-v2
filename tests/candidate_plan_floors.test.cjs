@@ -148,3 +148,15 @@ test('with a search, the people section filters too, and no match anywhere says 
  get('plan-search').value='nobody';
  c.renderLobbyistPlan();assert.match(get('plan-tbody').innerHTML,/No donors match/);
 });
+
+test("another state's candidate committee is never a donor, however it is spaced",()=>{
+ const {c}=harness();
+ assert.equal(c.isDonorExcluded('Friends of Reggie Harris'),true);
+ assert.equal(c.isDonorExcluded('  FRIENDS OF  REGGIE HARRIS '),true);
+ // Real Oregon PACs that a name pattern would have caught stay in.
+ assert.equal(c.isDonorExcluded('Friends of Naturopathic Medicine'),false);
+ assert.equal(c.isDonorExcluded('Clean Energy for Oregon PAC'),false);
+ const profile={top_donors_by_year:{2024:[gift(1000,'Friends of Reggie Harris','d87b3ec55d6b4'),gift(1000)]}};
+ const {targets}=c.buildRepeatDonorTargets(profile,[],[],['2025','2026'],2026,null);
+ assert.deepEqual(Array.from(targets,t=>t.donor),['Acme PAC']);
+});

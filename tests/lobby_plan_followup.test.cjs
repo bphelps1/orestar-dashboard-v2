@@ -129,6 +129,7 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
   ['n1',new Map([['Fahey',{2026:500}],['Wagner',{2024:2000}]])],      // Pat's client, not in the plan
   ['n2',new Map([['Fahey',{2024:9000}]])],                            // strongest link is Quinn, who has no group
   ['n4',new Map()],                                                     // Pat's, but gave the comparables nothing
+  ['n5',new Map([['Fahey',{2024:700}]])],                              // Pat's, but another state's candidate committee
  ]);
  const links=[
   {donor_id:'a',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
@@ -136,10 +137,11 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
   {donor_id:'n2',lobbyist_id:1,status:'confirmed',is_primary:false,score:5},
   {donor_id:'n2',lobbyist_id:2,status:'confirmed',is_primary:true,score:1},
   {donor_id:'n4',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
+  {donor_id:'n5',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
  ];
  c.__links=links;
  vm.runInContext(`LOB.fetchIn=async(table,select,col,values)=>table==='donors'
-   ?values.map(id=>({donor_id:id,display_name:{n1:'N One Industries'}[id]||id}))
+   ?values.map(id=>({donor_id:id,display_name:{n1:'N One Industries',n5:'Friends of Reggie Harris'}[id]||id}))
    :__links.filter(l=>values.includes(l[col]));`,c);
  const groups=c.planGroups();
  const found=await c.loadNonTargetClients(groups,2026);
@@ -159,6 +161,15 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
  assert.equal(lead[col(prior,'Fahey')],1000,'Acme');assert.equal(lead[col(prior,'Wagner')],2000,'the whole book');
  assert.equal(lead[col(thisCycle,'Fahey')],500);
  assert.equal(lead[kinds.indexOf('Ask')],2000,'asks are the plan\'s alone');
+ // Ticked, the same clients are listed one by one, and the lobbyist's totals do not move.
+ const listed=c.planSheetAoa(groups,2026,{listNonTargets:true});
+ const listedRow=listed.rows.find(r=>r[2]==='N One Industries');
+ assert.ok(listedRow,'the client has its own row');assert.equal(listedRow[3],'Non-target');
+ assert.equal(listed.roles[listed.rows.indexOf(listedRow)],'nontarget');
+ assert.ok(!listed.rows.some(r=>r[2]==='Non-target donors'),'no summary row when listed');
+ assert.equal(listedRow[col(prior,'Wagner')],2000);
+ const listedLead=listed.rows.find(r=>r[1]==='Pat');
+ assert.deepEqual(Array.from(listedLead),Array.from(lead),'same lobbyist row either way');
  const sheet=c.nonTargetSheetRows(groups,2026);
  assert.equal(sheet.length,1);
  assert.equal(sheet[0].Lobbyist,'Pat');assert.equal(sheet[0]['Non-target donor'],'N One Industries');
