@@ -47,6 +47,7 @@ MIGRATIONS = [
     "031_explore_complete_name_search.sql",
     "033_explore_sub_type_index.sql",
     "034_explore_sub_types.sql",
+    "035_explore_default_order_index.sql",
     # Last on purpose: it patches the functions 027 and 029 define, so it has
     # to run after them on every apply.
     "032_merge_refresh_safe_deletes.sql",
@@ -59,6 +60,7 @@ CONCURRENT_INDEXES = {
     "028_donor_identity_label_indexes.sql": ("idx_aliases_identity_label", "idx_donors_identity_label"),
     "030_explore_source_name_indexes.sql": ("idx_txn_source_filer_trgm", "idx_txn_source_payee_trgm"),
     "033_explore_sub_type_index.sql": ("idx_txn_sub_type_date",),
+    "035_explore_default_order_index.sql": ("idx_txn_date_desc",),
 }
 
 

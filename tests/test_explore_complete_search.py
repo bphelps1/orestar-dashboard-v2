@@ -27,7 +27,8 @@ def db():
         q.execute("""create function donor_group_ids(id text) returns text[] language sql as $$
           select case when id in ('a','b') then array['a','b'] else array[id] end $$""")
         for name in ['030_explore_source_name_indexes.sql','031_explore_complete_name_search.sql',
-                     '033_explore_sub_type_index.sql','034_explore_sub_types.sql']:
+                     '033_explore_sub_type_index.sql','034_explore_sub_types.sql',
+                     '035_explore_default_order_index.sql']:
             sql = (ROOT/'supabase/migrations'/name).read_text().replace('public.',schema+'.').replace('search_path = public','search_path = '+schema)
             q.execute(sql)
         q.execute("""insert into transactions(tran_id,filer_id,filer,filer_canonical,contributor_payee,
