@@ -23,19 +23,21 @@ test('history weights count complete eligible cycles, not primary or current cyc
  p._askDonorsByYear[2028]=[gift(10)];assert.equal(c.limitedHistoryWeight(p,2030),null);
  assert.equal(c.limitedHistoryWeight({...p,_recommendationOffice:'governor'},2026),null);
 });
-test('limited-history repeat targets move toward peer giving in either direction and preserve actual history',()=>{
+test('limited-history repeat targets move toward peer giving, never below last cycle, and preserve actual history',()=>{
  const c=harness(),comps=[filer('Peer')],profiles=[{top_donors_by_year:{2024:[gift(10000)]}}];
  function calculate(amount,entry){const p={top_donors_by_year:{2024:[gift(amount)]},...(entry?{_entryBaseline:{year:2024,primaryDate:'2024-05-21'},_askDonorsByYear:{2024:[gift(amount)]}}:{})};return c.buildRepeatDonorTargets(p,comps,profiles,[],2026,null).targets[0];}
  const zero=calculate(1000,true);assert.equal(zero.target,7750);assert.equal(zero.comparable_weight,0.75);assert.equal(zero.last_cycle_amt,1000);
  const one=calculate(1000,false);assert.equal(one.target,6500);assert.equal(one.comparable_weight,0.60);
- const high=calculate(20000,true);assert.equal(high.target,10000);assert.equal(high.last_cycle_amt,20000);
+ // The peer median ($10,000) would ask less than the $20,000 given last cycle; the floor wins.
+ const high=calculate(20000,true);assert.equal(high.target,21000);assert.equal(high.evidence_target,10000);assert.equal(high.last_cycle_amt,20000);
+ assert.match(high.factors.join(' '),/More than last cycle: \$20,000 eligible giving in 2023–2024/);
 });
 test('two completed cycles retain history-led weighting; absence of a peer does not invent an ask',()=>{
  const c=harness(),p={top_donors_by_year:{2022:[gift(1000)],2024:[gift(1000)]}};
  const row=c.buildRepeatDonorTargets(p,[filer('Peer')],[{top_donors_by_year:{2024:[gift(10000)]}}],[],2026,null).targets[0];
  assert.equal(row.history_cycles,2);assert.equal(row.comparable_weight,0.10);assert.equal(row.target,2000);
  const limited={top_donors_by_year:{2024:[gift(1000)],2026:[gift(100)]}};
- const own=c.buildRepeatDonorTargets(limited,[],[],[],2026,null).targets[0];assert.equal(own.target,1000);assert.equal(own.comparable_weight,0);
+ const own=c.buildRepeatDonorTargets(limited,[],[],[],2026,null).targets[0];assert.equal(own.target,1250);assert.equal(own.comparable_weight,0);
 });
 test('limited-history reference uses the median of latest funded prior cycles, excluding lifetime and current peaks',()=>{
  const c=harness(),p={top_donors_by_year:{2024:[gift(1000)]},_entryBaseline:{year:2024}};
@@ -52,7 +54,7 @@ test('limited-history reference uses the median of latest funded prior cycles, e
 test('no recent peer evidence does not substitute current-cycle giving or erase own eligible history',()=>{
  const c=harness(),p={top_donors_by_year:{2024:[gift(1000)]}};
  const row=c.buildRepeatDonorTargets(p,[filer('Peer')],[{top_donors_by_year:{2020:[gift(100000)],2026:[gift(100000)]}}],[],2026,null).targets[0];
- assert.equal(row.target,1000);assert.equal(row.peer_benchmark,0);assert.equal(row.comparable_weight,0);
+ assert.equal(row.target,1250);assert.equal(row.peer_benchmark,0);assert.equal(row.comparable_weight,0);
 });
 test('Excel donor asks match the reduced calculation and preserve actual contribution history',()=>{
  const c=harness();c.document.getElementById=()=>({value:'',checked:true});

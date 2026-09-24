@@ -19,7 +19,9 @@ test('dated baseline loading preserves full historical totals and removes entry-
  c.DL={getDonors:async p=>{assert.equal(p.start,'2024-05-22');assert.equal(p.end,'2024-12-31');return {by_year:{2024:[gift(1000)]}};}};
  await c.loadIncumbentBaselines([profile],[filer],2026);
  assert.equal(profile.top_donors_by_year[2024][0].total,15000);assert.equal(c.askDonorsByYear(profile)[2023],undefined);assert.equal(c.askDonorsByYear(profile)[2024][0].total,1000);
- const target=c.buildRepeatDonorTargets(profile,[],[],[],2026,null).targets[0];assert.equal(target.last_cycle_amt,25000);assert.equal(target.baseline_cycle_amt,1000);assert.equal(target.target,1000);assert.equal(target.remaining,500);
+ const target=c.buildRepeatDonorTargets(profile,[],[],[],2026,null).targets[0];assert.equal(target.last_cycle_amt,25000);assert.equal(target.baseline_cycle_amt,1000);assert.equal(target.target,1250);assert.equal(target.remaining,750);
+ // The floor is set from eligible giving: the $24,000 raised through the entry primary does not raise it.
+ assert.equal(target.last_cycle_eligible,1000);assert.equal(target.ask_floor,1250);
  assert.match(target.factors.join(' '),/2024-05-21/);
  await c.loadIncumbentBaselines([profile],[filer],2024);assert.equal(profile._entryBaseline,undefined);assert.equal(c.askDonorsByYear(profile)[2024][0].total,15000);
 });
