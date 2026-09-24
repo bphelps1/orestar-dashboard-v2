@@ -117,6 +117,59 @@ test('lobbyist exports wait for attribution, and say so when it failed',async()=
  c.confirm=()=>true;c.exportData('xlsx','lobbyist');await null;
  assert.ok(built,'exported after confirming');
 });
+test('the Google Sheets button asks Google inside the click, then uploads the same workbook as a Sheet',async()=>{
+ const {c,get}=harness();let requested=0,granted=true,sent=null,built=null;
+ c.window.google={accounts:{oauth2:{
+  initTokenClient:cfg=>({requestAccessToken(){requested++;cfg.callback({access_token:'tok',expires_in:3600});}}),
+  hasGrantedAllScopes:()=>granted}}};
+ // Fakes that record what was appended, so the test runs without a DOM.
+ c.FormData=class{constructor(){this.parts=[];}append(k,v){this.parts.push([k,v]);}};
+ c.Blob=class{constructor(parts,opts){this.parts=parts;this.type=opts&&opts.type;}};
+ // The consent window opens before anything is awaited: browsers block popups after a wait.
+ c.exportData=(...args)=>{built=args;};
+ c.saveLobbyistPlanToDrive();
+ assert.equal(requested,1,'token requested synchronously');
+ assert.equal(built[0],'xlsx');assert.equal(built[1],'lobbyist');assert.equal(await built[3],'tok');
+ // Remembered for the hour: a second save does not reopen Google's window.
+ assert.equal(await c.requestDriveToken(),'tok');assert.equal(requested,1);
+ c.fetch=async(url,opts)=>{sent={url,opts};return {ok:true,status:200,json:async()=>({id:'abc',name:'Plan <1>',webViewLink:'https://docs.google.com/spreadsheets/d/abc/edit'})};};
+ const file={kind:'xlsx'};
+ const link=await c.saveWorkbookToDrive(file,'Plan <1>',Promise.resolve('tok'));
+ assert.equal(link,'https://docs.google.com/spreadsheets/d/abc/edit');
+ assert.match(sent.url,/^https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files\?uploadType=multipart/);
+ assert.equal(sent.opts.method,'POST');assert.equal(sent.opts.headers.Authorization,'Bearer tok');
+ const [meta,body]=sent.opts.body.parts;
+ assert.equal(meta[0],'metadata');assert.equal(meta[1].type,'application/json');
+ assert.deepEqual(JSON.parse(meta[1].parts[0]),{name:'Plan <1>',mimeType:'application/vnd.google-apps.spreadsheet'});
+ assert.equal(body[0],'file');assert.equal(body[1],file);
+ assert.match(get('export-status').innerHTML,/href="https:\/\/docs\.google\.com\/spreadsheets\/d\/abc\/edit"/);
+ assert.match(get('export-status').innerHTML,/Plan &lt;1&gt;/);
+ // An expired token is forgotten, so the next click asks again.
+ c.fetch=async()=>({ok:false,status:401,json:async()=>({error:{message:'Invalid Credentials'}})});
+ await assert.rejects(c.saveWorkbookToDrive(file,'Plan',Promise.resolve('tok')),/401: Invalid Credentials/);
+ await c.requestDriveToken();assert.equal(requested,2);
+ // Unticking the Drive box on Google's screen is a refusal, not a token.
+ vm.runInContext('driveToken=null',c);granted=false;
+ await assert.rejects(c.requestDriveToken(),/not allowed/);
+});
+test('a Drive save carries its token through the attribution wait to the workbook, under a readable name',async()=>{
+ const {c}=harness();let opts=null;
+ c.XLSX={utils:{book_new:()=>({})}};
+ c.exportLobbyistWorkbook=async(groups,cycle,filename,o)=>{opts={filename,...o};};
+ vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Pat',kind:'person'}]]);`,c);
+ c.window._cycle=2026;c.window._recommendations=[];c.window._targetProfile={name:'Friends of Test',slug:'friends_of_test'};
+ c.window._repeatTargets=[{donor:'Acme',donor_key:'a',target:2000,current_cycle_amt:0,remaining:2000,cycles:{2024:1500},last_cycle_amt:1500,comp_max:0,comp_max_filers:[],comp_gifts:[],factors:[],history:[]}];
+ let finish;c.window._lobbyAttr=null;c.window._lobbyPlanLoad=new Promise(r=>{finish=r;});
+ const token=Promise.resolve('tok');
+ c.exportData('xlsx','lobbyist',false,token);assert.equal(opts,null);
+ vm.runInContext(`window._lobbyAttr=new Map([['a',[{lobbyist:lobbyistsById.get(1),status:'confirmed',is_primary:true,methods:[],client_names:[]}]]]);`,c);
+ finish();await c.window._lobbyPlanLoad;await null;await null;
+ assert.ok(opts,'built once attribution arrived');
+ assert.equal(opts.drive.token,token);assert.equal(opts.filename,'lobbyist_plan_friends_of_test_2026.xlsx');
+ assert.match(opts.drive.title,/^Friends of Test — Lobbyist Plan 2025–2026 \(\w{3} \d{1,2}, \d{4}\)$/);
+ // The Excel button is unchanged: no drive option, so the file downloads.
+ opts=null;c.exportData('xlsx','lobbyist');await null;assert.equal(opts.drive,null);
+});
 test("a lobbyist's comparable columns count their whole book, with non-target clients in one row and on their own sheet",async()=>{
  const {c}=harness();
  vm.runInContext(`lobbyistsById=new Map([[1,{lobbyist_id:1,name:'Pat',kind:'person'}],[2,{lobbyist_id:2,name:'Quinn',kind:'person'}]]);

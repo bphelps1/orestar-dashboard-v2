@@ -2151,15 +2151,19 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
 
   // Wire up export (re-clone to avoid duplicate listeners)
   for (const id of ["export-csv", "export-xlsx", "export-repeat-csv", "export-repeat-xlsx", "export-full-csv", "export-full-xlsx",
-                    "export-lobbyist-csv", "export-lobbyist-xlsx", "export-lobbyist-xlsx-2"]) {
+                    "export-lobbyist-csv", "export-lobbyist-xlsx", "export-lobbyist-xlsx-2",
+                    "export-lobbyist-drive", "export-lobbyist-drive-2"]) {
     const btn = document.getElementById(id);
     if (!btn) continue;
     const clone = btn.cloneNode(true);
     btn.parentNode.replaceChild(clone, btn);
     const fmt = id.includes("csv") ? "csv" : "xlsx";
     const scope = id.includes("lobbyist") ? "lobbyist" : id.includes("repeat") ? "repeat" : id.includes("full") ? "full" : "new";
-    clone.addEventListener("click", () => exportData(fmt, scope));
+    clone.addEventListener("click", id.includes("drive") ? saveLobbyistPlanToDrive : () => exportData(fmt, scope));
   }
+  // Loaded now so the click can open Google's window straight away: a popup
+  // opened after a network wait is one the browser may block.
+  loadGoogleIdentity().catch(err => console.warn("Google sign-in unavailable:", err));
 }
 
 /** "Similar-margin seats" card: what peers of this seat raised, and where
@@ -3979,7 +3983,7 @@ async function addPortrait(wb, ws, person, rowNumber, columnNumber, imageCache) 
   });
 }
 
-async function exportLobbyistWorkbook(groups, cycle, filename) {
+async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null } = {}) {
   const ExcelJSLib = await loadExcelJs();
   const wb = new ExcelJSLib.Workbook();
   wb.creator = "Oregon Campaign Finance";
@@ -4037,9 +4041,101 @@ async function exportLobbyistWorkbook(groups, cycle, filename) {
              { widths: { Item: 26, Value: 34, Detail: 110 } });
 
   const buf = await wb.xlsx.writeBuffer();
-  downloadFile(new Blob([buf], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  }), filename);
+  const file = new Blob([buf], { type: XLSX_MIME });
+  if (drive) return saveWorkbookToDrive(file, drive.title, drive.token);
+  downloadFile(file, filename);
+}
+
+// ── Save to Google Drive ───────────────────────────────────────────────────
+// The same workbook, uploaded and converted to a Google Sheet, formulas and
+// all. The browser gets its own token from Google (Google Identity Services)
+// for the drive.file scope, which reaches only the files this page creates,
+// nothing else in the user's Drive. Nothing passes through our servers. The
+// client ID is public by design; its Cloud project allows only this site's
+// origin.
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const GOOGLE_CLIENT_ID = "1037090200082-p4bh9n0g41ept44lhipvbqere98c13th.apps.googleusercontent.com";
+const GOOGLE_IDENTITY_SRC = "https://accounts.google.com/gsi/client";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink";
+let driveToken = null;          // { value, expires } — Google's tokens last an hour
+let googleIdentityLoad = null;
+
+function loadGoogleIdentity() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve(window.google);
+  googleIdentityLoad ||= new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = GOOGLE_IDENTITY_SRC;
+    el.async = true;
+    el.onload = () => resolve(window.google);
+    el.onerror = () => { googleIdentityLoad = null; reject(new Error("could not reach Google sign-in")); };
+    document.head.appendChild(el);
+  });
+  return googleIdentityLoad;
+}
+
+/** A Drive access token, from memory while it lasts, otherwise from Google's
+ *  consent window. Call it from the click itself: that window is a popup. */
+function requestDriveToken() {
+  if (driveToken && driveToken.expires > Date.now() + 60_000) return Promise.resolve(driveToken.value);
+  const ask = google => new Promise((resolve, reject) => {
+    google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: DRIVE_SCOPE,
+      callback: resp => {
+        if (resp.error) return reject(new Error(resp.error_description || resp.error));
+        // Google lets the user untick the Drive box and still press Continue.
+        if (!google.accounts.oauth2.hasGrantedAllScopes(resp, DRIVE_SCOPE)) {
+          return reject(new Error("Google Drive access was not allowed"));
+        }
+        driveToken = { value: resp.access_token, expires: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
+        resolve(driveToken.value);
+      },
+      error_callback: err => reject(new Error(
+        err?.type === "popup_closed" ? "the Google window was closed"
+          : err?.type === "popup_failed_to_open" ? "the browser blocked Google's window; allow popups for this site"
+          : err?.message || "Google sign-in failed")),
+    }).requestAccessToken();
+  });
+  return window.google?.accounts?.oauth2 ? ask(window.google) : loadGoogleIdentity().then(ask);
+}
+
+function exportStatus(html) {
+  const el = document.getElementById("export-status");
+  if (el) el.innerHTML = html;
+}
+
+/** Upload an .xlsx to the top of the user's Drive as a Google Sheet. Each save
+ *  is a new file; the date in its name tells them apart. */
+async function saveWorkbookToDrive(file, title, tokenPromise) {
+  exportStatus("Waiting for Google to allow access to your Drive…");
+  const token = await tokenPromise;
+  exportStatus("Saving to Google Drive…");
+  const body = new FormData();
+  body.append("metadata", new Blob([JSON.stringify({
+    name: title,
+    mimeType: "application/vnd.google-apps.spreadsheet",   // convert on upload
+  })], { type: "application/json" }));
+  body.append("file", file);
+  const resp = await fetch(DRIVE_UPLOAD, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body });
+  if (!resp.ok) {
+    if (resp.status === 401) driveToken = null;       // expired or revoked: ask again next time
+    let detail = "";
+    try { detail = (await resp.json())?.error?.message || ""; } catch { /* not JSON */ }
+    throw new Error(`Google Drive refused the upload (${resp.status}${detail ? `: ${detail}` : ""})`);
+  }
+  const saved = await resp.json();
+  const link = saved.webViewLink || `https://docs.google.com/spreadsheets/d/${encodeURIComponent(saved.id)}/edit`;
+  exportStatus(`Saved to your Google Drive: <a href="${esc(link)}" target="_blank" rel="noopener">open “${esc(saved.name || title)}” in Google Sheets</a>.`);
+  return link;
+}
+
+/** The Google Sheets button. Asks Google for access first, while the click
+ *  still counts as a click, then builds the workbook the Excel button builds. */
+function saveLobbyistPlanToDrive() {
+  const token = requestDriveToken();
+  token.catch(() => {});   // reported by saveWorkbookToDrive, if the export gets that far
+  exportData("xlsx", "lobbyist", false, token);
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
@@ -5113,14 +5209,14 @@ async function exportChamberList(format, scope) {
   }
 }
 
-function exportData(format, scope = "new", waited = false) {
+function exportData(format, scope = "new", waited = false, toDrive = null) {
   // Lobbyists load a few seconds after the plan does. An export before then
   // filed every donor under "nobody on file" in one collapsed group: a call
   // list that opened looking empty. Wait for them, once.
   if (scope === "lobbyist" && !window._lobbyAttr && window._lobbyPlanLoad && !waited) {
     const status = document.getElementById("plan-status");
     if (status) status.textContent = "Waiting for lobbyist attribution before exporting…";
-    window._lobbyPlanLoad.then(() => exportData(format, scope, true));
+    window._lobbyPlanLoad.then(() => exportData(format, scope, true, toDrive));
     return;
   }
   if (scope === "lobbyist" && window._lobbyAttrError
@@ -5225,10 +5321,20 @@ function exportData(format, scope = "new", waited = false) {
       // tier shading, currency. Asynchronous because the formatter loads on
       // demand; failures fall back to telling the user rather than a silent
       // empty download.
-      exportLobbyistWorkbook(planGroups(), cycle, `${fileLabel}_${target.slug}_${cycle}.xlsx`)
+      const drive = toDrive && {
+        token: toDrive,
+        title: `${target.name} — Lobbyist Plan ${cycleName(cycle)} (${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+      };
+      if (drive) exportStatus("Building the workbook for Google Drive…");
+      exportLobbyistWorkbook(planGroups(), cycle, `${fileLabel}_${target.slug}_${cycle}.xlsx`, { drive })
         .catch(err => {
           console.error(err);
-          alert(`Could not build the Excel file: ${err.message}. The CSV button still works.`);
+          if (drive) {
+            exportStatus(`Could not save to Google Drive: ${esc(err.message)}.`);
+            alert(`Could not save to Google Drive: ${err.message}. The Excel button still works.`);
+          } else {
+            alert(`Could not build the Excel file: ${err.message}. The CSV button still works.`);
+          }
         });
       return;
     } else {
