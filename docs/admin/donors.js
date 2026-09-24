@@ -844,37 +844,96 @@ async function emRecord(decision) {
   }
 }
 
+// The unfiltered log is the newest decisions; a filter is answered by the
+// database across every decision ever recorded. Filtering only the rows already
+// fetched made anything older than the newest 200 impossible to find or undo:
+// the Amazon Web Services merge was decision 601 of 710 three days after it
+// was saved, and could not be reached from this tab at all.
+const EM_LOG_RECENT = 200;
+const EM_LOG_MATCHES = 500;
+const EM_LOG_COLUMNS = ["label_a", "label_b", "alias_a", "alias_b"];
+
+/** A search term safe inside a PostgREST or() filter. Quoting keeps commas,
+ * periods and parentheses ("Amazon.com, Inc.") from being read as syntax. */
+function emOrTerm(term) {
+  return `"*${String(term).replace(/[\\"]/g, c => "\\" + c)}*"`;
+}
+
+/** The query behind the log: newest first, and bounded either way. */
+function emLogQuery(sb, filter) {
+  const q = String(filter || "").trim();
+  const query = sb.from("donor_merge_overrides").select("*", { count: "exact" })
+    .order("decided_at", { ascending: false });
+  if (!q) return query.limit(EM_LOG_RECENT);
+  return query.or(EM_LOG_COLUMNS.map(c => `${c}.ilike.${emOrTerm(q)}`).join(","))
+    .limit(EM_LOG_MATCHES);
+}
+
+/** What the log says about how much of it is on screen. */
+function emLogNote(filter, shown, total) {
+  const q = String(filter || "").trim();
+  if (q) {
+    return total > shown
+      ? `Showing ${shown} of ${total} matching decisions — narrow the filter to see the rest.`
+      : `${total} matching decision${total === 1 ? "" : "s"}.`;
+  }
+  return total > shown
+    ? `Showing the ${shown} most recent of ${total} decisions. Filter to reach older ones.`
+    : "";
+}
+
 async function emLoadList(filter = "") {
   const el = document.getElementById("em-list");
   if (!el) return;
   try {
     const sb = await getSupabase();
-    const { data, error } = await sb.from("donor_merge_overrides")
-      .select("*").order("decided_at", { ascending: false }).limit(200);
+    const { data, error, count } = await emLogQuery(sb, filter);
     if (error) throw new Error(error.message);
-    const q = filter.toLowerCase();
-    const rows = (data || []).filter(r =>
-      !q || `${r.label_a} ${r.label_b} ${r.alias_a} ${r.alias_b}`.toLowerCase().includes(q));
-    if (!rows.length) { el.innerHTML = '<p class="empty-msg">No entity decisions recorded yet.</p>'; return; }
-    el.innerHTML = rows.map(r => `
+    const rows = data || [];
+    const q = String(filter || "").trim();
+    if (!rows.length) {
+      el.innerHTML = `<p class="empty-msg">${q
+        ? `No decision matches \u201c${esc(q)}\u201d.` : "No entity decisions recorded yet."}</p>`;
+      return;
+    }
+    const note = emLogNote(q, rows.length, count ?? rows.length);
+    el.innerHTML = (note ? `<p class="em-log-note">${esc(note)}</p>` : "") + rows.map(r => `
       <div class="em-row">
         <div>
           <span class="em-badge em-${esc(r.decision)}">${esc(r.decision)}</span>
           <strong>${esc(r.label_a || r.alias_a)}</strong>
-          ${r.decision === "merged" ? "＋" : "✕"}
+          ${r.decision === "merged" ? "\uff0b" : "\u2715"}
           <strong>${esc(r.label_b || r.alias_b)}</strong>
-          <div class="em-r-meta">${esc(r.alias_a)} ↔ ${esc(r.alias_b)}</div>
+          <div class="em-r-meta">${esc(r.alias_a)} \u2194 ${esc(r.alias_b)}</div>
         </div>
         <button class="btn-link em-undo" data-key="${esc(r.merge_key)}">Undo</button>
       </div>`).join("");
-    el.querySelectorAll(".em-undo").forEach(btn => btn.addEventListener("click", async () => {
-      const sb2 = await getSupabase();
-      await sb2.from("donor_merge_overrides").delete().eq("merge_key", btn.dataset.key);
-      emLoadList(document.getElementById("em-filter").value.trim());
-    }));
+    el.querySelectorAll(".em-undo").forEach(btn => btn.addEventListener("click", () => emUndo(btn)));
   } catch (e) {
     el.innerHTML = `<p class="empty-msg">Could not load: ${esc(e.message)}</p>`;
   }
+}
+
+/** Remove one decision — and say so when nothing was removed, rather than
+ * reloading a list that still shows it. */
+async function emUndo(btn) {
+  btn.disabled = true;
+  let message = null;
+  try {
+    const sb = await getSupabase();
+    const { data, error } = await sb.from("donor_merge_overrides").delete()
+      .eq("merge_key", btn.dataset.key).select("merge_key");
+    if (error) message = `Undo failed: ${error.message}`;
+    else if (!data?.length) message = "Undo failed: nothing was removed";
+  } catch (e) {
+    message = `Undo failed: ${e.message}`;
+  }
+  if (message) {
+    btn.disabled = false;
+    btn.textContent = message;
+    return;
+  }
+  await emLoadList(document.getElementById("em-filter").value.trim());
 }
 
 function initEntityMerge() {
