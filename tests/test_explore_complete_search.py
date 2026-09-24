@@ -26,7 +26,9 @@ def db():
         q.execute('create table transactions (like public.transactions including all)')
         q.execute("""create function donor_group_ids(id text) returns text[] language sql as $$
           select case when id in ('a','b') then array['a','b'] else array[id] end $$""")
-        for name in ['030_explore_source_name_indexes.sql','031_explore_complete_name_search.sql']:
+        for name in ['030_explore_source_name_indexes.sql','031_explore_complete_name_search.sql',
+                     '033_explore_sub_type_index.sql','034_explore_sub_types.sql',
+                     '035_explore_default_order_index.sql']:
             sql = (ROOT/'supabase/migrations'/name).read_text().replace('public.',schema+'.').replace('search_path = public','search_path = '+schema)
             q.execute(sql)
         q.execute("""insert into transactions(tran_id,filer_id,filer,filer_canonical,contributor_payee,
@@ -74,3 +76,24 @@ def test_actual_daniel_nguyen_rows_are_all_found(db):
         found.extend(r[0] for r in db.fetchall())
     assert len(found) == count
     assert len(set(found)) == count
+
+
+def test_explore_returns_and_filters_sub_types(db):
+    db.execute("""update transactions set sub_type = case tran_id when 1 then 'Cash Contribution'
+                  when 2 then 'In-Kind Contribution' else 'Cash Expenditure' end where tran_id in (1,2,3)""")
+    db.execute("select tran_id,tran_type,sub_type from explore_transactions(p_sub_type=>'In-Kind Contribution')")
+    assert db.fetchall() == [(2,'C','In-Kind Contribution')]
+    db.execute("select tran_id from explore_transactions(p_tran_type=>'C',p_sub_type=>'Cash Expenditure')")
+    assert db.fetchall() == []
+    db.execute("select tran_id from explore_transactions(p_sort=>'sub_type',p_asc=>true)")
+    assert db.fetchall() == [(1,),(3,),(2,)]
+
+
+def test_explore_matches_search_transactions_without_a_sub_type(db):
+    for args in ("p_filer=>'Daniel Nguyen'", "p_payee=>'Adopted PAC'",
+                 "p_donor_id=>'b',p_sort=>'tran_id',p_asc=>true",
+                 "p_tran_type=>'C',p_amt_min=>150", "p_limit=>1,p_offset=>1"):
+        db.execute(f"select tran_id,amount,filer_canonical,contributor_payee_canonical from search_transactions({args})")
+        expected = db.fetchall()
+        db.execute(f"select tran_id,amount,filer_canonical,contributor_payee_canonical from explore_transactions({args})")
+        assert db.fetchall() == expected, args
