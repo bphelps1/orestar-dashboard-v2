@@ -129,7 +129,7 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
   ['n1',new Map([['Fahey',{2026:500}],['Wagner',{2024:2000}]])],      // Pat's client, not in the plan
   ['n2',new Map([['Fahey',{2024:9000}]])],                            // strongest link is Quinn, who has no group
   ['n4',new Map()],                                                     // Pat's, but gave the comparables nothing
-  ['n5',new Map([['Fahey',{2024:700}]])],                              // Pat's, but another state's candidate committee
+  ['n5',new Map([['Fahey',{2024:700}]])],                              // Pat's, but an Oregon candidate committee
  ]);
  const links=[
   {donor_id:'a',lobbyist_id:1,status:'confirmed',is_primary:true,score:1},
@@ -141,8 +141,9 @@ test("a lobbyist's comparable columns count their whole book, with non-target cl
  ];
  c.__links=links;
  vm.runInContext(`LOB.fetchIn=async(table,select,col,values)=>table==='donors'
-   ?values.map(id=>({donor_id:id,display_name:{n1:'N One Industries',n5:'Friends of Reggie Harris'}[id]||id}))
+   ?values.map(id=>({donor_id:id,display_name:{n1:'N One Industries',n5:'Friends of Oregon Candidate'}[id]||id}))
    :__links.filter(l=>values.includes(l[col]));`,c);
+ vm.runInContext(`filerIndex=[{slug:'foc',name:'Friends of Oregon Candidate',committee_type:'Candidate Committee'}]`,c);
  const groups=c.planGroups();
  const found=await c.loadNonTargetClients(groups,2026);
  assert.deepEqual(Array.from(found,x=>x.donor_id),['n1']);
