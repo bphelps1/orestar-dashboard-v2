@@ -34,6 +34,21 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 
+def identity_fingerprint(cur) -> str:
+    """Which saved merges this build applies, as docs/lib/identity.js computes
+    it from the same view: the row count and the sum of each row's 32-bit
+    FNV-1a hash. The Donors tab shows the stored ranking while it matches."""
+    cur.execute("select donor_id, canonical_id from donor_identity_map")
+    rows = cur.fetchall()
+    total = 0
+    for donor_id, canonical_id in rows:
+        h = 0x811C9DC5
+        for ch in f"{donor_id}\t{canonical_id}":
+            h = ((h ^ ord(ch)) * 0x01000193) & 0xFFFFFFFF
+        total = (total + h) & 0xFFFFFFFF
+    return f"v1:{len(rows)}:{total:x}"
+
+
 def build_top_donors(cur) -> dict:
     """{all_time: [{name,total,donor_id}], by_year: {year: [...]}} by entity."""
     log.info("Rebuilding top_donors with normalized donor identities…")
@@ -213,8 +228,12 @@ def main() -> int:
         log.error("donors table is empty — run resolve_donors.py first")
         return 1
 
+    # Taken before the rows are staged: a merge saved in between is then in
+    # the ranking but not the fingerprint, which only costs a live query.
+    fingerprint = identity_fingerprint(cur)
     stage_donor_rows(cur)
     top = build_top_donors(cur)
+    top["identity_fingerprint"] = fingerprint
     _upsert(conn, cur, "top_donors", top)
     rebuild_filer_donors(cur)
 

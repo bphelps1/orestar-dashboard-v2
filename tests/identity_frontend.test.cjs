@@ -56,6 +56,46 @@ test('affected cached profiles and global rankings use freshly grouped data',asy
  assert.equal((await ctx.data.getBlob('top_donors')).all_time[0].total,600);
  assert.deepEqual(plain(calls.map(c=>c.params.p_filer_ids)),[['1'],null]);
 });
+test('the merge fingerprint matches the one the daily build records, in any row order',async()=>{
+ // The same three rows give v1:3:e82ff12a in scraper/refresh_donor_aggregates.py.
+ const rows=[{donor_id:'a',canonical_id:'a'},{donor_id:'b',canonical_id:'a'},{donor_id:'é9',canonical_id:'a'}];
+ assert.equal(await identityHarness({donor_identity_map:rows}).id.fingerprint(),'v1:3:e82ff12a');
+ assert.equal(await identityHarness({donor_identity_map:rows.slice().reverse()}).id.fingerprint(),'v1:3:e82ff12a');
+ assert.notEqual(await identityHarness({donor_identity_map:rows.slice(0,2)}).id.fingerprint(),'v1:3:e82ff12a','an undone merge changes it');
+});
+// The statewide ranking: the daily blob when it already has every saved merge.
+function rankingHarness({stored,fingerprint='v1:1:abc',rpc}){
+ const calls=[],warnings=[];
+ const ctx=vm.createContext({console:{warn:(...a)=>warnings.push(a.join(' '))},
+  ID:{hasMerges:async()=>true,fingerprint:async()=>fingerprint},
+  getSupabase:async()=>({from:table=>({select(){return this;},eq(){return this;},async single(){calls.push(table);return stored instanceof Error?{error:stored}:{data:{data:stored}};}}),
+   rpc:async(name,params)=>{calls.push(name);return rpc(params);}})});
+ vm.runInContext(read('docs/lib/data.js')+'\nthis.data=DL;',ctx);
+ return {data:ctx.data,calls,warnings};
+}
+const daily={identity_fingerprint:'v1:1:abc',all_time:[{name:'Daily',total:1}],by_year:{}};
+const live={all_time:[{name:'Live',total:2}],by_year:{}};
+test('the Donors tab uses the daily ranking while it has every saved merge, without the live query',async()=>{
+ const {data,calls}=rankingHarness({stored:daily,rpc:()=>{throw Error('unexpected live query');}});
+ assert.equal((await data.getBlob('top_donors')).all_time[0].name,'Daily');
+ assert.deepEqual(plain(calls),['dashboard_cache']);
+});
+test('a merge saved or undone since the daily build brings back the live ranking',async()=>{
+ const {data,calls}=rankingHarness({stored:daily,fingerprint:'v1:2:def',rpc:()=>({data:live})});
+ assert.equal((await data.getBlob('top_donors')).all_time[0].name,'Live');
+ assert.deepEqual(plain(calls),['dashboard_cache','donor_leaderboard']);
+ const unstamped=rankingHarness({stored:{all_time:daily.all_time,by_year:{}},rpc:()=>({data:live})});
+ assert.equal((await unstamped.data.getBlob('top_donors')).all_time[0].name,'Live','a blob from before fingerprints proves nothing');
+});
+test('when the live ranking times out, the daily one is shown instead of an error',async()=>{
+ const timeout=()=>({error:{message:'canceling statement due to statement timeout'}});
+ const {data,warnings}=rankingHarness({stored:daily,fingerprint:'v1:2:def',rpc:timeout});
+ assert.equal((await data.getBlob('top_donors')).all_time[0].name,'Daily');
+ assert.match(warnings[0],/Live donor ranking failed/);
+ // With neither, the error still reaches the tab.
+ const none=rankingHarness({stored:Object.assign(new Error('x'),{message:'no row'}),fingerprint:'v1:2:def',rpc:timeout});
+ await assert.rejects(none.data.getBlob('top_donors'),/statement timeout/);
+});
 test('an unaffected profile keeps its cache rather than re-querying donor history',async()=>{
  const old={name:'Other',filer_ids:['2'],top_donors:[]};
  const ctx=vm.createContext({ID:{affectsFilers:async()=>false},getSupabase:async()=>({from:()=>({select(){return this;},eq(){return this;},async single(){return {data:{detail:old}};}}),rpc:async()=>{throw Error('unexpected query');}})});

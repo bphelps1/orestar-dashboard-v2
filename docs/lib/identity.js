@@ -24,6 +24,20 @@ const ID = (() => {
     return mapping;
   }
   async function hasMerges() { return (await loadMap()).size > 0; }
+  // Which saved merges a stored ranking already includes. The daily build
+  // (scraper/refresh_donor_aggregates.py) records the same value in the
+  // top_donors blob as identity_fingerprint: the row count and the sum of
+  // each row's 32-bit FNV-1a hash, so the order rows arrive in is irrelevant.
+  async function fingerprint() {
+    const map = await loadMap();
+    let sum = 0;
+    for (const row of map.values()) {
+      let h = 0x811c9dc5;
+      for (const ch of `${row.donor_id}\t${row.canonical_id}`) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193);
+      sum = (sum + (h >>> 0)) >>> 0;
+    }
+    return `v1:${map.size}:${sum.toString(16)}`;
+  }
   async function affectsFilers(ids) {
     const scope = [...new Set(ids.filter(id => id != null && String(id).trim()).map(id => String(id).trim()))].sort();
     if (!scope.length || !await hasMerges()) return false;
@@ -105,5 +119,5 @@ const ID = (() => {
       [year, Array.isArray(items) ? mergeRows(items, map, names) : items]));
   }
 
-  return { loadMap, hasMerges, affectsFilers, members, rekeyBlob, rekeyDonorYears };
+  return { loadMap, hasMerges, fingerprint, affectsFilers, members, rekeyBlob, rekeyDonorYears };
 })();
