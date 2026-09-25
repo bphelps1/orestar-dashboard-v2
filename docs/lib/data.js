@@ -16,6 +16,7 @@
 
 const DL = (() => {
   const donorRequests = new Map();
+  const rankingRequests = new Map();
   const names = value => typeof DN === "undefined" ? value : DN.tree(value);
 
   /** Fetch a whole-dashboard aggregate blob by key from dashboard_cache. */
@@ -114,5 +115,37 @@ const DL = (() => {
     return donorRequests.get(key);
   }
 
-  return { getBlob, getFilerDetail, getFilerDonorYears, getDonors };
+  /** One cached call per RPC and arguments; a failure is forgotten, so it can be retried. */
+  function ranking(rpc, params) {
+    const key = JSON.stringify([rpc, params]);
+    if (!rankingRequests.has(key)) {
+      const request = (async () => {
+        if (typeof DN !== "undefined") await DN.load();
+        const sb = await getSupabase();
+        const { data, error } = await sb.rpc(rpc, params);
+        if (error) throw new Error(`Failed to load ${rpc.replace(/_/g, " ")}: ${error.message}`);
+        return names(data || []);
+      })().catch(error => {
+        rankingRequests.delete(key);
+        throw error;
+      });
+      rankingRequests.set(key, request);
+    }
+    return rankingRequests.get(key);
+  }
+
+  /** Committees ranked by cash received between inclusive dates (the blob only
+   *  has calendar years): [{filer_id, slug, name, total}]. */
+  function getRecipients({ start = null, end = null, limit = 100 } = {}) {
+    return ranking("recipient_leaderboard", { p_start: start || null, p_end: end || null, p_limit: limit });
+  }
+
+  /** What one committee's filer IDs paid each payee between inclusive dates. */
+  function getPayees({ filerIds, start = null, end = null, limit = 200 } = {}) {
+    const ids = [...new Set((filerIds || []).map(id => String(id ?? "").trim()).filter(Boolean))].sort();
+    if (!ids.length) return Promise.reject(new Error("A selected committee has no filer ID."));
+    return ranking("payee_leaderboard", { p_filer_ids: ids, p_start: start || null, p_end: end || null, p_limit: limit });
+  }
+
+  return { getBlob, getFilerDetail, getFilerDonorYears, getDonors, getRecipients, getPayees };
 })();
