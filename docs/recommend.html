@@ -12,6 +12,15 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+  <!-- The Google Sheets mark, drawn once and reused by the export buttons. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="icon-sheets" viewBox="0 0 24 32">
+      <path d="M15 0H3a3 3 0 0 0-3 3v26a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3V9z" fill="#0F9D58"/>
+      <path d="M15 0v6a3 3 0 0 0 3 3h6z" fill="#87CEAC"/>
+      <path d="M5 14h14v11H5z" fill="#fff"/>
+      <path d="M11 14h1.6v11H11zM5 17.4h14V19H5zM5 21.2h14v1.6H5z" fill="#0F9D58"/>
+    </symbol>
+  </svg>
 
 <header>
   <div class="header-inner">
@@ -91,8 +100,10 @@
         <span class="export-group-label">Export:</span>
         <button class="btn-small" id="export-full-csv">Full Plan CSV</button>
         <button class="btn-small" id="export-full-xlsx">Full Plan Excel</button>
-        <button class="btn-small" id="export-lobbyist-xlsx">Lobbyist Plan Excel</button>
-        <button class="btn-small" id="export-lobbyist-drive" title="Save the Lobbyist Plan workbook to your Google Drive as a Google Sheet">Lobbyist Plan → Google Sheets</button>
+        <button class="btn-small" id="export-lobbyist-xlsx" title="The call list, in Excel">Lobbyist Plan Excel</button>
+        <button class="btn-small btn-icon" id="export-lobbyist-drive" title="Save the call list to your Google Drive as a Google Sheet" aria-label="Save the Lobbyist Plan to Google Sheets"><svg class="icon-sheets" aria-hidden="true"><use href="#icon-sheets"/></svg></button>
+        <button class="btn-small btn-icon" id="update-lobbyist-drive" title="Refresh the ORESTAR numbers in the Google Sheet saved for this candidate, keeping what you've typed" aria-label="Update the Lobbyist Plan's Google Sheet">Update <svg class="icon-sheets" aria-hidden="true"><use href="#icon-sheets"/></svg></button>
+        <button class="btn-small" id="export-lobbyist-all-xlsx" title="Every tab: cover, call list, lobbyists, non-target donors, individuals, donors and method">Lobbyist Plan, all tabs</button>
       </div>
     </div>
     <p id="export-status" class="plan-status" role="status" aria-live="polite"></p>
@@ -119,8 +130,10 @@
           <a href="/admin/lobbyists">/admin/lobbyists</a>.</p>
         <div class="export-btns">
           <button class="btn-small" id="export-lobbyist-csv">CSV</button>
-          <button class="btn-small" id="export-lobbyist-xlsx-2">Excel</button>
-          <button class="btn-small" id="export-lobbyist-drive-2" title="Save this workbook to your Google Drive as a Google Sheet">Google Sheets</button>
+          <button class="btn-small" id="export-lobbyist-xlsx-2" title="The call list, in Excel">Excel</button>
+          <button class="btn-small btn-icon" id="export-lobbyist-drive-2" title="Save the call list to your Google Drive as a Google Sheet" aria-label="Save the Lobbyist Plan to Google Sheets"><svg class="icon-sheets" aria-hidden="true"><use href="#icon-sheets"/></svg></button>
+          <button class="btn-small btn-icon" id="update-lobbyist-drive-2" title="Refresh the ORESTAR numbers in the Google Sheet saved for this candidate, keeping what you've typed" aria-label="Update the Lobbyist Plan's Google Sheet">Update <svg class="icon-sheets" aria-hidden="true"><use href="#icon-sheets"/></svg></button>
+          <button class="btn-small" id="export-lobbyist-all-xlsx-2" title="Every tab: cover, call list, lobbyists, non-target donors, individuals, donors and method">All tabs</button>
         </div>
       </div>
       <div class="table-search-bar plan-controls">
@@ -129,7 +142,7 @@
           Include unreviewed matches</label>
         <label class="plan-toggle"><input type="checkbox" id="plan-show-unattributed" checked />
           Show donors with no lobbyist</label>
-        <label class="plan-toggle" title="Clients of these lobbyists who are not in this plan. Unticked, each lobbyist gets one Non-target donors row; either way they are listed on their own sheet.">
+        <label class="plan-toggle" title="Clients of these lobbyists who are not in this plan. Unticked, each lobbyist gets one Non-target donors row; the all-tabs export also lists them on a sheet of their own.">
           <input type="checkbox" id="plan-list-non-targets" />
           List non-target donors one by one in the Excel export</label>
       </div>

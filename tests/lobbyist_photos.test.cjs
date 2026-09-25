@@ -48,11 +48,17 @@ test('the candidate call list carries no portraits, colours Remaining, and lists
  const wb=new BrowserExcelJS.Workbook();const ws=await c.writeCallList(wb,[g],2026);
  const res=v=>v&&typeof v==='object'&&'result' in v?v.result:v;
  // The team's layout: headers from row 1, Everyone on row 4 and frozen with them;
- // B lobbyist, C tier, D donor; this cycle's Ask, Given, Committed, change on last cycle, Remaining in H to L.
- assert.deepEqual(['B1','C1','D1','E1','F1'].map(a=>ws.getCell(a).value),['Lobbyist or firm','Tier','Donor','Email','Phone']);
+ // B lobbyist, C donor, D tier; this cycle's Ask, Given, Committed, change on last cycle, Remaining in H to L.
+ assert.deepEqual(['B1','C1','D1','E1','F1'].map(a=>ws.getCell(a).value),['Lobbyist or firm','Donor','Tier','Email','Phone']);
  assert.deepEqual(['H3','I3','J3','K3','L3'].map(a=>ws.getCell(a).value),['Ask','Given','Committed','Δ vs 2023–2024','Remaining']);
  assert.equal(ws.getCell('N3').value,'This candidate','last cycle, where the change is measured from');
- assert.equal(ws.views[0].ySplit,4);assert.equal(ws.views[0].xSplit,1);
+ assert.equal(ws.views[0].ySplit,4);assert.equal(ws.views[0].xSplit,3,'frozen through the donor');
+ // The earlier cycles fold away as column groups; this cycle's own band does not.
+ const lastCol=ws.getRow(1).cellCount;
+ assert.equal(ws.getRow(1).getCell(lastCol).value,'Row key');assert.equal(ws.getColumn(lastCol).hidden,true);
+ assert.ok(['H','I','J','K','L','M'].every(L=>!ws.getColumn(L).outlineLevel),'this cycle stays open');
+ assert.equal(ws.getColumn('N').outlineLevel,1,'last cycle is a group');
+ assert.equal(ws.properties.outlineLevelCol,1);assert.equal(ws.properties.outlineProperties.summaryRight,false);
  assert.equal(ws.getCell('B4').value,'Everyone');
  assert.deepEqual(['H4','I4','L4'].map(a=>res(ws.getCell(a).value)),[1000,250,750]);
  assert.equal(ws.getImages().length,0,'no portraits on the call list');
@@ -79,10 +85,12 @@ test('the candidate call list carries no portraits, colours Remaining, and lists
  assert.ok(colours(ws).some(r=>r.operator==='equal'&&r.style.font.color.argb===INK.met));
  // One grey for every lobbyist row; donors grouped under it but open.
  assert.equal(ws.getCell('B5').fill.fgColor.argb,INK.lobbyist);assert.equal(INK.lobbyist,'FFEFEFEF');
- assert.equal(ws.getCell('C5').value,'Tier 1');assert.equal(ws.getCell('D6').value,'Test organization');
+ assert.equal(ws.getCell('D5').value,'Tier 1');assert.equal(ws.getCell('C6').value,'Test organization');
+ assert.equal(ws.getRow(6).getCell(lastCol).value,'donor:a','the row key Update matches on');
  assert.equal(ws.getRow(6).hidden,false);assert.equal(ws.getRow(6).outlineLevel,1);
  const reread=new BrowserExcelJS.Workbook();await reread.xlsx.load(await wb.xlsx.writeBuffer());const saved=reread.getWorksheet('Call list');
  assert.equal(saved.getImages().length,0);assert.equal(saved.getRow(6).outlineLevel,1);
+ assert.equal(saved.getColumn('N').outlineLevel,1,'column groups survive a save');assert.equal(saved.views[0].xSplit,3);
  assert.equal(saved.getCell('L4').value.formula,'L5');assert.equal(res(saved.getCell('L4').value),750);
  assert.equal(saved.getCell('L6').value.formula,'IF(N(H6)>0,MAX(0,H6-N(I6)-N(J6)),"")');
  assert.equal(saved.getCell('K6').value.formula,'N(I6)+N(J6)-N(N6)');
@@ -99,7 +107,7 @@ test('the candidate call list carries no portraits, colours Remaining, and lists
  const none={...g,lobbyist:null,tier:{label:'',why:'',tier:4}};
  const noneSheet=await c.writeCallList(new BrowserExcelJS.Workbook(),[none],2026);
  assert.equal(noneSheet.getRow(5).getCell(2).value,'(nobody on file — assign these at /admin/lobbyists)');
- assert.equal(noneSheet.getRow(6).hidden,false);assert.equal(noneSheet.getRow(6).getCell(4).value,'Test organization');
+ assert.equal(noneSheet.getRow(6).hidden,false);assert.equal(noneSheet.getRow(6).getCell(3).value,'Test organization');
  assert.equal(noneSheet.getCell('L5').value.formula,'SUM(L6:L6)','no target of its own: the rows\' Remaining, added up');
  const firm={kind:'firm',name:'Example Firm',firm_primary_id:1,firm_member_ids:[1]};
  const firmBook=new BrowserExcelJS.Workbook();

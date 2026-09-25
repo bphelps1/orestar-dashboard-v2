@@ -2152,14 +2152,18 @@ function displayResults(recommendations, repeatTargets, targetProfile, comparabl
   // Wire up export (re-clone to avoid duplicate listeners)
   for (const id of ["export-csv", "export-xlsx", "export-repeat-csv", "export-repeat-xlsx", "export-full-csv", "export-full-xlsx",
                     "export-lobbyist-csv", "export-lobbyist-xlsx", "export-lobbyist-xlsx-2",
-                    "export-lobbyist-drive", "export-lobbyist-drive-2"]) {
+                    "export-lobbyist-drive", "export-lobbyist-drive-2", "update-lobbyist-drive", "update-lobbyist-drive-2",
+                    "export-lobbyist-all-xlsx", "export-lobbyist-all-xlsx-2"]) {
     const btn = document.getElementById(id);
     if (!btn) continue;
     const clone = btn.cloneNode(true);
     btn.parentNode.replaceChild(clone, btn);
     const fmt = id.includes("csv") ? "csv" : "xlsx";
     const scope = id.includes("lobbyist") ? "lobbyist" : id.includes("repeat") ? "repeat" : id.includes("full") ? "full" : "new";
-    clone.addEventListener("click", id.includes("drive") ? saveLobbyistPlanToDrive : () => exportData(fmt, scope));
+    clone.addEventListener("click", id.startsWith("update") ? updateLobbyistSheet
+      : id.includes("drive") ? saveLobbyistPlanToDrive
+      : id.includes("-all-") ? () => exportData(fmt, scope, { full: true })
+      : () => exportData(fmt, scope));
   }
   // Loaded now so the click can open Google's window straight away: a popup
   // opened after a network wait is one the browser may block.
@@ -2950,6 +2954,15 @@ function givenInCycle(key, filerName, cy, row) {
 // one by one on their own sheet.
 const NON_TARGET = "Non-target donors";
 
+// The call list's who-to-call columns, in the team's order: the lobbyist
+// again (hidden, for filtering), the lobbyist or firm, the donor, the tier
+// (a donor's status on their rows), then contact details. Frozen through the
+// donor. The last column is a hidden key per row, so Update can find each
+// row in a saved Google Sheet after rows and columns have been moved.
+const PLAN_FIXED = ["Lobbyist", "Lobbyist or firm", "Donor", "Tier", "Email", "Phone"];
+const PLAN_COL = { label: 0, lobbyist: 1, donor: 2, tier: 3, email: 4, phone: 5 };
+const ROW_KEY = "Row key";
+
 /**
  * Attaches g.nonTarget = { clients, byCell } to each lobbyist group, where
  * byCell maps "comparable|cycle" to dollars. A client is filed under the
@@ -3213,14 +3226,14 @@ function planExportRows(g) {
  * what these same donors gave this candidate and the handful of comparable
  * candidates they gave most to — the evidence for the ask, sitting next to it.
  */
-function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
+function planSheetAoa(groups, cycle, { listNonTargets = false, individualsSheet = false } = {}) {
   const self = window._targetProfile?.name || "This committee";
   const { cycles, comps } = planCycleColumns(groups, cycle);
 
   // The layout the fundraising team settled on (their "Bowman 2026 Lobby
   // List"): who to call on the left, then a spacer, this cycle, and the
   // evidence for the ask. Headers start on row 1; the cover explains the rest.
-  const fixed = ["Lobbyist", "Lobbyist or firm", "Tier", "Donor", "Email", "Phone"];
+  const fixed = PLAN_FIXED, P = PLAN_COL;
   const bands = [];
   let width = fixed.length + 1;                       // +1 spacer
   // Committed is typed in by hand: a pledge ORESTAR has not recorded yet.
@@ -3247,6 +3260,7 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     bands.push({ cycle: c, start: width, cols });
     width += cols.length;
   }
+  const keyAt = width++;
   const blank = () => new Array(width).fill("");
   const label = f => (f === PLAN_SELF ? self : f);
   const remainingAt = bands[0].start + bands[0].cols.findIndex(c => c.kind === REMAINING);
@@ -3261,12 +3275,14 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     b.cols.forEach((c, i) => { rName[b.start + i] = label(c.filer); rKind[b.start + i] = c.kind; });
   }
   fixed.slice(1).forEach((h, i) => { rCycle[i + 1] = h; });
+  rCycle[keyAt] = ROW_KEY;
   push(rCycle, "head-band");
   push(rName, "head-name");
   push(rKind, "head-kind");
 
   const totalsRow = blank();
-  totalsRow[1] = "Everyone";
+  totalsRow[P.lobbyist] = "Everyone";
+  totalsRow[keyAt] = "total";
   const totals = new Array(width).fill(0);
   const body = [], bodyRoles = [];
 
@@ -3274,19 +3290,22 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     const l = g.lobbyist;
     const name = l ? l.name : "(nobody on file — assign these at /admin/lobbyists)";
     const contact = planContact(l);
+    const lid = l ? l.lobbyist_id : "none";
     const lead = blank();
-    lead[1] = name;
-    lead[2] = l ? g.tier.label : "";
-    lead[4] = contact.email; lead[5] = contact.phone;
+    lead[P.lobbyist] = name;
+    lead[P.tier] = l ? g.tier.label : "";
+    lead[P.email] = contact.email; lead[P.phone] = contact.phone;
+    lead[keyAt] = `lobbyist:${lid}`;
     body.push(lead); bodyRoles.push("lobbyist");
     const groupSums = new Array(width).fill(0);
     for (const r of planExportRows(g)) {
       const row = blank();
-      row[0] = name;
-      row[2] = r.type === "Donor Target" ? "Gave before" : r.type === "New Prospect" ? "New prospect" : r.type;
-      row[3] = r.donor;
+      row[P.label] = name;
+      row[P.tier] = r.type === "Donor Target" ? "Gave before" : r.type === "New Prospect" ? "New prospect" : r.type;
+      row[P.donor] = r.donor;
       const dc = donorContact(r);
-      row[4] = dc.email; row[5] = dc.phone;
+      row[P.email] = dc.email; row[P.phone] = dc.phone;
+      row[keyAt] = r.donor_key ? `donor:${r.donor_key}` : `balance:${lid}`;
       for (const b of bands) {
         b.cols.forEach((c, i) => {
           if (c.kind === COMMITTED) return;           // for the team to fill in
@@ -3314,11 +3333,11 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
       // One summary row, or (the plan's "List non-target donors" box) each
       // client on its own row. The lobbyist's totals are the same either way.
       const entries = listNonTargets
-        ? g.nonTarget.clients.map(cl => ({ donor: cl.name, type: "Non-target", byCell: cl.byCell }))
-        : [{ donor: NON_TARGET, type: "Not asked here", byCell: g.nonTarget.byCell }];
+        ? g.nonTarget.clients.map(cl => ({ donor: cl.name, type: "Non-target", byCell: cl.byCell, key: `nontarget:${lid}:${cl.key}` }))
+        : [{ donor: NON_TARGET, type: "Not asked here", byCell: g.nonTarget.byCell, key: `nontarget:${lid}` }];
       for (const e of entries) {
         const row = blank();
-        row[0] = name; row[2] = e.type; row[3] = e.donor;
+        row[P.label] = name; row[P.tier] = e.type; row[P.donor] = e.donor; row[keyAt] = e.key;
         for (const b of bands) b.cols.forEach((c, i) => {
           if (c.filer === PLAN_SELF) return;            // what they gave the comparables, nothing else
           const v = e.byCell.get(`${c.filer}|${b.cycle}`) || 0;
@@ -3341,16 +3360,18 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
   }
 
   // The cash the call list leaves off by rule, so Everyone's Given is all of it.
-  const other = otherCycleContributions(cycle);
+  const other = otherCycleContributions(cycle, { individualsSheet });
   if (other.length) {
     const lead = blank();
-    lead[1] = "Other contributions this cycle (not on the call list)";
+    lead[P.lobbyist] = "Other contributions this cycle (not on the call list)";
+    lead[keyAt] = "other";
     body.push(lead); bodyRoles.push("subtotal");
     const lastAt = bands.find(b => b.cycle === cycle - 2 && !b.compsOnly)?.start;
     const deltaAt = bands[0].start + bands[0].cols.findIndex(c => c.kind === deltaKind(cycle));
     for (const o of other) {
       const row = blank();
-      row[0] = lead[1]; row[2] = "Not on the call list"; row[3] = o.label;
+      row[P.label] = lead[P.lobbyist]; row[P.tier] = "Not on the call list"; row[P.donor] = o.label;
+      row[keyAt] = `other:${o.id}`;
       const cells = [[givenAt, o.given], [lastAt, o.last], [deltaAt, o.given - o.last]];
       for (const [at, v] of cells) {
         if (at == null || !v) continue;
@@ -3370,8 +3391,11 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
     s: { r: 0, c: b.start }, e: { r: 0, c: b.start + b.cols.length - 1 },
   }));
   const cols = new Array(width).fill(null).map((_, i) =>
-    ({ wch: i === 0 ? 24 : i === 1 ? 30 : i === 2 ? 14.7 : i === 3 ? 38 : i === 4 ? 26 : 13 }));
-  return { rows, roles, merges, cols, moneyFrom: fixed.length, headerRows: 3 };
+    ({ wch: i === P.label ? 24 : i === P.lobbyist ? 30 : i === P.donor ? 38 : i === P.tier ? 14.7 : i === P.email ? 26 : 13 }));
+  // Every band but the candidate's own this cycle folds away: the comparables
+  // this cycle, then each earlier cycle, each its own group.
+  const outline = bands.filter(b => !b.current).map(b => [b.start, b.start + b.cols.length - 1]);
+  return { rows, roles, merges, cols, outline, keyAt, moneyFrom: fixed.length, headerRows: 3 };
 }
 
 /**
@@ -3380,7 +3404,7 @@ function planSheetAoa(groups, cycle, { listNonTargets = false } = {}) {
  * small-gift line — so the call list's Everyone Given adds up to all the cash
  * the committee has raised. In-kind stays out, as it does everywhere here.
  */
-function otherCycleContributions(cycle) {
+function otherCycleContributions(cycle, { individualsSheet = false } = {}) {
   const byYear = window._targetProfile?.top_donors_by_year;
   if (!byYear) return [];
   const planRows = planDonorRows();
@@ -3395,9 +3419,10 @@ function otherCycleContributions(cycle) {
       (isDonorExcluded(d.name) ? pooled : committees)[key] += d.total || 0;
     }
   }
-  return [["Individuals (see the Individuals sheet)", people], ["Oregon candidate committees", committees],
-          ["Small gifts of $100 and under", pooled]]
-    .filter(([, v]) => v.given > 0 || v.last > 0).map(([label, v]) => ({ label, ...v }));
+  return [["individuals", individualsSheet ? "Individuals (see the Individuals sheet)" : "Individuals", people],
+          ["committees", "Oregon candidate committees", committees],
+          ["small", "Small gifts of $100 and under", pooled]]
+    .filter(([, , v]) => v.given > 0 || v.last > 0).map(([id, label, v]) => ({ id, label, ...v }));
 }
 
 // The same evidence the review page shows, in words a first-time reader can
@@ -3741,17 +3766,23 @@ function liveCallListFormulas(ws, rows, roles, headerRows, moneyFrom, groups) {
 }
 
 async function writeCallList(wb, groups, cycle, options = {}) {
-  const { rows, roles, headerRows, cols, moneyFrom, merges } = planSheetAoa(groups, cycle, options);
-  const ws = wb.addWorksheet("Call list", {
-    // The headers and the Everyone row stay in view.
-    views: [{ state: "frozen", xSplit: 1, ySplit: headerRows + 1 }],
-    properties: { defaultRowHeight: 16, outlineLevelRow: 1, outlineProperties: { summaryBelow: false } },
+  const { rows, roles, headerRows, cols, moneyFrom, merges, outline, keyAt } = planSheetAoa(groups, cycle, options);
+  const ws = wb.addWorksheet(PLAN_SHEET, {
+    // The headers and the Everyone row stay in view, and so does everything
+    // up to the donor's name while the money columns scroll.
+    views: [{ state: "frozen", xSplit: PLAN_COL.donor + 1, ySplit: headerRows + 1 }],
+    properties: { defaultRowHeight: 16, outlineLevelRow: 1, outlineLevelCol: 1,
+                  // Each group's button sits on its own side: above the donors,
+                  // and on the spacer column left of each band.
+                  outlineProperties: { summaryBelow: false, summaryRight: false } },
   });
   rows.forEach(r => ws.addRow(r));
   cols.forEach((col, i) => { ws.getColumn(i+1).width = col?.wch || 12; });
   for (const m of merges) ws.mergeCells(m.s.r + 1, m.s.c + 1, m.e.r + 1, m.e.c + 1);
-  // Excel columns for the planSheetAoa layout: B lobbyist, C tier, D donor.
-  const LOBBYIST_COL = 2, DONOR_COL = 4;
+  // The comparables this cycle and each earlier cycle fold away, open to start.
+  for (const [from, to] of outline) for (let c = from; c <= to; c++) ws.getColumn(c + 1).outlineLevel = 1;
+  // Excel columns for the planSheetAoa layout: B lobbyist, C donor, D tier.
+  const LOBBYIST_COL = PLAN_COL.lobbyist + 1, DONOR_COL = PLAN_COL.donor + 1;
   const remainingCol = rows[headerRows - 1].indexOf(REMAINING) + 1;
 
   rows.forEach((_, i) => {
@@ -3819,9 +3850,10 @@ async function writeCallList(wb, groups, cycle, options = {}) {
   // for reading; it would otherwise be the first thing the eye lands on.
   ws.getColumn(1).hidden = true;
   ws.getColumn(1).width = 24;
+  ws.getColumn(keyAt + 1).hidden = true;          // for Update, not for reading
   const headers = roles.flatMap((role,i) => role === "lobbyist" ? [i+1] : []);
   for (let i = 0; i < headers.length; i++) {
-    if (groups[i]?.lobbyist) writeFirmName(ws, groups[i].lobbyist, headers[i], 2);
+    if (groups[i]?.lobbyist) writeFirmName(ws, groups[i].lobbyist, headers[i], LOBBYIST_COL);
   }
   return ws;
 }
@@ -3943,7 +3975,7 @@ function writeCover(wb, groups, cycle, { listNonTargets = false } = {}) {
   para("Lobbyists are listed best-prospect first: Tier 1 through Tier 4. The tier reflects how many donors they carry here and how much those donors give to candidates like this one — the reason is spelled out in the “Why them” column.");
   para(`Under each lobbyist are the donors they handle. “Ask” is what to ask for this cycle; “Given” is what has already come in; “Committed” is for pledges ORESTAR has not recorded yet: type them in; “Δ vs” last cycle is Given plus Committed less what the same donor gave this candidate last cycle (green ahead, red behind); “Remaining” is what is still to come after Given and Committed, never below $0 — for a lobbyist, their target less what their donors have given and committed. Next come what those same donors have given the comparable candidates this cycle, then what they gave this candidate and the comparables in the two cycles before — that is the case for the ask. A lobbyist's comparable columns count their whole book: ${listNonTargets ? "clients not in this plan are listed one by one under them, marked “Non-target”, with no ask." : "clients not in this plan are summed in a “Non-target donors” row under them."}`);
   para("The call list is organizations, PACs and businesses only, using ORESTAR's own category for each contributor. Donors with no lobbyist on file are at the bottom of it. People who have given to this candidate are on the Individuals sheet instead.");
-  para("The totals are live: type a pledge into Committed, a gift ORESTAR has not recorded yet into Given, or a new Ask, and that donor's Remaining, the lobbyist's row, Everyone, the Lobbyists sheet and “Still to ask” all follow. Opened in Google Sheets, the formulas carry over. The last block, “Other contributions this cycle”, holds the cash the call list leaves off by rule (people, Oregon candidate committees, gifts of $100 and under), so Everyone's Given is all the cash raised this cycle.");
+  para("The totals are live: type a pledge or a gift ORESTAR has not recorded yet into Committed, or a new Ask, and that donor's Remaining, the lobbyist's row, Everyone, the Lobbyists sheet and “Still to ask” all follow. Opened in Google Sheets, the formulas carry over, and the dashboard's Update button refreshes Given and the other ORESTAR figures without touching what you have typed. The last block, “Other contributions this cycle”, holds the cash the call list leaves off by rule (people, Oregon candidate committees, gifts of $100 and under), so Everyone's Given is all the cash raised this cycle.");
   para("Anyone who gave last cycle is asked for more than that. The fundraising target is never less than last cycle's contributions plus 5%, leaving out giving in exceptionally high-spend primary contests; anything the asks do not cover is shown as still to find.");
 
   ws.getColumn(1).width = 34;
@@ -3983,7 +4015,12 @@ async function addPortrait(wb, ws, person, rowNumber, columnNumber, imageCache) 
   });
 }
 
-async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null } = {}) {
+/**
+ * The lobbyist plan as a workbook. By default just the call list, the tab the
+ * team works from; `full` adds the cover, the Lobbyists, Non-target donors,
+ * Individuals and Donors tables and the method sheet.
+ */
+async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null, full = false } = {}) {
   const ExcelJSLib = await loadExcelJs();
   const wb = new ExcelJSLib.Workbook();
   wb.creator = "Oregon Campaign Finance";
@@ -3996,10 +4033,21 @@ async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null } 
   }
   // Decided per export, with the box beside the Excel button.
   const listNonTargets = document.getElementById("plan-list-non-targets")?.checked === true;
-  writeCover(wb, groups, cycle, { listNonTargets });
-  const callList = await writeCallList(wb, groups, cycle, { listNonTargets });
-  linkCoverToCallList(wb.getWorksheet("Start here"), callList.planLinks);
+  const people = full ? individualSheetRows(cycle) : [];
+  if (full) writeCover(wb, groups, cycle, { listNonTargets });
+  const callList = await writeCallList(wb, groups, cycle, { listNonTargets, individualsSheet: people.length > 0 });
+  if (full) {
+    linkCoverToCallList(wb.getWorksheet("Start here"), callList.planLinks);
+    writeSupportingSheets(wb, groups, cycle, callList, people);
+  }
+  const buf = await wb.xlsx.writeBuffer();
+  const file = new Blob([buf], { type: XLSX_MIME });
+  if (drive) return saveWorkbookToDrive(file, drive.title, drive.token, drive.appProperties);
+  downloadFile(file, filename);
+}
 
+/** The all-tabs workbook's tables after the call list. */
+function writeSupportingSheets(wb, groups, cycle, callList, people) {
   const lobRows = lobbyistSheetRows(groups, cycle);
   if (lobRows.length) {
     const lobbyistSheet = writeTable(wb, "Lobbyists", lobRows, {
@@ -4021,7 +4069,6 @@ async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null } 
       note: "Clients filed under a lobbyist in this plan who are not in the plan themselves. Their giving to the comparison candidates is each lobbyist's “Non-target donors” row on the call list.",
     });
   }
-  const people = individualSheetRows(cycle);
   if (people.length) {
     writeTable(wb, "Individuals", people, {
       money: ["Ask", `Given ${cycle - 1}–${cycle}`, "Remaining", `Given ${cycle - 3}–${cycle - 2}`],
@@ -4039,11 +4086,6 @@ async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null } 
   }
   writeTable(wb, "How these numbers were set", methodSheetRows(groups, cycle),
              { widths: { Item: 26, Value: 34, Detail: 110 } });
-
-  const buf = await wb.xlsx.writeBuffer();
-  const file = new Blob([buf], { type: XLSX_MIME });
-  if (drive) return saveWorkbookToDrive(file, drive.title, drive.token);
-  downloadFile(file, filename);
 }
 
 // ── Save to Google Drive ───────────────────────────────────────────────────
@@ -4051,8 +4093,9 @@ async function exportLobbyistWorkbook(groups, cycle, filename, { drive = null } 
 // all. The browser gets its own token from Google (Google Identity Services)
 // for the drive.file scope, which reaches only the files this page creates,
 // nothing else in the user's Drive. Nothing passes through our servers. The
-// client ID is public by design; its Cloud project allows only this site's
-// origin.
+// client ID is public by design; its Cloud project allows only the
+// dashboard's own addresses (orestar-dashboard.vercel.app and
+// www.bradleyphelps.com), so Vercel preview links cannot use it.
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const GOOGLE_CLIENT_ID = "1037090200082-p4bh9n0g41ept44lhipvbqere98c13th.apps.googleusercontent.com";
 const GOOGLE_IDENTITY_SRC = "https://accounts.google.com/gsi/client";
@@ -4107,7 +4150,7 @@ function exportStatus(html) {
 
 /** Upload an .xlsx to the top of the user's Drive as a Google Sheet. Each save
  *  is a new file; the date in its name tells them apart. */
-async function saveWorkbookToDrive(file, title, tokenPromise) {
+async function saveWorkbookToDrive(file, title, tokenPromise, appProperties = null) {
   exportStatus("Waiting for Google to allow access to your Drive…");
   const token = await tokenPromise;
   exportStatus("Saving to Google Drive…");
@@ -4115,6 +4158,7 @@ async function saveWorkbookToDrive(file, title, tokenPromise) {
   body.append("metadata", new Blob([JSON.stringify({
     name: title,
     mimeType: "application/vnd.google-apps.spreadsheet",   // convert on upload
+    ...(appProperties ? { appProperties } : {}),           // how Update finds it again
   })], { type: "application/json" }));
   body.append("file", file);
   const resp = await fetch(DRIVE_UPLOAD, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body });
@@ -4126,7 +4170,7 @@ async function saveWorkbookToDrive(file, title, tokenPromise) {
   }
   const saved = await resp.json();
   const link = saved.webViewLink || `https://docs.google.com/spreadsheets/d/${encodeURIComponent(saved.id)}/edit`;
-  exportStatus(`Saved to your Google Drive: <a href="${esc(link)}" target="_blank" rel="noopener">open “${esc(saved.name || title)}” in Google Sheets</a>.`);
+  exportStatus(`Saved to your Google Drive: <a href="${esc(link)}" target="_blank" rel="noopener">open “${esc(saved.name || title)}” in Google Sheets</a>. Update refreshes its ORESTAR numbers later.`);
   return link;
 }
 
@@ -4135,7 +4179,363 @@ async function saveWorkbookToDrive(file, title, tokenPromise) {
 function saveLobbyistPlanToDrive() {
   const token = requestDriveToken();
   token.catch(() => {});   // reported by saveWorkbookToDrive, if the export gets that far
-  exportData("xlsx", "lobbyist", false, token);
+  exportData("xlsx", "lobbyist", { drive: token });
+}
+
+// ── Update a saved Google Sheet ────────────────────────────────────────────
+// Refreshes the ORESTAR figures in a call list saved with the Sheets button,
+// in place, leaving what the team has typed alone. Rows are found by the
+// hidden Row key (by lobbyist and donor name in sheets saved before it
+// existed); columns by their three header rows, so moved and added columns
+// are fine. It writes:
+//   • Given, the comparables' giving and the earlier cycles, on donor rows
+//     (a cell holding a formula of the team's is left as it is)
+//   • a row for each donor who has given since, under their lobbyist, with
+//     the row's formulas, and the lobbyist's sums widened to take it in
+//   • a note on Committed wherever Given has gone up while a pledge is typed
+//     in: the pledge may have arrived, and would be counted twice
+// It never writes Ask, Committed, the formula columns, contacts or notes.
+// Needs the Google Sheets API enabled in the client's Cloud project.
+const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets";
+const DRIVE_FILES = "https://www.googleapis.com/drive/v3/files";
+const PLAN_SHEET = "Call list";
+const UPDATE_FILL = { red: 1, green: 0.95, blue: 0.7 };      // the pale yellow of a highlighter
+
+/** The Drive appProperties a saved plan carries, so Update finds it again. */
+function planSheetTags(target, cycle) {
+  return { orestarPlan: "lobbyist", orestarFiler: String(target.slug || target.name).slice(0, 100),
+           orestarCycle: String(cycle) };
+}
+
+async function googleApi(url, token, { method = "GET", body } = {}) {
+  const resp = await fetch(url, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!resp.ok) {
+    if (resp.status === 401) driveToken = null;       // expired or revoked: ask again next time
+    let detail = "";
+    try { detail = (await resp.json())?.error?.message || ""; } catch { /* not JSON */ }
+    throw new Error(`Google refused the request (${resp.status}${detail ? `: ${detail}` : ""})`);
+  }
+  return resp.status === 204 ? null : resp.json();
+}
+
+/** A Drive query string literal. */
+const driveQuoted = v => `'${String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+
+/** The most recently changed sheet saved for this candidate and cycle. Sheets
+ *  saved before they were tagged are found by the name the button gave them,
+ *  then tagged, so renaming them afterwards is fine. */
+async function findPlanSheet(token, target, cycle) {
+  const tags = planSheetTags(target, cycle);
+  const params = o => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+  const list = async query => (await googleApi(`${DRIVE_FILES}?${params({
+    q: `${query} and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+    orderBy: "modifiedTime desc", pageSize: 10, fields: "files(id,name,webViewLink)",
+  })}`, token)).files || [];
+  const tagged = await list(`appProperties has { key='orestarFiler' and value=${driveQuoted(tags.orestarFiler)} }`
+    + ` and appProperties has { key='orestarCycle' and value=${driveQuoted(tags.orestarCycle)} }`);
+  if (tagged.length) return tagged[0];
+  const named = (await list(`name contains ${driveQuoted(`${target.name} — Lobbyist Plan`)}`))
+    .filter(f => f.name.includes(cycleName(cycle)));
+  if (!named.length) return null;
+  await googleApi(`${DRIVE_FILES}/${encodeURIComponent(named[0].id)}`, token, { method: "PATCH", body: { appProperties: tags } });
+  return named[0];
+}
+
+/** The call list tab: its id, its values and, separately, its formulas. */
+async function readPlanSheet(token, fileId) {
+  const meta = await googleApi(`${SHEETS_API}/${encodeURIComponent(fileId)}?fields=sheets(properties(sheetId,title))`, token);
+  const tab = (meta.sheets || []).find(t => t.properties.title === PLAN_SHEET) || meta.sheets?.[0];
+  if (!tab) throw new Error("the sheet has no tabs");
+  const title = tab.properties.title;
+  const range = encodeURIComponent(`'${title.replace(/'/g, "''")}'`);
+  const [values, formulas] = await Promise.all(["UNFORMATTED_VALUE", "FORMULA"].map(o =>
+    googleApi(`${SHEETS_API}/${encodeURIComponent(fileId)}/values/${range}?valueRenderOption=${o}`, token)
+      .then(r => r.values || [])));
+  return { sheetId: tab.properties.sheetId, title, values, formulas };
+}
+
+/**
+ * Where everything is, from the three header rows: the who-to-call columns by
+ * their title, and each money column as "band|committee|kind" — the band's
+ * title is written once, across its merged cells.
+ */
+function callListColumns(head) {
+  const fixed = {}, money = new Map();
+  const width = Math.max(0, ...head.map(r => r.length));
+  let band = "";
+  for (let c = 0; c < width; c++) {
+    const [title, name, kind] = [0, 1, 2].map(i => String(head[i]?.[c] ?? "").trim());
+    if (kind) {
+      if (title) band = title;
+      money.set(`${band}|${name}|${kind}`, c);
+    } else {
+      band = "";
+      if (title) fixed[title] = c;
+    }
+  }
+  fixed[PLAN_FIXED[0]] ??= PLAN_COL.label;         // the hidden repeat has no title of its own
+  return { fixed, money };
+}
+
+// Donor names match without a parenthetical ("Individuals (see the
+// Individuals sheet)" is "Individuals"); lobbyist labels match as written.
+const matchLabel = v => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const matchName = v => matchLabel(String(v ?? "").replace(/\([^)]*\)/g, " "));
+const sheetNumber = v => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const isKindOwned = kind => !["Ask", COMMITTED, REMAINING].includes(kind) && !kind.startsWith("Δ vs ");
+
+/**
+ * What Update will change, worked out from the sheet as read and the plan as
+ * it stands. Pure, so it can be tested; every row and column in the result is
+ * 0-based and already allows for the rows it inserts.
+ */
+function planCallListUpdate(sheet, fresh, { cycle, today }) {
+  const { values, formulas } = sheet;
+  const HEAD = 3;
+  const sc = callListColumns(values.slice(0, HEAD));
+  const fc = callListColumns(fresh.rows.slice(0, HEAD));
+  const col = name => sc.fixed[name];
+  const donorCol = col("Donor"), labelCol = col("Lobbyist"), keyCol = col(ROW_KEY);
+  if (donorCol == null || ![...sc.money.keys()].some(k => k.endsWith("|Given"))) {
+    throw new Error(`“${sheet.title}” does not look like a call list: its Donor and Given headers are missing`);
+  }
+  const selfName = window._targetProfile?.name || "This committee";
+  const thisBand = `This cycle (${cycleName(cycle)})`;
+  const at = kind => sc.money.get(`${thisBand}|${selfName}|${kind}`);
+  const givenAt = at("Given"), askAt = at("Ask"), committedAt = at(COMMITTED), remainingAt = at(REMAINING);
+  const deltaAt = at(deltaKind(cycle)), lastAt = sc.money.get(`${cycleName(cycle - 2)}|${selfName}|This candidate`);
+  const freshGivenAt = fc.money.get(`${thisBand}|${selfName}|Given`);
+
+  // The sheet's rows, grouped the way the export lays them out: a lobbyist
+  // (or subtotal) row, then its donors, which carry a name in the Donor column.
+  const width = Math.max(...values.map(r => r.length), ...formulas.map(r => r.length));
+  const cell = (rows, r, c) => rows[r]?.[c] ?? "";
+  const member = r => String(cell(values, r, donorCol)).trim() !== "";
+  const sections = [];
+  const byKey = new Map(), byGroupName = new Map(), byName = new Map();
+  for (let r = HEAD; r < values.length; r++) {
+    if (!member(r)) { sections.push({ lead: r, members: [] }); continue; }
+    sections.at(-1)?.members.push(r);
+    const key = keyCol != null ? String(cell(values, r, keyCol)) : "";
+    if (key) byKey.set(key, r);
+    const name = matchName(cell(values, r, donorCol));
+    byGroupName.set(`${matchLabel(cell(values, r, labelCol))}|${name}`, r);
+    byName.set(name, byName.has(name) ? -1 : r);          // -1: more than one row has it
+  }
+  const sectionByLabel = new Map();
+  for (const s of sections) for (const r of s.members) sectionByLabel.set(matchLabel(cell(values, r, labelCol)), s);
+
+  const matchRow = f => {
+    const key = f[fresh.keyAt];
+    if (key && byKey.has(key)) return byKey.get(key);
+    const name = matchName(f[PLAN_COL.donor]);
+    const grouped = byGroupName.get(`${matchLabel(f[PLAN_COL.label])}|${name}`);
+    if (grouped != null) return grouped;
+    const only = byName.get(name);
+    return only != null && only >= 0 ? only : null;
+  };
+
+  const writes = [], flags = [], inserts = [], unplaced = [];
+  let changedDonors = 0, givenChange = 0;
+  const today_ = today || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const owned = [...fc.money].filter(([id]) => isKindOwned(id.split("|")[2]) && sc.money.has(id))
+    .map(([id, from]) => [from, sc.money.get(id)]);
+  const money = v => `$${Math.round(v).toLocaleString("en-US")}`;
+  fresh.rows.forEach((f, i) => {
+    const role = fresh.roles[i];
+    if (!["donor", "nontarget", "other"].includes(role)) return;
+    const r = matchRow(f);
+    if (r == null) {
+      // Someone who has given since the sheet was saved.
+      if ((role === "donor" || role === "other") && sheetNumber(f[freshGivenAt]) > 0) {
+        const s = sectionByLabel.get(matchLabel(f[PLAN_COL.label]))
+          || (role === "donor" && [...sectionByLabel].find(([label]) => label.includes("nobody on file"))?.[1]);
+        if (!s) { if (role === "donor") unplaced.push(f[PLAN_COL.donor]); return; }
+        // Inside the group, so its row grouping and conditional formats take it in:
+        // above the last row, or below the only one.
+        const m = s.members;
+        inserts.push({ at: m.length > 1 ? m[m.length - 1] : m[0] + 1, fresh: f, section: s });
+      }
+      return;
+    }
+    let touched = false;
+    for (const [from, to] of owned) {
+      if (String(cell(formulas, r, to)).startsWith("=")) continue;      // the team's own formula
+      const next = sheetNumber(f[from]), prev = sheetNumber(cell(values, r, to));
+      if (Math.round(next) === Math.round(prev)) continue;
+      writes.push({ row: r, col: to, value: next ? Math.round(next) : "" });
+      if (to === givenAt) { touched = true; givenChange += next - prev; }
+    }
+    if (touched && role === "donor") changedDonors++;
+    if (role === "donor" && givenAt != null && committedAt != null) {
+      const rose = sheetNumber(f[freshGivenAt]) - sheetNumber(cell(values, r, givenAt));
+      if (rose > 0 && sheetNumber(cell(values, r, committedAt)) > 0) {
+        flags.push({ row: r, col: committedAt, note: `ORESTAR shows ${money(f[freshGivenAt])} given as of ${today_}, `
+          + `up ${money(rose)} since the last update. If this pledge has come in, clear Committed so it isn't counted twice.` });
+      }
+    }
+  });
+
+  // Every position after the inserts: inserting in ascending order, the k-th
+  // new row lands at its insertion point plus the k rows already put in.
+  inserts.sort((a, b) => a.at - b.at);
+  inserts.forEach((ins, k) => { ins.row = ins.at + k; });
+  const shift = r => r + inserts.filter(ins => ins.at <= r).length;
+  for (const list of [writes, flags]) for (const w of list) w.row = shift(w.row);
+
+  const letter = c => colLetter(c + 1);
+  const formulaWrites = [], notes = [];
+  for (const ins of inserts) {
+    const f = ins.fresh, r = ins.row, n = r + 1;           // n: the row's number in the sheet
+    const put = (c, value) => { if (c != null && value !== "" && value != null) writes.push({ row: r, col: c, value }); };
+    put(labelCol, f[PLAN_COL.label]);
+    put(donorCol, f[PLAN_COL.donor]);
+    put(col("Tier"), f[PLAN_COL.tier]);
+    put(col("Email"), f[PLAN_COL.email]);
+    put(col("Phone"), f[PLAN_COL.phone]);
+    put(keyCol, f[fresh.keyAt]);
+    for (const [id, from] of fc.money) {
+      const kind = id.split("|")[2];
+      if ((kind === "Ask" || isKindOwned(kind)) && sc.money.has(id) && sheetNumber(f[from])) {
+        put(sc.money.get(id), Math.round(f[from]));
+      }
+    }
+    if (remainingAt != null && askAt != null && givenAt != null && committedAt != null) {
+      const [A, G, C] = [askAt, givenAt, committedAt].map(letter);
+      formulaWrites.push({ row: r, col: remainingAt, value: `=IF(N(${A}${n})>0,MAX(0,${A}${n}-N(${G}${n})-N(${C}${n})),"")` });
+    }
+    if (deltaAt != null && lastAt != null && givenAt != null && committedAt != null) {
+      formulaWrites.push({ row: r, col: deltaAt,
+        value: `=N(${letter(givenAt)}${n})+N(${letter(committedAt)}${n})-N(${letter(lastAt)}${n})` });
+    }
+    notes.push({ row: r, col: donorCol, note: `Added by Update on ${today_}: has given since this sheet was saved.`, fill: true });
+  }
+
+  // Each lobbyist's sums, widened over the rows added under them.
+  const touchedSections = [...new Set(inserts.map(ins => ins.section))];
+  const groupRanges = [];
+  for (const s of touchedSections) {
+    const lead = shift(s.lead);
+    const added = inserts.filter(ins => ins.section === s).length;
+    const first = lead + 1, last = lead + s.members.length + added;
+    groupRanges.push({ first, last });
+    for (let c = 0; c < width; c++) {
+      const m = String(cell(formulas, s.lead, c)).match(/^=SUM\(([A-Z]+)\d+:([A-Z]+)\d+\)$/i);
+      if (m && m[1].toUpperCase() === letter(c) && m[2].toUpperCase() === letter(c)) {
+        formulaWrites.push({ row: lead, col: c, value: `=SUM(${letter(c)}${first + 1}:${letter(c)}${last + 1})` });
+      }
+    }
+  }
+  const everyone = sections.find(s => matchName(cell(values, s.lead, col("Lobbyist or firm"))) === "everyone");
+  if (everyone) {
+    notes.push({ row: shift(everyone.lead), col: col("Lobbyist or firm"),
+                 note: `ORESTAR figures updated ${today_} from the dashboard's Update button.` });
+  }
+  return {
+    writes, formulaWrites, flags, notes, inserts: inserts.map(ins => ({ row: ins.row, donor: ins.fresh[PLAN_COL.donor] })),
+    groupRanges,
+    summary: { changedDonors, givenChange, added: inserts.map(ins => ins.fresh[PLAN_COL.donor]), flagged: flags.length, unplaced },
+  };
+}
+
+/** Sends a planned update: rows first, then values, formulas, grouping and notes. */
+async function applyCallListUpdate(token, fileId, sheet, plan) {
+  const base = `${SHEETS_API}/${encodeURIComponent(fileId)}`;
+  const a1 = (r, c) => `'${sheet.title.replace(/'/g, "''")}'!${colLetter(c + 1)}${r + 1}`;
+  const batch = requests => requests.length
+    ? googleApi(`${base}:batchUpdate`, token, { method: "POST", body: { requests } }) : null;
+  const values = (list, valueInputOption) => list.length
+    ? googleApi(`${base}/values:batchUpdate`, token, { method: "POST", body: {
+        valueInputOption, data: list.map(w => ({ range: a1(w.row, w.col), values: [[w.value]] })) } })
+    : null;
+  await batch(plan.inserts.map(ins => ({ insertDimension: {
+    range: { sheetId: sheet.sheetId, dimension: "ROWS", startIndex: ins.row, endIndex: ins.row + 1 },
+    inheritFromBefore: true,                        // a donor row's formatting
+  } })));
+  await values(plan.writes, "RAW");                 // names stay names, numbers stay numbers
+  await values(plan.formulaWrites, "USER_ENTERED");
+  if (plan.groupRanges.length) await regroupRows(token, fileId, sheet.sheetId, plan.groupRanges);
+  const range = (r, c) => ({ sheetId: sheet.sheetId, startRowIndex: r, endRowIndex: r + 1, startColumnIndex: c, endColumnIndex: c + 1 });
+  await batch([...plan.flags.map(f => ({ ...f, fill: true })), ...plan.notes].map(n => ({ updateCells: {
+    range: range(n.row, n.col),
+    rows: [{ values: [{ note: n.note, ...(n.fill ? { userEnteredFormat: { backgroundColor: UPDATE_FILL } } : {}) }] }],
+    fields: n.fill ? "note,userEnteredFormat.backgroundColor" : "note",
+  } })));
+}
+
+/** Makes each lobbyist's donors one row group again once rows have been added. */
+async function regroupRows(token, fileId, sheetId, ranges) {
+  const meta = await googleApi(`${SHEETS_API}/${encodeURIComponent(fileId)}?fields=sheets(properties(sheetId),rowGroups)`, token);
+  const groups = (meta.sheets || []).find(t => t.properties.sheetId === sheetId)?.rowGroups || [];
+  const requests = [];
+  for (const { first, last } of ranges) {
+    const overlapping = groups.filter(g => g.depth === 1 && (g.range.startIndex ?? 0) <= last && g.range.endIndex - 1 >= first);
+    if (overlapping.length === 1 && (overlapping[0].range.startIndex ?? 0) === first && overlapping[0].range.endIndex === last + 1) continue;
+    if (groups.some(g => g.depth > 1 && (g.range.startIndex ?? 0) <= last && g.range.endIndex - 1 >= first)) continue;   // the team's own nesting
+    for (const g of overlapping) requests.push({ deleteDimensionGroup: { range: { sheetId, dimension: "ROWS",
+      startIndex: g.range.startIndex ?? 0, endIndex: g.range.endIndex } } });
+    const span = { sheetId, dimension: "ROWS", startIndex: first, endIndex: last + 1 };
+    requests.push({ addDimensionGroup: { range: span } });
+    if (overlapping.some(g => g.collapsed)) {
+      requests.push({ updateDimensionGroup: { dimensionGroup: { range: span, depth: 1, collapsed: true }, fields: "collapsed" } });
+    }
+  }
+  if (requests.length) await googleApi(`${SHEETS_API}/${encodeURIComponent(fileId)}:batchUpdate`, token, { method: "POST", body: { requests } });
+}
+
+/** Finds this candidate's saved sheet and brings its ORESTAR figures up to date. */
+async function updatePlanSheet(tokenPromise) {
+  const target = window._targetProfile, cycle = window._cycle;
+  if (!target || !cycle) throw new Error("load a candidate's plan first");
+  if (window._lobbyAttrError) throw new Error(`lobbyist attribution is unavailable (${window._lobbyAttrError}); try again once it loads`);
+  exportStatus("Waiting for Google to allow access to your Drive…");
+  const token = await tokenPromise;
+  exportStatus(`Looking for the Google Sheet saved for ${esc(target.name)}…`);
+  const file = await findPlanSheet(token, target, cycle);
+  if (!file) {
+    exportStatus(`No Google Sheet saved for ${esc(target.name)} (${cycleName(cycle)}) was found. Save one with the Sheets button first.`);
+    return null;
+  }
+  exportStatus(`Updating “${esc(file.name)}”…`);
+  const groups = planGroups();
+  try {
+    await loadNonTargetClients(groups, cycle);
+  } catch (e) {
+    console.warn("Non-target clients unavailable:", e);
+  }
+  const listNonTargets = document.getElementById("plan-list-non-targets")?.checked === true;
+  const fresh = planSheetAoa(groups, cycle, { listNonTargets });
+  const sheet = await readPlanSheet(token, file.id);
+  const plan = planCallListUpdate(sheet, fresh, { cycle });
+  await applyCallListUpdate(token, file.id, sheet, plan);
+  const { changedDonors, givenChange, added, flagged, unplaced } = plan.summary;
+  const signed = v => `${v < 0 ? "−" : "+"}$${Math.abs(Math.round(v)).toLocaleString("en-US")}`;
+  const parts = [];
+  if (changedDonors) parts.push(`Given changed for ${changedDonors} donor${changedDonors === 1 ? "" : "s"} (${signed(givenChange)})`);
+  if (added.length) parts.push(`${added.length} new donor${added.length === 1 ? "" : "s"} added, highlighted: ${added.map(esc).join(", ")}`);
+  if (flagged) parts.push(`${flagged} pledge${flagged === 1 ? "" : "s"} to check, highlighted in Committed`);
+  if (unplaced.length) parts.push(`${unplaced.length} new donor${unplaced.length === 1 ? "" : "s"} with no place to go: ${unplaced.map(esc).join(", ")}`);
+  const link = file.webViewLink || `https://docs.google.com/spreadsheets/d/${encodeURIComponent(file.id)}/edit`;
+  exportStatus(`Updated <a href="${esc(link)}" target="_blank" rel="noopener">“${esc(file.name)}”</a>: `
+    + (parts.length ? `${parts.join("; ")}.` : "already up to date with ORESTAR."));
+  return plan.summary;
+}
+
+/** The Update button. Asks Google for access inside the click, like the save. */
+function updateLobbyistSheet() {
+  const token = requestDriveToken();
+  token.catch(() => {});   // reported by updatePlanSheet
+  const ready = window._lobbyAttr || !window._lobbyPlanLoad ? Promise.resolve() : window._lobbyPlanLoad;
+  if (!window._lobbyAttr && window._lobbyPlanLoad) exportStatus("Waiting for lobbyist attribution before updating…");
+  return ready.then(() => updatePlanSheet(token)).catch(err => {
+    console.error(err);
+    exportStatus(`Could not update the Google Sheet: ${esc(err.message)}.`);
+    alert(`Could not update the Google Sheet: ${err.message}.`);
+  });
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
@@ -5209,14 +5609,14 @@ async function exportChamberList(format, scope) {
   }
 }
 
-function exportData(format, scope = "new", waited = false, toDrive = null) {
+function exportData(format, scope = "new", { waited = false, drive: toDrive = null, full = false } = {}) {
   // Lobbyists load a few seconds after the plan does. An export before then
   // filed every donor under "nobody on file" in one collapsed group: a call
   // list that opened looking empty. Wait for them, once.
   if (scope === "lobbyist" && !window._lobbyAttr && window._lobbyPlanLoad && !waited) {
     const status = document.getElementById("plan-status");
     if (status) status.textContent = "Waiting for lobbyist attribution before exporting…";
-    window._lobbyPlanLoad.then(() => exportData(format, scope, true, toDrive));
+    window._lobbyPlanLoad.then(() => exportData(format, scope, { waited: true, drive: toDrive, full }));
     return;
   }
   if (scope === "lobbyist" && window._lobbyAttrError
@@ -5323,10 +5723,11 @@ function exportData(format, scope = "new", waited = false, toDrive = null) {
       // empty download.
       const drive = toDrive && {
         token: toDrive,
-        title: `${target.name} — Lobbyist Plan ${cycleName(cycle)} (${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+        title: `${target.name} — Lobbyist Plan${full ? ", all tabs" : ""} ${cycleName(cycle)} (${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})`,
+        appProperties: planSheetTags(target, cycle),
       };
       if (drive) exportStatus("Building the workbook for Google Drive…");
-      exportLobbyistWorkbook(planGroups(), cycle, `${fileLabel}_${target.slug}_${cycle}.xlsx`, { drive })
+      exportLobbyistWorkbook(planGroups(), cycle, `${fileLabel}${full ? "_all_tabs" : ""}_${target.slug}_${cycle}.xlsx`, { drive, full })
         .catch(err => {
           console.error(err);
           if (drive) {

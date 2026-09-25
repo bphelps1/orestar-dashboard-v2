@@ -164,16 +164,23 @@ function planFixture() {
 test("the sheet is banded by cycle, with the candidate and its comparables", () => {
   const { ctx, groups } = planFixture();
   const { rows, merges, roles } = ctx.planSheetAoa(groups, 2026);
-  // The team's layout: headers from row 1 (no title or notes), who to call on the left.
-  assert.deepEqual(Array.from(rows[0].slice(1, 6)), ["Lobbyist or firm", "Tier", "Donor", "Email", "Phone"]);
+  // The team's layout: headers from row 1 (no title or notes), who to call on
+  // the left, the donor before its tier, and a hidden row key at the far right.
+  assert.deepEqual(Array.from(rows[0].slice(1, 6)), ["Lobbyist or firm", "Donor", "Tier", "Email", "Phone"]);
+  assert.equal(rows[0].at(-1), "Row key");
   const [cycleRow, nameRow, kindRow] = [rows[0], rows[1], rows[2]];
-  assert.deepEqual(Array.from(cycleRow.filter(Boolean).slice(-4)),
+  assert.deepEqual(Array.from(cycleRow.filter(v => v && v !== "Row key").slice(-4)),
                    ["This cycle (2025–2026)", "This cycle (2025–2026): comparables", "2023–2024", "2021–2022"]);
   assert.equal(nameRow.filter(Boolean)[0], "Friends of A");
   assert.ok(nameRow.includes("Fahey"));
   assert.deepEqual([...new Set(kindRow.filter(Boolean))],
                    ["Ask", "Given", "Committed", "Δ vs 2023–2024", "Remaining", "Comparable", "This candidate"]);
   assert.equal(merges.length, 4);          // one per band: this cycle, its comparables, two earlier cycles
+  // Every band but the candidate's own this cycle folds away as a column group.
+  const { outline } = ctx.planSheetAoa(groups, 2026);
+  assert.equal(outline.length, 3);
+  assert.ok(outline.every(([from]) => from > kindRow.indexOf("Remaining")), "Ask to Remaining stays open");
+  assert.equal(outline[0][0], cycleRow.indexOf("This cycle (2025–2026): comparables"));
   // Roles drive the formatting, so every row must carry one.
   assert.equal(roles.length, rows.length);
   assert.deepEqual(Array.from(roles.slice(0, 4)), ["head-band", "head-name", "head-kind", "total"]);
@@ -184,13 +191,13 @@ test("the lobbyist row totals its donors and the totals row totals everything", 
   const { rows, roles, moneyFrom } = ctx.planSheetAoa(groups, 2026);
   const total = rows.find(r => r[1] === "Everyone");
   const lead = rows.find(r => r[1] === "Amanda Dalton");
-  const donor = rows.find(r => r[3] === "Grocery PAC");
+  const donor = rows.find(r => r[2] === "Grocery PAC");
   const askCol = rows[2].indexOf("Ask");
   assert.ok(askCol > moneyFrom);
   assert.equal(donor[askCol], 1100);
   assert.equal(lead[askCol], 2100);        // 1,100 + 1,000
   assert.equal(total[askCol], 2100);
-  assert.equal(lead[2], "Tier 1");
+  assert.equal(lead[3], "Tier 1");
   assert.equal(roles[rows.indexOf(donor)], "donor");
 });
 
@@ -207,7 +214,7 @@ test("this cycle's comparable giving sits in its own band, a spacer apart from A
   assert.deepEqual(Array.from(nameRow.slice(compsBand, compsBand + 2)), ["Fahey", "Lieber"]);
   assert.ok(!nameRow.slice(compsBand, bandRow.indexOf("2023–2024")).includes("Friends of A"),
             "the candidate's own giving this cycle is Given, not repeated here");
-  const row = name => rows.find(r => r[3] === name);
+  const row = name => rows.find(r => r[2] === name);
   assert.equal(row("Grocery PAC")[compsBand], 3000);
   assert.equal(row("Foresight")[compsBand], 500);
   assert.equal(row("Grocery PAC")[compsBand + 1], "", "no 2025–2026 giving to Lieber");
@@ -229,7 +236,7 @@ test("the current cycle carries Remaining: never below $0, and a lobbyist's is t
   const deltaCol = kinds.indexOf("Δ vs 2023–2024");
   assert.deepEqual([givenCol, kinds.indexOf("Committed"), deltaCol, remCol], [askCol + 1, askCol + 2, askCol + 3, askCol + 4],
                    "Ask, Given, Committed, the change on last cycle, Remaining, in that order");
-  const row = name => rows.find(r => r[3] === name);
+  const row = name => rows.find(r => r[2] === name);
   assert.equal(row("Grocery PAC")[remCol], 600);      // 1,100 asked − 500 given
   assert.equal(row("Foresight")[remCol], 1000);
   assert.equal(row("Early PAC")[remCol], 0, "met, not negative");
@@ -273,8 +280,8 @@ test("a donor's giving to a comparable lands in the right cycle band", () => {
     if (names[i] === "Fahey" && band === "2023–2024") { col = i; break; }
   }
   assert.ok(col > 0, "no Fahey column in the 2023–2024 band");
-  assert.equal(rows.find(r => r[3] === "Grocery PAC")[col], 5000);
-  assert.equal(rows.find(r => r[3] === "Foresight")[col], 250);
+  assert.equal(rows.find(r => r[2] === "Grocery PAC")[col], 5000);
+  assert.equal(rows.find(r => r[2] === "Foresight")[col], 250);
 });
 
 test("only the five comparables this plan's donors gave most to get columns", () => {

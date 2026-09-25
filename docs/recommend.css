@@ -219,6 +219,8 @@
 }
 .results-header h2 { font-size: 1.1rem; }
 .export-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn-icon { display: inline-flex; align-items: center; gap: 6px; }
+.icon-sheets { width: 12px; height: 16px; flex: none; display: block; }
 
 .results-summary {
   display: flex;
