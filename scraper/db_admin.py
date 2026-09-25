@@ -48,6 +48,7 @@ MIGRATIONS = [
     "033_explore_sub_type_index.sql",
     "034_explore_sub_types.sql",
     "035_explore_default_order_index.sql",
+    "036_exact_date_recipients.sql",
     # Last on purpose: it patches the functions 027 and 029 define, so it has
     # to run after them on every apply.
     "032_merge_refresh_safe_deletes.sql",

@@ -3711,24 +3711,74 @@ function renderDonorSummary(donors) {
 }
 
 // ── Recipients ────────────────────────────────────────────────────────────────
+// With dates set (a cycle button runs Dec 1 – Nov 30), the rankings come from
+// the database for exactly those dates. The top_recipients blob and each
+// profile's top_payees_by_year only hold calendar years, and only each year's
+// leaders: added up, the 2024 cycle took in all of 2022, and put that year's
+// governor's race at the top of it.
+
+let recipientsLoadVersion = 0;
+
+/** "2026 cycle" when the dates are a cycle button's, otherwise the dates. */
+function rangeCaption() {
+  const start = state.dateStart, end = state.dateEnd;
+  if (!start && !end) return "";
+  if (start && end) {
+    const year = +end.slice(0, 4), cycle = cycleRange(year);
+    if (cycle.start === start && cycle.end === end) return `${year} cycle`;
+  }
+  const day = v => new Date(`${v}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return start && end ? `${day(start)} – ${day(end)}` : start ? `since ${day(start)}` : `through ${day(end)}`;
+}
+
+function renderRecipientRows(rows, { valueLabel, color, nameLabel, totalLabel }) {
+  const top20 = rows.slice(0, 20);
+  makeBarChart("chart-top-recipients", top20.map(r => r.name), top20.map(r => r.total), valueLabel, color);
+  buildSortableTable("table-recipients", rows, [
+    { key: "name",  label: nameLabel },
+    { key: "total", label: totalLabel, fmt: fmt$, cls: "num" },
+  ]);
+}
 
 async function loadRecipients() {
-  if (!recipientsData) {
-    recipientsData = await DL.getBlob("top_recipients");
-  }
-
+  const version = ++recipientsLoadVersion;
+  const start = state.dateStart || null, end = state.dateEnd || null;
+  const ranged = !!(start || end);
+  const selected = state.selectedFilers.map(f => ({ ...f }));
+  const isCurrent = () => version === recipientsLoadVersion;
   const chartTitle = document.getElementById("recipients-chart-title");
   const tableTitle = document.getElementById("recipients-table-title");
-  const n = state.selectedFilers.length;
-  const years = yearsInRange();
+  const caption = ranged ? `, ${rangeCaption()}` : "";
+  const failed = error => {
+    if (!isCurrent()) return;
+    tableTitle.textContent = `Could not load ${ranged ? rangeCaption() : "these figures"}: ${error.message}`;
+    renderRecipientRows([], { valueLabel: "", color: "#38a169", nameLabel: "Committee / Candidate", totalLabel: "Total ($)" });
+  };
 
-  if (n === 0) {
-    chartTitle.textContent = "Top 20 Recipients (by Contributions Received)";
-    tableTitle.textContent = "Top 100 Recipients";
+  if (selected.length === 0) {
+    const received = { valueLabel: "Total Received", color: "#38a169",
+                       nameLabel: "Committee / Candidate", totalLabel: "Total Received ($)" };
+    chartTitle.textContent = `Top 20 Recipients (by Contributions Received)${caption}`;
+    tableTitle.textContent = `Top 100 Recipients${caption}`;
+    // The year selector is for calendar years; dates take its place.
+    document.getElementById("recipient-year-group").hidden = ranged;
 
-    // Hide year selector when date range is active
-    document.getElementById("recipient-year-group").hidden = !!years;
+    if (ranged) {
+      tableTitle.textContent += " — loading…";
+      let rows;
+      try {
+        rows = await DL.getRecipients({ start, end });
+      } catch (error) {
+        return failed(error);
+      }
+      if (!isCurrent()) return;
+      tableTitle.textContent = `Top 100 Recipients${caption}`;
+      renderRecipientRows(rows, received);
+      return;
+    }
 
+    if (!recipientsData) recipientsData = await DL.getBlob("top_recipients");
+    if (!isCurrent()) return;
     const sel = document.getElementById("recipient-year");
     if (!sel._listenerAttached) {
       Object.keys(recipientsData.by_year || {}).sort().reverse().forEach(yr => {
@@ -3737,37 +3787,26 @@ async function loadRecipients() {
       sel.addEventListener("change", () => renderRecipients(sel.value));
       sel._listenerAttached = true;
     }
-
-    if (years) {
-      const rows  = mergeByYear(recipientsData.by_year, years);
-      const top20 = rows.slice(0, 20);
-      makeBarChart("chart-top-recipients",
-        top20.map(r => r.name), top20.map(r => r.total),
-        "Total Received", "#38a169");
-      buildSortableTable("table-recipients", rows, [
-        { key: "name",  label: "Committee / Candidate" },
-        { key: "total", label: "Total Received ($)", fmt: fmt$, cls: "num" },
-      ]);
-    } else {
-      renderRecipients(sel.value || "all");
-    }
+    renderRecipients(sel.value || "all");
 
   } else {
-    const profile = await loadFilerProfile(state.selectedFilers[0].slug);
-    chartTitle.textContent = `Top Spending by ${profile.name}`;
-    tableTitle.textContent = `Top Spending by ${profile.name}`;
-
-    const rows = years
-      ? mergeByYear(profile.top_payees_by_year || {}, years).slice(0, 50)
-      : (profile.top_payees || []);
-    const top20 = rows.slice(0, 20);
-    makeBarChart("chart-top-recipients",
-      top20.map(r => r.name), top20.map(r => r.total),
-      "Expenditures", "#dd6b20");
-    buildSortableTable("table-recipients", rows, [
-      { key: "name",  label: "Payee" },
-      { key: "total", label: "Total Paid ($)", fmt: fmt$, cls: "num" },
-    ]);
+    const profile = await loadFilerProfile(selected[0].slug);
+    if (!isCurrent()) return;
+    const spent = { valueLabel: "Expenditures", color: "#dd6b20", nameLabel: "Payee", totalLabel: "Total Paid ($)" };
+    chartTitle.textContent = `Top Spending by ${profile.name}${caption}`;
+    tableTitle.textContent = `Top Spending by ${profile.name}${caption}`;
+    let rows = profile.top_payees || [];
+    if (ranged) {
+      tableTitle.textContent += " — loading…";
+      try {
+        rows = await DL.getPayees({ filerIds: donorFilerIds(profile, selected[0]), start, end });
+      } catch (error) {
+        return failed(error);
+      }
+      if (!isCurrent()) return;
+      tableTitle.textContent = `Top Spending by ${profile.name}${caption}`;
+    }
+    renderRecipientRows(rows, spent);
   }
 }
 
