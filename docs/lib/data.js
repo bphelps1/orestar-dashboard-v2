@@ -19,10 +19,7 @@ const DL = (() => {
   const rankingRequests = new Map();
   const names = value => typeof DN === "undefined" ? value : DN.tree(value);
 
-  /** Fetch a whole-dashboard aggregate blob by key from dashboard_cache. */
-  async function getBlob(key) {
-    if (typeof DN !== "undefined") await DN.load();
-    if (key === "top_donors" && typeof ID !== "undefined" && await ID.hasMerges()) return getDonors();
+  async function readCache(key) {
     const sb = await getSupabase();
     const { data, error } = await sb
       .from("dashboard_cache")
@@ -30,8 +27,41 @@ const DL = (() => {
       .eq("key", key)
       .single();
     if (error) throw new Error(`Failed to load '${key}': ${error.message}`);
+    return data.data;
+  }
+
+  /** Fetch a whole-dashboard aggregate blob by key from dashboard_cache. */
+  async function getBlob(key) {
+    if (typeof DN !== "undefined") await DN.load();
+    if (key === "top_donors" && typeof ID !== "undefined" && await ID.hasMerges()) return mergedTopDonors();
+    const data = await readCache(key);
     return typeof ID !== "undefined" && ["by_contributor_type", "activity_snapshot"].includes(key)
-      ? names(await ID.rekeyBlob(data.data)) : names(data.data);
+      ? names(await ID.rekeyBlob(data)) : names(data);
+  }
+
+  /**
+   * The statewide ranking with saved merges applied. The daily build's
+   * top_donors already applies every merge saved before it ran, and records
+   * which (identity_fingerprint); only a merge saved or undone since needs the
+   * live ranking, which reads all ~2M contributions and runs up against the
+   * API's 30-second limit. If that fails, the daily ranking is still shown.
+   */
+  async function mergedTopDonors() {
+    let stored = null;
+    try {
+      stored = await readCache("top_donors");
+    } catch (error) {
+      console.warn("Stored donor ranking unavailable:", error);
+    }
+    if (stored?.identity_fingerprint && typeof ID.fingerprint === "function"
+        && stored.identity_fingerprint === await ID.fingerprint()) return names(stored);
+    try {
+      return await getDonors();
+    } catch (error) {
+      if (!stored) throw error;
+      console.warn("Live donor ranking failed; showing the daily one, without merges saved since it was built:", error);
+      return names(stored);
+    }
   }
 
   /** Fetch a single filer's detail blob by slug from filer_detail. */
